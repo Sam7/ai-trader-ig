@@ -7,6 +7,7 @@
     <Project Path="src/Trading.IG/Trading.IG.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Trading.Cli.Tests/Trading.Cli.Tests.csproj" />
     <Project Path="tests/Ig.Trading.Sdk.Tests/Ig.Trading.Sdk.Tests.csproj" />
     <Project Path="tests/Trading.Abstractions.Tests/Trading.Abstractions.Tests.csproj" />
     <Project Path="tests/Trading.IG.Tests/Trading.IG.Tests.csproj" />

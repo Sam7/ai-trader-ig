@@ -7,8 +7,33 @@ Small .NET 10 solution proving IG dealing behind a broker-neutral abstraction.
 - `src/Trading.Abstractions` broker-neutral contracts and domain models.
 - `src/Ig.Trading.Sdk` isolated IG SDK (Refit-based) intended to be extractable to its own OSS repo.
 - `src/Trading.IG` adapter implementing `ITradingGateway` using the SDK.
-- `src/Trading.Cli` tiny manual CLI.
+- `src/Trading.Cli` small Spectre.Console CLI for manual flows and local verification.
 - `tests/*` fast unit tests plus optional integration tests.
+
+## Architecture
+
+The solution is intentionally split into four layers so the broker-neutral model stays readable and stable:
+
+- `Trading.Cli` is the outermost shell. It loads configuration, wires DI, and exposes manual commands. It should stay thin and avoid business logic.
+- `Trading.Abstractions` defines the domain language the rest of the solution talks in: `ITradingGateway`, requests, results, and enums.
+- `Trading.IG` is the broker adapter. It maps abstraction requests into IG calls, translates IG failures into `TradingGatewayException`, and keeps order-status orchestration in one place.
+- `Ig.Trading.Sdk` owns IG-specific concerns: auth, session handling, request/response DTOs, Refit contracts, headers, and endpoint quirks.
+
+Typical flow:
+
+1. The CLI calls `ITradingGateway`.
+2. `Trading.IG` validates and maps the broker-neutral request.
+3. `Ig.Trading.Sdk` executes the HTTP call against IG and manages auth/session details.
+4. `Trading.IG` maps the IG response back into broker-neutral models.
+
+This keeps the CLI and abstractions free from IG transport details, while keeping the IG SDK usable on its own.
+
+## Testing approach
+
+- `tests/Trading.Abstractions.Tests` covers request and model behavior.
+- `tests/Ig.Trading.Sdk.Tests` covers IG SDK concerns in isolation.
+- `tests/Trading.IG.Tests` covers adapter behavior plus opt-in live integration tests.
+- `tests/Trading.Cli.Tests` covers command routing, exit codes, and rendered output without calling the live broker.
 
 ## Configuration
 
@@ -38,14 +63,14 @@ Optional integration test values:
 
 ```powershell
 dotnet run --project src/Trading.Cli -- auth
-dotnet run --project src/Trading.Cli -- buy --instrument IX.D.SPTRD.DAILY.IP --size 1
-dotnet run --project src/Trading.Cli -- markets-search --query VIX
-dotnet run --project src/Trading.Cli -- markets-browse
-dotnet run --project src/Trading.Cli -- prices --instrument CC.D.VIX.UMA.IP
-dotnet run --project src/Trading.Cli -- positions
-dotnet run --project src/Trading.Cli -- position-update --deal-id DIAAAAAAA --stop-level 1 --limit-level 100
-dotnet run --project src/Trading.Cli -- close --deal-id DIAAAAAAA
-dotnet run --project src/Trading.Cli -- status --deal-reference spike-...
+dotnet run --project src/Trading.Cli -- trades buy --instrument IX.D.SPTRD.DAILY.IP --size 1
+dotnet run --project src/Trading.Cli -- markets search --query VIX
+dotnet run --project src/Trading.Cli -- markets browse
+dotnet run --project src/Trading.Cli -- markets prices --instrument CC.D.VIX.UMA.IP --resolution hour --max 10
+dotnet run --project src/Trading.Cli -- positions list
+dotnet run --project src/Trading.Cli -- positions update --deal-id DIAAAAAAA --stop-level 1 --limit-level 100
+dotnet run --project src/Trading.Cli -- positions close --deal-id DIAAAAAAA
+dotnet run --project src/Trading.Cli -- orders status --deal-reference spike-...
 ```
 
 ## Tests
