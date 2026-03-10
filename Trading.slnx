@@ -1,5 +1,7 @@
 <Solution>
-  <File Path="appsettings.example.json" />
+  <Folder Name="/workspace/">
+    <Project Path="Repository.Files.csproj" />
+  </Folder>
   <Folder Name="/src/">
     <Project Path="src/Ig.Trading.Sdk/Ig.Trading.Sdk.csproj" />
     <Project Path="src/Trading.Abstractions/Trading.Abstractions.csproj" />

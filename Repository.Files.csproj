@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <EnableDefaultItems>false</EnableDefaultItems>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <EnableDefaultEmbeddedResourceItems>false</EnableDefaultEmbeddedResourceItems>
+    <EnableDefaultNoneItems>false</EnableDefaultNoneItems>
+    <EnableDefaultContentItems>false</EnableDefaultContentItems>
+    <IsPackable>false</IsPackable>
+    <IsPublishable>false</IsPublishable>
+    <BaseOutputPath>artifacts\bin\Repository.Files\</BaseOutputPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include=".codex\**\*" Exclude=".codex\**\bin\**\*;.codex\**\obj\**\*" />
+    <None Include=".github\**\*" Exclude=".github\**\bin\**\*;.github\**\obj\**\*" />
+    <None Include=".vscode\**\*" Exclude=".vscode\**\bin\**\*;.vscode\**\obj\**\*" />
+    <None Include="docs\**\*" Exclude="docs\**\bin\**\*;docs\**\obj\**\*" />
+    <None Include="*.md;*.json;*.props;*.rsp;*.targets;*.yml;*.yaml;*.gitignore;*.gitattributes;*.editorconfig;*.ps1;*.cmd;*.sh" />
+  </ItemGroup>
+</Project>
