@@ -1,0 +1,4 @@
+interface:
+  display_name: "Git Commit Guard"
+  short_description: "Create safe, well-scoped Git commits."
+  default_prompt: "Use $git-commit-guard to stage the intended changes and create a clear Git commit message."

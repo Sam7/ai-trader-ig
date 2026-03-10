@@ -208,3 +208,8 @@ FakesAssemblies/
 
 # JetBrains Rider
 *.sln.iml
+
+# Local runtime configuration
+appsettings.json
+appsettings.local.json
+appsettings.*.local.json

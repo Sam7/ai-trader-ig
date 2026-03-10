@@ -10,6 +10,7 @@ public static class ServiceCollectionExtensions
     public static IServiceCollection AddIgTradingGateway(this IServiceCollection services, IConfiguration configuration)
     {
         services.AddIgTradingSdk(configuration);
+        services.AddSingleton<IOrderReferenceJournal, NullOrderReferenceJournal>();
         services.AddTransient<ITradingGateway, IgTradingGateway>();
         return services;
     }

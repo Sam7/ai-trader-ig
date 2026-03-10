@@ -33,6 +33,18 @@ public sealed class CliRunner
                 case "sell":
                     await PlaceOrderAsync(TradeDirection.Sell, options);
                     return 0;
+                case "working-create":
+                    await CreateWorkingOrderAsync(options);
+                    return 0;
+                case "working-update":
+                    await UpdateWorkingOrderAsync(options);
+                    return 0;
+                case "working-cancel":
+                    await CancelWorkingOrderAsync(options);
+                    return 0;
+                case "working-orders":
+                    await ShowWorkingOrdersAsync();
+                    return 0;
                 case "close":
                     await ClosePositionAsync(options);
                     return 0;
@@ -90,6 +102,73 @@ public sealed class CliRunner
         await _gateway.AuthenticateAsync();
         var result = await _gateway.ClosePositionAsync(new ClosePositionRequest(dealId, size));
         Console.WriteLine($"Close submitted. Ref={result.DealReference}, DealId={result.DealId ?? "n/a"}, Status={result.Status}, Message={result.Message ?? "n/a"}");
+    }
+
+    private async Task CreateWorkingOrderAsync(CliOptions options)
+    {
+        var instrument = options.Required("instrument");
+        var direction = ParseDirection(options.Required("direction"));
+        var type = ParseWorkingOrderType(options.Required("type"));
+        var size = options.RequiredDecimal("size");
+        var level = options.RequiredDecimal("level");
+        var tif = ParseTimeInForce(options.TryGet("time-in-force", out var tifRaw) ? tifRaw! : "gtc");
+        var goodTillDate = options.TryGetDateTimeOffset("good-till-date", out var gtdValue)
+            ? gtdValue
+            : (DateTimeOffset?)null;
+
+        await _gateway.AuthenticateAsync();
+        var result = await _gateway.PlaceWorkingOrderAsync(new CreateWorkingOrderRequest(
+            new InstrumentId(instrument),
+            direction,
+            type,
+            size,
+            level,
+            tif,
+            goodTillDate));
+        Console.WriteLine($"Working order created. Ref={result.DealReference}, DealId={result.DealId ?? "n/a"}, Status={result.Status}, Message={result.Message ?? "n/a"}");
+    }
+
+    private async Task UpdateWorkingOrderAsync(CliOptions options)
+    {
+        var dealId = options.Required("deal-id");
+        var level = options.TryGet("level", out var levelRaw)
+            ? decimal.Parse(levelRaw!, System.Globalization.CultureInfo.InvariantCulture)
+            : (decimal?)null;
+        var type = options.TryGet("type", out var typeRaw) ? ParseWorkingOrderType(typeRaw!) : (WorkingOrderType?)null;
+        var tif = options.TryGet("time-in-force", out var tifRaw) ? ParseTimeInForce(tifRaw!) : (WorkingOrderTimeInForce?)null;
+        var goodTillDate = options.TryGetDateTimeOffset("good-till-date", out var gtdValue)
+            ? gtdValue
+            : (DateTimeOffset?)null;
+
+        await _gateway.AuthenticateAsync();
+        var result = await _gateway.UpdateWorkingOrderAsync(new UpdateWorkingOrderRequest(dealId, level, type, tif, goodTillDate));
+        Console.WriteLine($"Working order updated. Ref={result.DealReference}, DealId={result.DealId ?? "n/a"}, Status={result.Status}, Message={result.Message ?? "n/a"}");
+    }
+
+    private async Task CancelWorkingOrderAsync(CliOptions options)
+    {
+        var dealId = options.Required("deal-id");
+
+        await _gateway.AuthenticateAsync();
+        var result = await _gateway.CancelWorkingOrderAsync(dealId);
+        Console.WriteLine($"Working order cancelled. Ref={result.DealReference}, DealId={result.DealId ?? "n/a"}, Status={result.Status}, Message={result.Message ?? "n/a"}");
+    }
+
+    private async Task ShowWorkingOrdersAsync()
+    {
+        await _gateway.AuthenticateAsync();
+        var workingOrders = await _gateway.GetWorkingOrdersAsync();
+
+        if (workingOrders.Count == 0)
+        {
+            Console.WriteLine("No working orders.");
+            return;
+        }
+
+        foreach (var order in workingOrders)
+        {
+            Console.WriteLine($"DealId={order.DealId} Instrument={order.Instrument} Direction={order.Direction} Type={order.Type} Size={order.Size} Level={order.Level} Tif={order.TimeInForce} Status={order.Status} Created={order.CreatedAtUtc:O}");
+        }
     }
 
     private async Task ShowPositionsAsync()
@@ -157,9 +236,30 @@ public sealed class CliRunner
         Console.WriteLine("  auth");
         Console.WriteLine("  buy --instrument <epic> --size <decimal>");
         Console.WriteLine("  sell --instrument <epic> --size <decimal>");
+        Console.WriteLine("  working-create --instrument <epic> --direction <buy|sell> --type <limit|stop> --size <decimal> --level <decimal> [--time-in-force <gtc|gtd>] [--good-till-date <ISO-8601>]");
+        Console.WriteLine("  working-update --deal-id <id> [--level <decimal>] [--type <limit|stop>] [--time-in-force <gtc|gtd>] [--good-till-date <ISO-8601>]");
+        Console.WriteLine("  working-cancel --deal-id <id>");
+        Console.WriteLine("  working-orders");
         Console.WriteLine("  close --deal-id <id> [--size <decimal>]");
         Console.WriteLine("  positions");
         Console.WriteLine("  orders [--from <ISO-8601>] [--to <ISO-8601>] [--max <int>]");
         Console.WriteLine("  status --deal-reference <value>");
     }
+
+    private static TradeDirection ParseDirection(string value)
+        => value.Equals("sell", StringComparison.OrdinalIgnoreCase)
+            ? TradeDirection.Sell
+            : TradeDirection.Buy;
+
+    private static WorkingOrderType ParseWorkingOrderType(string value)
+        => value.Equals("stop", StringComparison.OrdinalIgnoreCase)
+            ? WorkingOrderType.Stop
+            : WorkingOrderType.Limit;
+
+    private static WorkingOrderTimeInForce ParseTimeInForce(string value)
+        => value.Equals("gtd", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("good_till_date", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("good-till-date", StringComparison.OrdinalIgnoreCase)
+                ? WorkingOrderTimeInForce.GoodTillDate
+                : WorkingOrderTimeInForce.GoodTillCancelled;
 }

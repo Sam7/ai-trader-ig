@@ -1,0 +1,7 @@
+interface:
+  display_name: "Code Review Guard"
+  short_description: "Review uncommitted code changes well"
+  default_prompt: "Use $code-review-guard to review the current uncommitted changes in this repository."
+
+policy:
+  allow_implicit_invocation: true

@@ -40,6 +40,16 @@ public static class ServiceCollectionExtensions
             .ConfigureHttpClient((sp, client) => ConfigureClient(sp, client))
             .AddHttpMessageHandler<IgAuthenticationHeaderHandler>();
 
+        services
+            .AddRefitClient<IIgWorkingOrdersApi>(CreateRefitSettings())
+            .ConfigureHttpClient((sp, client) => ConfigureClient(sp, client))
+            .AddHttpMessageHandler<IgAuthenticationHeaderHandler>();
+
+        services
+            .AddRefitClient<IIgAccountsApi>(CreateRefitSettings())
+            .ConfigureHttpClient((sp, client) => ConfigureClient(sp, client))
+            .AddHttpMessageHandler<IgAuthenticationHeaderHandler>();
+
         services.AddTransient<IIgTradingApi, IgTradingApi>();
 
         return services;

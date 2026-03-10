@@ -14,8 +14,6 @@ public sealed class IgClientOptions
 
     public string? AccountId { get; set; }
 
-    public bool UseDemo { get; set; } = true;
-
     public void Validate()
     {
         if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out _))

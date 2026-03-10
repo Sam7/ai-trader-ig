@@ -17,6 +17,8 @@ public sealed class IgTradingApi : IIgTradingApi
     private readonly IIgMarketsApi _marketsApi;
     private readonly IIgPositionsApi _positionsApi;
     private readonly IIgOrderStateApi _orderStateApi;
+    private readonly IIgWorkingOrdersApi _workingOrdersApi;
+    private readonly IIgAccountsApi _accountsApi;
     private readonly IIgSessionStore _sessionStore;
     private readonly IgClientOptions _options;
     private readonly ILogger<IgTradingApi> _logger;
@@ -26,6 +28,8 @@ public sealed class IgTradingApi : IIgTradingApi
         IIgMarketsApi marketsApi,
         IIgPositionsApi positionsApi,
         IIgOrderStateApi orderStateApi,
+        IIgWorkingOrdersApi workingOrdersApi,
+        IIgAccountsApi accountsApi,
         IIgSessionStore sessionStore,
         IOptions<IgClientOptions> options,
         ILogger<IgTradingApi> logger)
@@ -34,6 +38,8 @@ public sealed class IgTradingApi : IIgTradingApi
         _marketsApi = marketsApi;
         _positionsApi = positionsApi;
         _orderStateApi = orderStateApi;
+        _workingOrdersApi = workingOrdersApi;
+        _accountsApi = accountsApi;
         _sessionStore = sessionStore;
         _options = options.Value;
         _logger = logger;
@@ -45,6 +51,8 @@ public sealed class IgTradingApi : IIgTradingApi
 
         var response = await ExecuteAsync(
             () => _sessionApi.CreateSessionAsync(new SessionRequest(_options.Identifier, _options.Password), cancellationToken));
+
+        EnsureSuccess(response);
 
         var cst = TryGetSingleHeader(response.Headers, "CST");
         var securityToken = TryGetSingleHeader(response.Headers, "X-SECURITY-TOKEN");
@@ -60,8 +68,9 @@ public sealed class IgTradingApi : IIgTradingApi
 
         if (!string.IsNullOrWhiteSpace(_options.AccountId))
         {
-            await ExecuteAsync(
+            var switchResponse = await ExecuteAsync(
                 () => _sessionApi.SwitchAccountAsync(new SwitchAccountRequest(_options.AccountId!), cancellationToken));
+            EnsureSuccess(switchResponse);
 
             session = session with { CurrentAccountId = _options.AccountId };
             _sessionStore.Set(session);
@@ -80,8 +89,33 @@ public sealed class IgTradingApi : IIgTradingApi
     public Task<ClosePositionResponse> ClosePositionAsync(ClosePositionRequest request, CancellationToken cancellationToken = default)
         => ExecuteAsync(() => _positionsApi.ClosePositionAsync(request, cancellationToken));
 
+    public Task<WorkingOrderMutationResponse> CreateWorkingOrderAsync(CreateWorkingOrderRequest request, CancellationToken cancellationToken = default)
+        => ExecuteAsync(() => _workingOrdersApi.CreateWorkingOrderAsync(request, cancellationToken));
+
+    public Task<WorkingOrderMutationResponse> UpdateWorkingOrderAsync(string dealId, UpdateWorkingOrderRequest request, CancellationToken cancellationToken = default)
+        => ExecuteAsync(() => _workingOrdersApi.UpdateWorkingOrderAsync(dealId, request, cancellationToken));
+
+    public Task<WorkingOrderMutationResponse> DeleteWorkingOrderAsync(string dealId, CancellationToken cancellationToken = default)
+        => ExecuteAsync(() => _workingOrdersApi.DeleteWorkingOrderAsync(dealId, cancellationToken));
+
     public Task<PositionsResponse> GetOpenPositionsAsync(CancellationToken cancellationToken = default)
         => ExecuteAsync(() => _positionsApi.GetOpenPositionsAsync(cancellationToken));
+
+    public async Task<PositionEnvelope?> GetPositionByDealIdAsync(string dealId, CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            return await _positionsApi.GetPositionByDealIdAsync(dealId, cancellationToken);
+        }
+        catch (ApiException exception) when (exception.StatusCode == HttpStatusCode.NotFound)
+        {
+            return null;
+        }
+        catch (ApiException exception)
+        {
+            throw IgErrorParser.ToIgApiException(exception);
+        }
+    }
 
     public async Task<DealConfirmationResponse?> GetDealConfirmationAsync(string dealReference, CancellationToken cancellationToken = default)
     {
@@ -100,7 +134,7 @@ public sealed class IgTradingApi : IIgTradingApi
     }
 
     public Task<WorkingOrdersResponse> GetWorkingOrdersAsync(CancellationToken cancellationToken = default)
-        => ExecuteAsync(() => _orderStateApi.GetWorkingOrdersAsync(cancellationToken));
+        => ExecuteAsync(() => _workingOrdersApi.GetWorkingOrdersAsync(cancellationToken));
 
     public Task<ActivityResponse> GetActivityAsync(
         DateTimeOffset fromUtc,
@@ -113,6 +147,12 @@ public sealed class IgTradingApi : IIgTradingApi
             detailed: true,
             pageSize,
             cancellationToken));
+
+    public Task<TransactionHistoryResponse> GetTransactionsAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync(() => _orderStateApi.GetTransactionsAsync(cancellationToken));
+
+    public Task<AccountsResponse> GetAccountsAsync(CancellationToken cancellationToken = default)
+        => ExecuteAsync(() => _accountsApi.GetAccountsAsync(cancellationToken));
 
     private static string? TryGetSingleHeader(HttpHeaders headers, string name)
     {
@@ -134,5 +174,21 @@ public sealed class IgTradingApi : IIgTradingApi
         {
             throw IgErrorParser.ToIgApiException(exception);
         }
+    }
+
+    private static void EnsureSuccess<T>(ApiResponse<T> response)
+    {
+        if (response.IsSuccessStatusCode)
+        {
+            return;
+        }
+
+        if (response.Error is not null)
+        {
+            throw IgErrorParser.ToIgApiException(response.Error);
+        }
+
+        var content = response.Content?.ToString();
+        throw IgErrorParser.Create(response.StatusCode, content);
     }
 }

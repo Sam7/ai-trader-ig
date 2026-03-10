@@ -12,14 +12,19 @@ Small .NET 10 solution proving IG dealing behind a broker-neutral abstraction.
 
 ## Configuration
 
-Set via environment variables or user secrets:
+Set via environment variables, user secrets, or a local ignored config file:
 
 - `IG__BaseUrl`
 - `IG__ApiKey`
 - `IG__Identifier`
 - `IG__Password`
 - `IG__AccountId` (optional)
-- `IG__UseDemo`
+
+Recommended local file workflow:
+
+- copy `appsettings.example.json` to `appsettings.json` or `appsettings.local.json`
+- keep real credentials only in the local ignored file
+- never commit live credentials
 
 Optional integration test values:
 
@@ -43,5 +48,35 @@ dotnet run --project src/Trading.Cli -- status --deal-reference spike-...
 dotnet test
 $env:RUN_IG_INTEGRATION='true'; dotnet test --filter Category=Integration
 ```
+
+## Live demo suite
+
+The live integration suite is intentionally small:
+
+- `AuthenticateAsync_WithValidDemoCredentials_ShouldReturnSession`
+- `FullDemoRun_WithValidDemoCredentials_ShouldExerciseImplementedEndpoints`
+
+The full demo run is the main end-to-end proof. It performs one realistic broker journey and touches the implemented endpoint surface roughly once:
+
+- authenticate
+- accounts lookup
+- market metadata lookup
+- create/list/update/cancel a working order
+- place a market order
+- confirm order state
+- list open positions
+- fetch one position by deal id
+- query recent activity/orders
+- query transaction history
+- close the opened position
+
+Recommended live settings:
+
+- `RUN_IG_INTEGRATION=true`
+- `IG__TestEpic`
+- `IG__TestSize`
+- `IG__WorkingOrderTestLevel`
+
+`PUT /session` is covered automatically when `IG__AccountId` is configured.
 
 Never commit real credentials.

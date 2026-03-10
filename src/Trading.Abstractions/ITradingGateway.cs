@@ -8,11 +8,25 @@ public interface ITradingGateway
         PlaceOrderRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<WorkingOrderResult> PlaceWorkingOrderAsync(
+        CreateWorkingOrderRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<ClosePositionResult> ClosePositionAsync(
         ClosePositionRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<WorkingOrderResult> UpdateWorkingOrderAsync(
+        UpdateWorkingOrderRequest request,
+        CancellationToken cancellationToken = default);
+
+    Task<WorkingOrderResult> CancelWorkingOrderAsync(
+        string dealId,
+        CancellationToken cancellationToken = default);
+
     Task<IReadOnlyList<PositionSummary>> GetOpenPositionsAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<WorkingOrderSummary>> GetWorkingOrdersAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<OrderSummary>> GetOrdersAsync(
         OrderQuery query,

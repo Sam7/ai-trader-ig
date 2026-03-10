@@ -13,7 +13,15 @@ public interface IIgTradingApi
 
     Task<ClosePositionResponse> ClosePositionAsync(ClosePositionRequest request, CancellationToken cancellationToken = default);
 
+    Task<WorkingOrderMutationResponse> CreateWorkingOrderAsync(CreateWorkingOrderRequest request, CancellationToken cancellationToken = default);
+
+    Task<WorkingOrderMutationResponse> UpdateWorkingOrderAsync(string dealId, UpdateWorkingOrderRequest request, CancellationToken cancellationToken = default);
+
+    Task<WorkingOrderMutationResponse> DeleteWorkingOrderAsync(string dealId, CancellationToken cancellationToken = default);
+
     Task<PositionsResponse> GetOpenPositionsAsync(CancellationToken cancellationToken = default);
+
+    Task<PositionEnvelope?> GetPositionByDealIdAsync(string dealId, CancellationToken cancellationToken = default);
 
     Task<DealConfirmationResponse?> GetDealConfirmationAsync(string dealReference, CancellationToken cancellationToken = default);
 
@@ -24,4 +32,8 @@ public interface IIgTradingApi
         DateTimeOffset toUtc,
         int pageSize,
         CancellationToken cancellationToken = default);
+
+    Task<TransactionHistoryResponse> GetTransactionsAsync(CancellationToken cancellationToken = default);
+
+    Task<AccountsResponse> GetAccountsAsync(CancellationToken cancellationToken = default);
 }

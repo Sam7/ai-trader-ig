@@ -1,3 +1,4 @@
+using System.Net;
 using System.Text.Json;
 using Refit;
 
@@ -7,13 +8,17 @@ internal static class IgErrorParser
 {
     public static IgApiException ToIgApiException(ApiException exception)
     {
-        var content = exception.Content;
+        return Create(exception.StatusCode, exception.Content, exception);
+    }
+
+    public static IgApiException Create(HttpStatusCode? statusCode, string? content, Exception? innerException = null)
+    {
         var errorCode = TryGetErrorCode(content);
         var message = string.IsNullOrWhiteSpace(errorCode)
-            ? $"IG API request failed with status code {(int)exception.StatusCode}."
+            ? $"IG API request failed with status code {(int?)statusCode ?? 0}."
             : $"IG API error: {errorCode}.";
 
-        return new IgApiException(errorCode, exception.StatusCode, message, exception);
+        return new IgApiException(errorCode, statusCode, message, innerException);
     }
 
     private static string? TryGetErrorCode(string? content)
