@@ -1,0 +1,7 @@
+interface:
+  display_name: "LLM Prompt Writer"
+  short_description: "Write robust prompts for LLM tasks"
+  default_prompt: "Use $llm-prompt-writer to draft or refine a prompt for a large language model task."
+
+policy:
+  allow_implicit_invocation: true
