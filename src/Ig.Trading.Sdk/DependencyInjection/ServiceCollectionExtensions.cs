@@ -16,6 +16,7 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(IgClientOptions.SectionName));
 
         services.AddSingleton<IIgSessionStore, InMemoryIgSessionStore>();
+        services.AddSingleton<IIgPasswordEncryptor, RsaIgPasswordEncryptor>();
         services.AddTransient<IgAuthenticationHeaderHandler>();
 
         static RefitSettings CreateRefitSettings() => new();
@@ -50,7 +51,17 @@ public static class ServiceCollectionExtensions
             .ConfigureHttpClient((sp, client) => ConfigureClient(sp, client))
             .AddHttpMessageHandler<IgAuthenticationHeaderHandler>();
 
-        services.AddTransient<IIgTradingApi, IgTradingApi>();
+        services.AddTransient<IIgTradingApi>(sp => new IgTradingApi(
+            sp.GetRequiredService<IIgSessionApi>(),
+            sp.GetRequiredService<IIgMarketsApi>(),
+            sp.GetRequiredService<IIgPositionsApi>(),
+            sp.GetRequiredService<IIgOrderStateApi>(),
+            sp.GetRequiredService<IIgWorkingOrdersApi>(),
+            sp.GetRequiredService<IIgAccountsApi>(),
+            sp.GetRequiredService<IIgSessionStore>(),
+            sp.GetRequiredService<IIgPasswordEncryptor>(),
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<IgClientOptions>>(),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<IgTradingApi>>()));
 
         return services;
     }

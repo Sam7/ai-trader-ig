@@ -11,7 +11,7 @@ using System.Net.Http.Headers;
 
 namespace Ig.Trading.Sdk;
 
-public sealed class IgTradingApi : IIgTradingApi
+internal sealed class IgTradingApi : IIgTradingApi
 {
     private readonly IIgSessionApi _sessionApi;
     private readonly IIgMarketsApi _marketsApi;
@@ -20,10 +20,11 @@ public sealed class IgTradingApi : IIgTradingApi
     private readonly IIgWorkingOrdersApi _workingOrdersApi;
     private readonly IIgAccountsApi _accountsApi;
     private readonly IIgSessionStore _sessionStore;
+    private readonly IIgPasswordEncryptor _passwordEncryptor;
     private readonly IgClientOptions _options;
     private readonly ILogger<IgTradingApi> _logger;
 
-    public IgTradingApi(
+    internal IgTradingApi(
         IIgSessionApi sessionApi,
         IIgMarketsApi marketsApi,
         IIgPositionsApi positionsApi,
@@ -31,6 +32,7 @@ public sealed class IgTradingApi : IIgTradingApi
         IIgWorkingOrdersApi workingOrdersApi,
         IIgAccountsApi accountsApi,
         IIgSessionStore sessionStore,
+        IIgPasswordEncryptor passwordEncryptor,
         IOptions<IgClientOptions> options,
         ILogger<IgTradingApi> logger)
     {
@@ -41,6 +43,7 @@ public sealed class IgTradingApi : IIgTradingApi
         _workingOrdersApi = workingOrdersApi;
         _accountsApi = accountsApi;
         _sessionStore = sessionStore;
+        _passwordEncryptor = passwordEncryptor;
         _options = options.Value;
         _logger = logger;
     }
@@ -49,8 +52,9 @@ public sealed class IgTradingApi : IIgTradingApi
     {
         _options.Validate();
 
+        var sessionRequest = await CreateSessionRequestAsync(cancellationToken);
         var response = await ExecuteAsync(
-            () => _sessionApi.CreateSessionAsync(new SessionRequest(_options.Identifier, _options.Password), cancellationToken));
+            () => _sessionApi.CreateSessionAsync(sessionRequest, cancellationToken));
 
         EnsureSuccess(response);
 
@@ -83,11 +87,46 @@ public sealed class IgTradingApi : IIgTradingApi
     public Task<MarketDetailsResponse> GetMarketByEpicAsync(string epic, CancellationToken cancellationToken = default)
         => ExecuteAsync(() => _marketsApi.GetMarketByEpicAsync(epic, cancellationToken));
 
+    public Task<MarketSearchResponse> SearchMarketsAsync(string searchTerm, CancellationToken cancellationToken = default)
+        => ExecuteAsync(() => _marketsApi.SearchMarketsAsync(searchTerm, cancellationToken));
+
+    public Task<MarketNavigationResponse> GetMarketNavigationAsync(string? nodeId = null, CancellationToken cancellationToken = default)
+        => string.IsNullOrWhiteSpace(nodeId)
+            ? ExecuteAsync(() => _marketsApi.GetMarketNavigationRootAsync(cancellationToken))
+            : ExecuteAsync(() => _marketsApi.GetMarketNavigationNodeAsync(nodeId, cancellationToken));
+
+    public Task<PricesResponse> GetPricesAsync(GetPricesRequest request, CancellationToken cancellationToken = default)
+    {
+        if (request.FromUtc is not null && request.ToUtc is not null && request.Resolution is not null)
+        {
+            return ExecuteAsync(() => _marketsApi.GetPricesByRangeAsync(
+                request.Epic,
+                request.Resolution,
+                request.FromUtc.Value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss"),
+                request.ToUtc.Value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss"),
+                cancellationToken));
+        }
+
+        if (request.MaxPoints is not null && request.Resolution is not null)
+        {
+            return ExecuteAsync(() => _marketsApi.GetPricesByPointsAsync(
+                request.Epic,
+                request.Resolution,
+                request.MaxPoints.Value,
+                cancellationToken));
+        }
+
+        return ExecuteAsync(() => _marketsApi.GetRecentPricesAsync(request.Epic, cancellationToken));
+    }
+
     public Task<CreatePositionResponse> CreatePositionAsync(CreatePositionRequest request, CancellationToken cancellationToken = default)
         => ExecuteAsync(() => _positionsApi.CreatePositionAsync(request, cancellationToken));
 
     public Task<ClosePositionResponse> ClosePositionAsync(ClosePositionRequest request, CancellationToken cancellationToken = default)
         => ExecuteAsync(() => _positionsApi.ClosePositionAsync(request, cancellationToken));
+
+    public Task<UpdatePositionResponse> UpdatePositionAsync(string dealId, UpdatePositionRequest request, CancellationToken cancellationToken = default)
+        => ExecuteAsync(() => _positionsApi.UpdatePositionAsync(dealId, request, cancellationToken));
 
     public Task<WorkingOrderMutationResponse> CreateWorkingOrderAsync(CreateWorkingOrderRequest request, CancellationToken cancellationToken = default)
         => ExecuteAsync(() => _workingOrdersApi.CreateWorkingOrderAsync(request, cancellationToken));
@@ -153,6 +192,18 @@ public sealed class IgTradingApi : IIgTradingApi
 
     public Task<AccountsResponse> GetAccountsAsync(CancellationToken cancellationToken = default)
         => ExecuteAsync(() => _accountsApi.GetAccountsAsync(cancellationToken));
+
+    private async Task<SessionRequest> CreateSessionRequestAsync(CancellationToken cancellationToken)
+    {
+        if (!_options.UseEncryptedPassword)
+        {
+            return new SessionRequest(_options.Identifier, _options.Password);
+        }
+
+        var encryptionKey = await ExecuteAsync(() => _sessionApi.GetEncryptionKeyAsync(cancellationToken));
+        var encryptedPassword = _passwordEncryptor.Encrypt(_options.Password, encryptionKey);
+        return new SessionRequest(_options.Identifier, encryptedPassword, EncryptedPassword: true);
+    }
 
     private static string? TryGetSingleHeader(HttpHeaders headers, string name)
     {

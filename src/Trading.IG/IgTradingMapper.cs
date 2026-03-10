@@ -13,7 +13,11 @@ internal static class IgTradingMapper
             IgTradingConversions.ParseDirection(source.Position.Direction),
             source.Position.Size,
             source.Position.Currency,
-            IgTradingConversions.ParseDate(source.Position.CreatedDateUtc));
+            IgTradingConversions.ParseDate(source.Position.CreatedDateUtc),
+            source.Position.StopLevel,
+            source.Position.LimitLevel,
+            source.Position.TrailingStopDistance,
+            source.Position.TrailingStopIncrement);
     }
 
     public static WorkingOrderSummary MapWorkingOrder(WorkingOrderEnvelope source)
@@ -113,6 +117,52 @@ internal static class IgTradingMapper
         {
             DealReference = submission.DealReference,
         };
+    }
+
+    public static MarketSearchResult MapMarketSearchResult(MarketSearchItem source)
+    {
+        return new MarketSearchResult(
+            new InstrumentId(source.Epic),
+            source.InstrumentName ?? source.Epic,
+            source.InstrumentType,
+            source.Expiry,
+            source.CurrencyCode,
+            IgTradingConversions.ParseMarketStatus(source.MarketStatus));
+    }
+
+    public static MarketNavigationPage MapMarketNavigation(string? nodeId, MarketNavigationResponse source)
+    {
+        return new MarketNavigationPage(
+            nodeId,
+            source.Name ?? "Markets",
+            (source.Nodes ?? [])
+                .Select(node => new MarketNavigationNode(node.Id, node.Name))
+                .ToList(),
+            (source.Markets ?? [])
+                .Select(MapMarketSearchResult)
+                .ToList());
+    }
+
+    public static PriceSeries MapPrices(Trading.Abstractions.GetPricesRequest request, PricesResponse source)
+    {
+        var bars = (source.Prices ?? [])
+            .Select(price => new PriceBar(
+                IgTradingConversions.ParseDate(price.SnapshotTimeUtc),
+                price.OpenPrice?.Bid ?? 0m,
+                price.HighPrice?.Bid ?? 0m,
+                price.LowPrice?.Bid ?? 0m,
+                price.ClosePrice?.Bid ?? 0m,
+                price.OpenPrice?.Ask ?? 0m,
+                price.HighPrice?.Ask ?? 0m,
+                price.LowPrice?.Ask ?? 0m,
+                price.ClosePrice?.Ask ?? 0m,
+                price.LastTradedVolume))
+            .ToList();
+
+        return new PriceSeries(
+            request.Instrument,
+            request.Resolution,
+            bars);
     }
 
     public static string? ResolveActivityDealReference(ActivityItem activity)

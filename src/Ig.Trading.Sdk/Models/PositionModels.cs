@@ -28,6 +28,16 @@ public sealed record ClosePositionRequest(
 public sealed record ClosePositionResponse(
     [property: JsonPropertyName("dealReference")] string DealReference);
 
+public sealed record UpdatePositionRequest(
+    [property: JsonPropertyName("limitLevel")] decimal? LimitLevel,
+    [property: JsonPropertyName("stopLevel")] decimal? StopLevel,
+    [property: JsonPropertyName("trailingStop")] bool TrailingStop,
+    [property: JsonPropertyName("trailingStopDistance")] decimal? TrailingStopDistance,
+    [property: JsonPropertyName("trailingStopIncrement")] decimal? TrailingStopIncrement);
+
+public sealed record UpdatePositionResponse(
+    [property: JsonPropertyName("dealReference")] string DealReference);
+
 public sealed record PositionsResponse(
     [property: JsonPropertyName("positions")] IReadOnlyList<PositionEnvelope>? Positions);
 
@@ -40,7 +50,12 @@ public sealed record PositionData(
     [property: JsonPropertyName("direction")] string Direction,
     [property: JsonPropertyName("size")] decimal Size,
     [property: JsonPropertyName("currency")] string Currency,
-    [property: JsonPropertyName("createdDateUTC")] string? CreatedDateUtc);
+    [property: JsonPropertyName("level")] decimal? Level,
+    [property: JsonPropertyName("createdDateUTC")] string? CreatedDateUtc,
+    [property: JsonPropertyName("limitLevel")] decimal? LimitLevel,
+    [property: JsonPropertyName("stopLevel")] decimal? StopLevel,
+    [property: JsonPropertyName("trailingStopDistance")] decimal? TrailingStopDistance,
+    [property: JsonPropertyName("trailingStep")] decimal? TrailingStopIncrement);
 
 public sealed record PositionMarketData(
     [property: JsonPropertyName("epic")] string Epic,

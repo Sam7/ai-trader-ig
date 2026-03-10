@@ -7,4 +7,5 @@ public enum OrderSubmissionKind
     WorkingOrderCreate = 3,
     WorkingOrderUpdate = 4,
     WorkingOrderCancel = 5,
+    PositionUpdate = 6,
 }

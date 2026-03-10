@@ -5,6 +5,10 @@ namespace Ig.Trading.Sdk.Contracts;
 
 public interface IIgSessionApi
 {
+    [Get("/session/encryptionKey")]
+    [Headers("Version: 1")]
+    Task<EncryptionKeyResponse> GetEncryptionKeyAsync(CancellationToken cancellationToken = default);
+
     [Post("/session")]
     [Headers("Version: 2")]
     Task<ApiResponse<SessionResponse>> CreateSessionAsync([Body] SessionRequest request, CancellationToken cancellationToken = default);

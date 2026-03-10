@@ -16,6 +16,16 @@ public class IgDemoIntegrationTests
         session.BrokerName.Should().Be("IG");
     }
 
+    [OptionalIntegrationFact("RUN_IG_ENCRYPTED_INTEGRATION", "encrypted IG demo auth")]
+    [Trait("Category", "Integration")]
+    public async Task AuthenticateAsync_WithEncryptedPasswordEnabled_ShouldReturnSession()
+    {
+        await using var context = await IgDemoIntegrationContext.CreateAsync(useEncryptedPasswordOverride: true);
+        var session = await context.AuthenticateAsync();
+
+        session.BrokerName.Should().Be("IG");
+    }
+
     [IntegrationFact]
     [Trait("Category", "Integration")]
     public async Task FullDemoRun_WithValidDemoCredentials_ShouldExerciseImplementedEndpoints()
@@ -29,6 +39,9 @@ public class IgDemoIntegrationTests
 
         var accounts = await context.IgTradingApi.GetAccountsAsync();
         (accounts.Accounts ?? []).Should().NotBeEmpty();
+
+        var searchResults = await context.Gateway.SearchMarketsAsync(context.MarketSearchTerm, 10);
+        searchResults.Should().NotBeEmpty();
 
         var createdWorkingOrder = await context.Gateway.PlaceWorkingOrderAsync(new CreateWorkingOrderRequest(
             new InstrumentId(context.Epic),
@@ -94,6 +107,15 @@ public class IgDemoIntegrationTests
         context.PositionDealId.Should().NotBeNullOrWhiteSpace();
         await context.WaitForPositionPresenceAsync(context.PositionDealId!, shouldExist: true, TimeSpan.FromSeconds(20));
 
+        var (stopLevel, limitLevel) = await context.CreateValidProtectionLevelsAsync(context.PositionDealId!);
+        var updatedPosition = await context.Gateway.UpdatePositionAsync(new UpdatePositionRequest(
+            context.PositionDealId!,
+            stopLevel,
+            limitLevel));
+
+        updatedPosition.Status.Should().BeOneOf(OrderStatus.Accepted, OrderStatus.Open);
+        await context.WaitForPositionProtectionAsync(context.PositionDealId!, stopLevel, limitLevel, TimeSpan.FromSeconds(20));
+
         var positions = await context.Gateway.GetOpenPositionsAsync();
         positions.Should().Contain(position => position.DealId == context.PositionDealId);
 
@@ -123,5 +145,34 @@ public class IgDemoIntegrationTests
 
         var finalPositions = await context.Gateway.GetOpenPositionsAsync();
         finalPositions.Should().NotContain(position => string.Equals(position.DealId, closedPositionStatus.DealId, StringComparison.OrdinalIgnoreCase));
+    }
+
+    [OptionalIntegrationFact("RUN_IG_NAVIGATION_INTEGRATION", "market navigation discovery")]
+    [Trait("Category", "Integration")]
+    public async Task BrowseMarketsAsync_WhenDemoSupportsNavigation_ShouldReturnRootAndChildPage()
+    {
+        await using var context = await IgDemoIntegrationContext.CreateAsync();
+        await context.AuthenticateAsync();
+
+        var rootNavigation = await context.Gateway.BrowseMarketsAsync();
+        rootNavigation.Nodes.Should().NotBeEmpty();
+
+        var childNavigation = await context.Gateway.BrowseMarketsAsync(rootNavigation.Nodes[0].Id);
+        childNavigation.Should().NotBeNull();
+    }
+
+    [OptionalIntegrationFact("RUN_IG_PRICES_INTEGRATION", "price retrieval when the IG account has price-history entitlement")]
+    [Trait("Category", "Integration")]
+    public async Task GetPricesAsync_WhenDemoAccountHasEntitlement_ShouldReturnPrices()
+    {
+        await using var context = await IgDemoIntegrationContext.CreateAsync();
+        await context.AuthenticateAsync();
+
+        var prices = await context.Gateway.GetPricesAsync(new GetPricesRequest(
+            new InstrumentId(context.Epic),
+            PriceResolution.Minute,
+            3));
+
+        prices.Bars.Should().NotBeEmpty();
     }
 }

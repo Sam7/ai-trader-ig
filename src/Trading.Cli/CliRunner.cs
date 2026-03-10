@@ -48,8 +48,20 @@ public sealed class CliRunner
                 case "close":
                     await ClosePositionAsync(options);
                     return 0;
+                case "position-update":
+                    await UpdatePositionAsync(options);
+                    return 0;
                 case "positions":
                     await ShowPositionsAsync();
+                    return 0;
+                case "markets-search":
+                    await SearchMarketsAsync(options);
+                    return 0;
+                case "markets-browse":
+                    await BrowseMarketsAsync(options);
+                    return 0;
+                case "prices":
+                    await ShowPricesAsync(options);
                     return 0;
                 case "orders":
                     await ShowOrdersAsync(options);
@@ -102,6 +114,24 @@ public sealed class CliRunner
         await _gateway.AuthenticateAsync();
         var result = await _gateway.ClosePositionAsync(new ClosePositionRequest(dealId, size));
         Console.WriteLine($"Close submitted. Ref={result.DealReference}, DealId={result.DealId ?? "n/a"}, Status={result.Status}, Message={result.Message ?? "n/a"}");
+    }
+
+    private async Task UpdatePositionAsync(CliOptions options)
+    {
+        var dealId = options.Required("deal-id");
+        var stopLevel = options.TryGetDecimal("stop-level", out var stop) ? stop : (decimal?)null;
+        var limitLevel = options.TryGetDecimal("limit-level", out var limit) ? limit : (decimal?)null;
+        var trailingDistance = options.TryGetDecimal("trailing-stop-distance", out var trailingStopDistance) ? trailingStopDistance : (decimal?)null;
+        var trailingIncrement = options.TryGetDecimal("trailing-stop-increment", out var trailingStopIncrement) ? trailingStopIncrement : (decimal?)null;
+
+        await _gateway.AuthenticateAsync();
+        var result = await _gateway.UpdatePositionAsync(new UpdatePositionRequest(
+            dealId,
+            stopLevel,
+            limitLevel,
+            trailingDistance,
+            trailingIncrement));
+        Console.WriteLine($"Position updated. Ref={result.DealReference}, DealId={result.DealId}, Status={result.Status}, Message={result.Message ?? "n/a"}");
     }
 
     private async Task CreateWorkingOrderAsync(CliOptions options)
@@ -184,7 +214,72 @@ public sealed class CliRunner
 
         foreach (var position in positions)
         {
-            Console.WriteLine($"DealId={position.DealId} Instrument={position.Instrument} Direction={position.Direction} Size={position.Size} Currency={position.Currency} Created={position.CreatedAtUtc:O}");
+            Console.WriteLine($"DealId={position.DealId} Instrument={position.Instrument} Direction={position.Direction} Size={position.Size} Currency={position.Currency} Stop={position.StopLevel?.ToString() ?? "n/a"} Limit={position.LimitLevel?.ToString() ?? "n/a"} Created={position.CreatedAtUtc:O}");
+        }
+    }
+
+    private async Task SearchMarketsAsync(CliOptions options)
+    {
+        var query = options.Required("query");
+        var max = options.TryGetInt("max", out var maxValue) ? maxValue : 20;
+
+        await _gateway.AuthenticateAsync();
+        var markets = await _gateway.SearchMarketsAsync(query, max);
+
+        if (markets.Count == 0)
+        {
+            Console.WriteLine("No matching markets.");
+            return;
+        }
+
+        foreach (var market in markets)
+        {
+            Console.WriteLine($"Instrument={market.Instrument} Name={market.Name} Type={market.Type ?? "n/a"} Expiry={market.Expiry ?? "n/a"} Currency={market.CurrencyCode ?? "n/a"} Status={market.Status}");
+        }
+    }
+
+    private async Task BrowseMarketsAsync(CliOptions options)
+    {
+        var nodeId = options.TryGet("node-id", out var nodeValue) ? nodeValue : null;
+
+        await _gateway.AuthenticateAsync();
+        var page = await _gateway.BrowseMarketsAsync(nodeId);
+
+        Console.WriteLine($"Node={page.Name} Id={page.CurrentNodeId ?? "root"}");
+
+        foreach (var node in page.Nodes)
+        {
+            Console.WriteLine($"ChildNode={node.Id} Name={node.Name}");
+        }
+
+        foreach (var market in page.Markets)
+        {
+            Console.WriteLine($"Market={market.Instrument} Name={market.Name} Status={market.Status}");
+        }
+    }
+
+    private async Task ShowPricesAsync(CliOptions options)
+    {
+        var instrument = options.Required("instrument");
+        var resolution = options.TryGet("resolution", out var resolutionValue)
+            ? ParsePriceResolution(resolutionValue!)
+            : (PriceResolution?)null;
+        var max = options.TryGetInt("max", out var maxValue) ? maxValue : (int?)null;
+        var from = options.TryGetDateTimeOffset("from", out var fromValue) ? fromValue : (DateTimeOffset?)null;
+        var to = options.TryGetDateTimeOffset("to", out var toValue) ? toValue : (DateTimeOffset?)null;
+
+        await _gateway.AuthenticateAsync();
+        var series = await _gateway.GetPricesAsync(new GetPricesRequest(new InstrumentId(instrument), resolution, max, from, to));
+
+        if (series.Bars.Count == 0)
+        {
+            Console.WriteLine("No prices returned.");
+            return;
+        }
+
+        foreach (var bar in series.Bars)
+        {
+            Console.WriteLine($"{bar.TimestampUtc:O} BidO={bar.BidOpen} BidH={bar.BidHigh} BidL={bar.BidLow} BidC={bar.BidClose} AskO={bar.AskOpen} AskH={bar.AskHigh} AskL={bar.AskLow} AskC={bar.AskClose} Vol={bar.Volume?.ToString() ?? "n/a"}");
         }
     }
 
@@ -241,7 +336,11 @@ public sealed class CliRunner
         Console.WriteLine("  working-cancel --deal-id <id>");
         Console.WriteLine("  working-orders");
         Console.WriteLine("  close --deal-id <id> [--size <decimal>]");
+        Console.WriteLine("  position-update --deal-id <id> [--stop-level <decimal>] [--limit-level <decimal>] [--trailing-stop-distance <decimal>] [--trailing-stop-increment <decimal>]");
         Console.WriteLine("  positions");
+        Console.WriteLine("  markets-search --query <text> [--max <int>]");
+        Console.WriteLine("  markets-browse [--node-id <id>]");
+        Console.WriteLine("  prices --instrument <epic> [--resolution <value>] [--max <int>] [--from <ISO-8601>] [--to <ISO-8601>]");
         Console.WriteLine("  orders [--from <ISO-8601>] [--to <ISO-8601>] [--max <int>]");
         Console.WriteLine("  status --deal-reference <value>");
     }
@@ -262,4 +361,25 @@ public sealed class CliRunner
             || value.Equals("good-till-date", StringComparison.OrdinalIgnoreCase)
                 ? WorkingOrderTimeInForce.GoodTillDate
                 : WorkingOrderTimeInForce.GoodTillCancelled;
+
+    private static PriceResolution ParsePriceResolution(string value)
+        => value.ToLowerInvariant() switch
+        {
+            "second" => PriceResolution.Second,
+            "minute" => PriceResolution.Minute,
+            "2minute" or "minute_2" => PriceResolution.TwoMinutes,
+            "3minute" or "minute_3" => PriceResolution.ThreeMinutes,
+            "5minute" or "minute_5" => PriceResolution.FiveMinutes,
+            "10minute" or "minute_10" => PriceResolution.TenMinutes,
+            "15minute" or "minute_15" => PriceResolution.FifteenMinutes,
+            "30minute" or "minute_30" => PriceResolution.ThirtyMinutes,
+            "hour" => PriceResolution.Hour,
+            "2hour" or "hour_2" => PriceResolution.TwoHours,
+            "3hour" or "hour_3" => PriceResolution.ThreeHours,
+            "4hour" or "hour_4" => PriceResolution.FourHours,
+            "day" => PriceResolution.Day,
+            "week" => PriceResolution.Week,
+            "month" => PriceResolution.Month,
+            _ => throw new ArgumentException($"Unsupported resolution '{value}'."),
+        };
 }

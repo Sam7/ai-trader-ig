@@ -14,6 +14,8 @@ public sealed class IgClientOptions
 
     public string? AccountId { get; set; }
 
+    public bool UseEncryptedPassword { get; set; }
+
     public void Validate()
     {
         if (!Uri.TryCreate(BaseUrl, UriKind.Absolute, out _))

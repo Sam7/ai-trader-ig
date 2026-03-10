@@ -16,6 +16,10 @@ public interface ITradingGateway
         ClosePositionRequest request,
         CancellationToken cancellationToken = default);
 
+    Task<UpdatePositionResult> UpdatePositionAsync(
+        UpdatePositionRequest request,
+        CancellationToken cancellationToken = default);
+
     Task<WorkingOrderResult> UpdateWorkingOrderAsync(
         UpdateWorkingOrderRequest request,
         CancellationToken cancellationToken = default);
@@ -27,6 +31,19 @@ public interface ITradingGateway
     Task<IReadOnlyList<PositionSummary>> GetOpenPositionsAsync(CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<WorkingOrderSummary>> GetWorkingOrdersAsync(CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<MarketSearchResult>> SearchMarketsAsync(
+        string searchTerm,
+        int maxResults = 20,
+        CancellationToken cancellationToken = default);
+
+    Task<MarketNavigationPage> BrowseMarketsAsync(
+        string? nodeId = null,
+        CancellationToken cancellationToken = default);
+
+    Task<PriceSeries> GetPricesAsync(
+        GetPricesRequest request,
+        CancellationToken cancellationToken = default);
 
     Task<IReadOnlyList<OrderSummary>> GetOrdersAsync(
         OrderQuery query,

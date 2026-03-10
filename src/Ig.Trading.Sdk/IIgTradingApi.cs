@@ -9,9 +9,17 @@ public interface IIgTradingApi
 
     Task<MarketDetailsResponse> GetMarketByEpicAsync(string epic, CancellationToken cancellationToken = default);
 
+    Task<MarketSearchResponse> SearchMarketsAsync(string searchTerm, CancellationToken cancellationToken = default);
+
+    Task<MarketNavigationResponse> GetMarketNavigationAsync(string? nodeId = null, CancellationToken cancellationToken = default);
+
+    Task<PricesResponse> GetPricesAsync(GetPricesRequest request, CancellationToken cancellationToken = default);
+
     Task<CreatePositionResponse> CreatePositionAsync(CreatePositionRequest request, CancellationToken cancellationToken = default);
 
     Task<ClosePositionResponse> ClosePositionAsync(ClosePositionRequest request, CancellationToken cancellationToken = default);
+
+    Task<UpdatePositionResponse> UpdatePositionAsync(string dealId, UpdatePositionRequest request, CancellationToken cancellationToken = default);
 
     Task<WorkingOrderMutationResponse> CreateWorkingOrderAsync(CreateWorkingOrderRequest request, CancellationToken cancellationToken = default);
 

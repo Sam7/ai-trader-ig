@@ -7,6 +7,10 @@ public sealed record SessionRequest(
     [property: JsonPropertyName("password")] string Password,
     [property: JsonPropertyName("encryptedPassword")] bool EncryptedPassword = false);
 
+public sealed record EncryptionKeyResponse(
+    [property: JsonPropertyName("encryptionKey")] string EncryptionKey,
+    [property: JsonPropertyName("timeStamp")] long TimeStamp);
+
 public sealed record SwitchAccountRequest(
     [property: JsonPropertyName("accountId")] string AccountId,
     [property: JsonPropertyName("defaultAccount")] bool DefaultAccount = true);

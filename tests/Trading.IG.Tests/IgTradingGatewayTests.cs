@@ -46,8 +46,9 @@ public class IgTradingGatewayTests
         var api = new FakeIgTradingApi
         {
             Market = _ => Task.FromResult(new MarketDetailsResponse(
-                new MarketInstrument("IX.D.SPTRD.DAILY.IP", "DFB", [new MarketCurrency("USD", true)]),
-                new MarketSnapshot("CLOSED"))),
+                new MarketInstrument("IX.D.SPTRD.DAILY.IP", null, null, "DFB", [new MarketCurrency("USD", true)]),
+                new MarketSnapshot("CLOSED", null, null),
+                null)),
         };
 
         var gateway = CreateGateway(api);
@@ -249,6 +250,119 @@ public class IgTradingGatewayTests
     }
 
     [Fact]
+    public async Task UpdatePositionAsync_ShouldSubmitExpectedPayload()
+    {
+        string? capturedDealId = null;
+        Ig.Trading.Sdk.Models.UpdatePositionRequest? capturedRequest = null;
+
+        var api = new FakeIgTradingApi
+        {
+            PositionByDealId = _ => Task.FromResult<PositionEnvelope?>(new PositionEnvelope(
+                new PositionData("P1", "BUY", 1m, "USD", 12m, DateTimeOffset.UtcNow.ToString("O"), 15m, 10m, null, null),
+                new PositionMarketData("IX.D.SPTRD.DAILY.IP", "DFB"))),
+            UpdatePosition = (dealId, request) =>
+            {
+                capturedDealId = dealId;
+                capturedRequest = request;
+                return Task.FromResult(new UpdatePositionResponse("AMENDREF1"));
+            },
+            DealConfirmation = _ => Task.FromResult<DealConfirmationResponse?>(new DealConfirmationResponse(
+                "ACCEPTED",
+                "OPEN",
+                null,
+                "P1",
+                "AMENDREF1",
+                "IX.D.SPTRD.DAILY.IP",
+                "BUY",
+                1m,
+                DateTimeOffset.UtcNow.ToString("O"))),
+        };
+
+        var gateway = CreateGateway(api);
+
+        var result = await gateway.UpdatePositionAsync(new Trading.Abstractions.UpdatePositionRequest("P1", 11m, 16m, null, null));
+
+        result.DealReference.Should().Be("AMENDREF1");
+        capturedDealId.Should().Be("P1");
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.StopLevel.Should().Be(11m);
+        capturedRequest.LimitLevel.Should().Be(16m);
+        capturedRequest.TrailingStop.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task SearchMarketsAsync_ShouldMapAndLimitResults()
+    {
+        var api = new FakeIgTradingApi
+        {
+            SearchMarkets = _ => Task.FromResult(new MarketSearchResponse(
+            [
+                new MarketSearchItem("Volatility Index", "CC.D.VIX.UMA.IP", "-", "INDICES", "TRADEABLE", "USD"),
+                new MarketSearchItem("US 500", "IX.D.SPTRD.DAILY.IP", "DFB", "INDICES", "CLOSED", "USD"),
+            ])),
+        };
+
+        var gateway = CreateGateway(api);
+
+        var results = await gateway.SearchMarketsAsync("VIX", maxResults: 1);
+
+        results.Should().ContainSingle();
+        results[0].Instrument.Value.Should().Be("CC.D.VIX.UMA.IP");
+        results[0].Status.Should().Be(MarketStatus.Tradeable);
+    }
+
+    [Fact]
+    public async Task BrowseMarketsAsync_ShouldMapNodesAndMarkets()
+    {
+        var api = new FakeIgTradingApi
+        {
+            MarketNavigation = _ => Task.FromResult(new MarketNavigationResponse(
+                "Indices",
+                [new MarketNavigationNodeItem("1", "Major indices")],
+                [new MarketSearchItem("US 500", "IX.D.SPTRD.DAILY.IP", "DFB", "INDICES", "TRADEABLE", "USD")])),
+        };
+
+        var gateway = CreateGateway(api);
+
+        var page = await gateway.BrowseMarketsAsync("root");
+
+        page.Name.Should().Be("Indices");
+        page.Nodes.Should().ContainSingle(node => node.Id == "1");
+        page.Markets.Should().ContainSingle(market => market.Instrument.Value == "IX.D.SPTRD.DAILY.IP");
+    }
+
+    [Fact]
+    public async Task GetPricesAsync_ShouldMapBars()
+    {
+        var api = new FakeIgTradingApi
+        {
+            Prices = _ => Task.FromResult(new PricesResponse(
+            [
+                new PricePoint(
+                    DateTimeOffset.UtcNow.ToString("O"),
+                    new PriceLevel(10m, 11m),
+                    new PriceLevel(12m, 13m),
+                    new PriceLevel(9m, 10m),
+                    new PriceLevel(11m, 12m),
+                    42)
+            ],
+            "INDICES",
+            null)),
+        };
+
+        var gateway = CreateGateway(api);
+
+        var series = await gateway.GetPricesAsync(new Trading.Abstractions.GetPricesRequest(
+            new InstrumentId("CC.D.VIX.UMA.IP"),
+            PriceResolution.Minute,
+            1));
+
+        series.Bars.Should().ContainSingle();
+        series.Bars[0].BidOpen.Should().Be(10m);
+        series.Bars[0].AskClose.Should().Be(12m);
+    }
+
+    [Fact]
     public async Task PlaceWorkingOrderAsync_ShouldSubmitExpectedPayload()
     {
         Ig.Trading.Sdk.Models.CreateWorkingOrderRequest? capturedRequest = null;
@@ -353,7 +467,16 @@ public class IgTradingGatewayTests
             = _ => Task.FromResult(new IgSessionContext("cst", "token", "ACC1", DateTimeOffset.UtcNow));
 
         public Func<string, Task<MarketDetailsResponse>> Market { get; set; }
-            = _ => Task.FromResult(new MarketDetailsResponse(new MarketInstrument("IX.D.SPTRD.DAILY.IP", "DFB", [new MarketCurrency("USD", true)]), new MarketSnapshot("TRADEABLE")));
+            = _ => Task.FromResult(new MarketDetailsResponse(new MarketInstrument("IX.D.SPTRD.DAILY.IP", null, null, "DFB", [new MarketCurrency("USD", true)]), new MarketSnapshot("TRADEABLE", 100m, 101m), new MarketDealingRules(new MarketRuleDistance(1m, "POINTS"))));
+
+        public Func<string, Task<MarketSearchResponse>> SearchMarkets { get; set; }
+            = _ => Task.FromResult(new MarketSearchResponse([]));
+
+        public Func<string?, Task<MarketNavigationResponse>> MarketNavigation { get; set; }
+            = _ => Task.FromResult(new MarketNavigationResponse("Markets", [], []));
+
+        public Func<Ig.Trading.Sdk.Models.GetPricesRequest, Task<PricesResponse>> Prices { get; set; }
+            = _ => Task.FromResult(new PricesResponse([], null, null));
 
         public Func<CreatePositionRequest, Task<CreatePositionResponse>> CreatePosition { get; set; }
             = _ => Task.FromResult(new CreatePositionResponse("REF-NEW"));
@@ -369,6 +492,9 @@ public class IgTradingGatewayTests
 
         public Func<Ig.Trading.Sdk.Models.ClosePositionRequest, Task<ClosePositionResponse>> ClosePosition { get; set; }
             = _ => Task.FromResult(new ClosePositionResponse("REF-CLOSE"));
+
+        public Func<string, Ig.Trading.Sdk.Models.UpdatePositionRequest, Task<UpdatePositionResponse>> UpdatePosition { get; set; }
+            = (_, _) => Task.FromResult(new UpdatePositionResponse("REF-AMEND"));
 
         public Func<CancellationToken, Task<PositionsResponse>> OpenPositions { get; set; }
             = _ => Task.FromResult(new PositionsResponse([]));
@@ -395,6 +521,12 @@ public class IgTradingGatewayTests
 
         public Task<MarketDetailsResponse> GetMarketByEpicAsync(string epic, CancellationToken cancellationToken = default) => Market(epic);
 
+        public Task<MarketSearchResponse> SearchMarketsAsync(string searchTerm, CancellationToken cancellationToken = default) => SearchMarkets(searchTerm);
+
+        public Task<MarketNavigationResponse> GetMarketNavigationAsync(string? nodeId = null, CancellationToken cancellationToken = default) => MarketNavigation(nodeId);
+
+        public Task<PricesResponse> GetPricesAsync(Ig.Trading.Sdk.Models.GetPricesRequest request, CancellationToken cancellationToken = default) => Prices(request);
+
         public Task<CreatePositionResponse> CreatePositionAsync(CreatePositionRequest request, CancellationToken cancellationToken = default) => CreatePosition(request);
 
         public Task<WorkingOrderMutationResponse> CreateWorkingOrderAsync(Ig.Trading.Sdk.Models.CreateWorkingOrderRequest request, CancellationToken cancellationToken = default) => CreateWorkingOrder(request);
@@ -404,6 +536,8 @@ public class IgTradingGatewayTests
         public Task<WorkingOrderMutationResponse> DeleteWorkingOrderAsync(string dealId, CancellationToken cancellationToken = default) => DeleteWorkingOrder(dealId);
 
         public Task<ClosePositionResponse> ClosePositionAsync(Ig.Trading.Sdk.Models.ClosePositionRequest request, CancellationToken cancellationToken = default) => ClosePosition(request);
+
+        public Task<UpdatePositionResponse> UpdatePositionAsync(string dealId, Ig.Trading.Sdk.Models.UpdatePositionRequest request, CancellationToken cancellationToken = default) => UpdatePosition(dealId, request);
 
         public Task<PositionsResponse> GetOpenPositionsAsync(CancellationToken cancellationToken = default) => OpenPositions(cancellationToken);
 

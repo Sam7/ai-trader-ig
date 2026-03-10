@@ -49,6 +49,48 @@ internal static class IgTradingConversions
             ? "SELL"
             : "BUY";
 
+    public static string ToIgPriceResolution(PriceResolution resolution)
+        => resolution switch
+        {
+            PriceResolution.Second => "SECOND",
+            PriceResolution.Minute => "MINUTE",
+            PriceResolution.TwoMinutes => "MINUTE_2",
+            PriceResolution.ThreeMinutes => "MINUTE_3",
+            PriceResolution.FiveMinutes => "MINUTE_5",
+            PriceResolution.TenMinutes => "MINUTE_10",
+            PriceResolution.FifteenMinutes => "MINUTE_15",
+            PriceResolution.ThirtyMinutes => "MINUTE_30",
+            PriceResolution.Hour => "HOUR",
+            PriceResolution.TwoHours => "HOUR_2",
+            PriceResolution.ThreeHours => "HOUR_3",
+            PriceResolution.FourHours => "HOUR_4",
+            PriceResolution.Day => "DAY",
+            PriceResolution.Week => "WEEK",
+            PriceResolution.Month => "MONTH",
+            _ => throw new ArgumentOutOfRangeException(nameof(resolution), resolution, "Unsupported price resolution."),
+        };
+
+    public static PriceResolution? ParsePriceResolution(string? resolution)
+        => resolution?.ToUpperInvariant() switch
+        {
+            "SECOND" => PriceResolution.Second,
+            "MINUTE" => PriceResolution.Minute,
+            "MINUTE_2" => PriceResolution.TwoMinutes,
+            "MINUTE_3" => PriceResolution.ThreeMinutes,
+            "MINUTE_5" => PriceResolution.FiveMinutes,
+            "MINUTE_10" => PriceResolution.TenMinutes,
+            "MINUTE_15" => PriceResolution.FifteenMinutes,
+            "MINUTE_30" => PriceResolution.ThirtyMinutes,
+            "HOUR" => PriceResolution.Hour,
+            "HOUR_2" => PriceResolution.TwoHours,
+            "HOUR_3" => PriceResolution.ThreeHours,
+            "HOUR_4" => PriceResolution.FourHours,
+            "DAY" => PriceResolution.Day,
+            "WEEK" => PriceResolution.Week,
+            "MONTH" => PriceResolution.Month,
+            _ => null,
+        };
+
     public static DateTimeOffset ParseDate(string? value)
         => DateTimeOffset.TryParse(value, out var parsed) ? parsed : DateTimeOffset.UtcNow;
 
@@ -80,9 +122,18 @@ internal static class IgTradingConversions
 
     public static void EnsureMarketIsTradable(MarketDetailsResponse market)
     {
-        if (!string.Equals(market.Snapshot.MarketStatus, "TRADEABLE", StringComparison.OrdinalIgnoreCase))
+        if (ParseMarketStatus(market.Snapshot.MarketStatus) != MarketStatus.Tradeable)
         {
             throw new TradingGatewayException(TradingErrorCode.MarketClosed, $"Market is not tradeable. Status: {market.Snapshot.MarketStatus}.");
         }
     }
+
+    public static MarketStatus ParseMarketStatus(string? value)
+        => value?.ToUpperInvariant() switch
+        {
+            "TRADEABLE" => MarketStatus.Tradeable,
+            "CLOSED" => MarketStatus.Closed,
+            "SUSPENDED" => MarketStatus.Suspended,
+            _ => MarketStatus.Unknown,
+        };
 }

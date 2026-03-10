@@ -18,7 +18,8 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
         IIgTradingApi igTradingApi,
         string epic,
         decimal size,
-        decimal workingOrderLevel)
+        decimal workingOrderLevel,
+        string marketSearchTerm)
     {
         _provider = provider;
         Gateway = gateway;
@@ -26,6 +27,7 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
         Epic = epic;
         Size = size;
         WorkingOrderLevel = workingOrderLevel;
+        MarketSearchTerm = marketSearchTerm;
     }
 
     public ITradingGateway Gateway { get; }
@@ -38,15 +40,26 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
 
     public decimal WorkingOrderLevel { get; }
 
+    public string MarketSearchTerm { get; }
+
     public string? WorkingOrderDealId { get; set; }
 
     public string? PositionDealId { get; set; }
 
-    public static Task<IgDemoIntegrationContext> CreateAsync()
+    public static Task<IgDemoIntegrationContext> CreateAsync(bool? useEncryptedPasswordOverride = null)
     {
-        var configuration = new ConfigurationBuilder()
-            .AddEnvironmentVariables()
-            .Build();
+        var builder = new ConfigurationBuilder()
+            .AddEnvironmentVariables();
+
+        if (useEncryptedPasswordOverride is not null)
+        {
+            builder.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["IG:UseEncryptedPassword"] = useEncryptedPasswordOverride.Value.ToString().ToLowerInvariant(),
+            });
+        }
+
+        var configuration = builder.Build();
 
         var epic = configuration["IG__TestEpic"] ?? "CC.D.VIX.UMA.IP";
         var size = decimal.TryParse(configuration["IG__TestSize"], out var configuredSize)
@@ -55,6 +68,7 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
         var workingOrderLevel = decimal.TryParse(configuration["IG__WorkingOrderTestLevel"], out var configuredLevel)
             ? configuredLevel
             : 10m;
+        var marketSearchTerm = configuration["IG__MarketSearchTerm"] ?? "VIX";
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -64,7 +78,7 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
         var gateway = provider.GetRequiredService<ITradingGateway>();
         var igTradingApi = provider.GetRequiredService<IIgTradingApi>();
 
-        return Task.FromResult(new IgDemoIntegrationContext(provider, gateway, igTradingApi, epic, size, workingOrderLevel));
+        return Task.FromResult(new IgDemoIntegrationContext(provider, gateway, igTradingApi, epic, size, workingOrderLevel, marketSearchTerm));
     }
 
     public async Task<ITradingSession> AuthenticateAsync()
@@ -143,6 +157,52 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
         throw new TimeoutException($"Open positions did not grow beyond {initialCount} within {timeout}.");
     }
 
+    public async Task WaitForPositionProtectionAsync(
+        string dealId,
+        decimal expectedStopLevel,
+        decimal expectedLimitLevel,
+        TimeSpan timeout)
+    {
+        var startedAt = Stopwatch.StartNew();
+
+        while (startedAt.Elapsed < timeout)
+        {
+            var position = await Gateway.GetOpenPositionsAsync();
+            var match = position.FirstOrDefault(x => string.Equals(x.DealId, dealId, StringComparison.OrdinalIgnoreCase));
+            if (match is not null
+                && match.StopLevel == expectedStopLevel
+                && match.LimitLevel == expectedLimitLevel)
+            {
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+
+        throw new TimeoutException($"Position '{dealId}' did not reflect expected stop/limit levels within {timeout}.");
+    }
+
+    public async Task<(decimal StopLevel, decimal LimitLevel)> CreateValidProtectionLevelsAsync(string dealId)
+    {
+        var position = await IgTradingApi.GetPositionByDealIdAsync(dealId)
+            ?? throw new InvalidOperationException($"Position '{dealId}' was not found.");
+        var market = await IgTradingApi.GetMarketByEpicAsync(position.Market.Epic);
+
+        var basis = position.Position.Level
+            ?? market.Snapshot.Bid
+            ?? market.Snapshot.Offer
+            ?? 0m;
+        var snapshotBid = market.Snapshot.Bid ?? basis;
+        var snapshotOffer = market.Snapshot.Offer ?? basis;
+        var minDistance = ResolveDistance(market, snapshotBid, snapshotOffer);
+
+        var bufferedDistance = decimal.Round(Math.Max(minDistance * 3m, 1m), 2, MidpointRounding.AwayFromZero);
+
+        return string.Equals(position.Position.Direction, "BUY", StringComparison.OrdinalIgnoreCase)
+            ? (basis - bufferedDistance, basis + bufferedDistance)
+            : (basis + bufferedDistance, basis - bufferedDistance);
+    }
+
     public async ValueTask DisposeAsync()
     {
         await CleanupAsync();
@@ -180,4 +240,17 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
 
     private Task EnsureAuthenticatedAsync()
         => _session is null ? AuthenticateAsync() : Task.CompletedTask;
+
+    private static decimal ResolveDistance(Ig.Trading.Sdk.Models.MarketDetailsResponse market, decimal bid, decimal offer)
+    {
+        var value = market.DealingRules?.MinNormalStopOrLimitDistance?.Value ?? 1m;
+        var unit = market.DealingRules?.MinNormalStopOrLimitDistance?.Unit;
+        if (string.Equals(unit, "PERCENTAGE", StringComparison.OrdinalIgnoreCase))
+        {
+            var basis = Math.Max((bid + offer) / 2m, 1m);
+            return decimal.Round(basis * (value / 100m), 2, MidpointRounding.AwayFromZero);
+        }
+
+        return value;
+    }
 }

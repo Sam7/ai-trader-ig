@@ -4,6 +4,8 @@ using Ig.Trading.Sdk.Models;
 using Microsoft.Extensions.Logging;
 using Trading.Abstractions;
 using SdkClosePositionRequest = Ig.Trading.Sdk.Models.ClosePositionRequest;
+using SdkGetPricesRequest = Ig.Trading.Sdk.Models.GetPricesRequest;
+using SdkUpdatePositionRequest = Ig.Trading.Sdk.Models.UpdatePositionRequest;
 
 namespace Trading.IG;
 
@@ -201,6 +203,55 @@ public sealed class IgTradingGateway : ITradingGateway
         }
     }
 
+    public async Task<UpdatePositionResult> UpdatePositionAsync(
+        Trading.Abstractions.UpdatePositionRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        request.Validate();
+
+        try
+        {
+            var existing = await _igTradingApi.GetPositionByDealIdAsync(request.DealId, cancellationToken);
+            if (existing is null)
+            {
+                throw new TradingGatewayException(TradingErrorCode.InvalidRequest, $"No open position found for dealId '{request.DealId}'.");
+            }
+
+            var response = await _igTradingApi.UpdatePositionAsync(
+                request.DealId,
+                new SdkUpdatePositionRequest(
+                    request.LimitLevel ?? existing.Position.LimitLevel,
+                    request.StopLevel ?? existing.Position.StopLevel,
+                    request.TrailingStopDistance is not null || existing.Position.TrailingStopDistance is not null,
+                    request.TrailingStopDistance ?? existing.Position.TrailingStopDistance,
+                    request.TrailingStopIncrement ?? existing.Position.TrailingStopIncrement),
+                cancellationToken);
+
+            await _orderReferenceJournal.SaveAsync(
+                new OrderSubmissionRecord(
+                    response.DealReference,
+                    OrderSubmissionKind.PositionUpdate,
+                    DateTimeOffset.UtcNow,
+                    new InstrumentId(existing.Market.Epic),
+                    IgTradingConversions.ParseDirection(existing.Position.Direction),
+                    existing.Position.Size,
+                    request.DealId),
+                cancellationToken);
+
+            var status = await _orderStatusResolver.GetOrderStatusAsync(response.DealReference, cancellationToken);
+            return new UpdatePositionResult(
+                response.DealReference,
+                request.DealId,
+                status?.Status ?? OrderStatus.Pending,
+                status?.Message ?? "Position amendment submitted.",
+                status?.TimestampUtc ?? DateTimeOffset.UtcNow);
+        }
+        catch (IgApiException exception)
+        {
+            throw TranslateException(exception);
+        }
+    }
+
     public async Task<WorkingOrderResult> UpdateWorkingOrderAsync(
         Trading.Abstractions.UpdateWorkingOrderRequest request,
         CancellationToken cancellationToken = default)
@@ -304,6 +355,75 @@ public sealed class IgTradingGateway : ITradingGateway
             return (response.WorkingOrders ?? [])
                 .Select(IgTradingMapper.MapWorkingOrder)
                 .ToList();
+        }
+        catch (IgApiException exception)
+        {
+            throw TranslateException(exception);
+        }
+    }
+
+    public async Task<IReadOnlyList<MarketSearchResult>> SearchMarketsAsync(
+        string searchTerm,
+        int maxResults = 20,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(searchTerm))
+        {
+            throw new ArgumentException("Search term is required.", nameof(searchTerm));
+        }
+
+        if (maxResults <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maxResults), "MaxResults must be greater than zero.");
+        }
+
+        try
+        {
+            var response = await _igTradingApi.SearchMarketsAsync(searchTerm, cancellationToken);
+            return (response.Markets ?? [])
+                .Take(maxResults)
+                .Select(IgTradingMapper.MapMarketSearchResult)
+                .ToList();
+        }
+        catch (IgApiException exception)
+        {
+            throw TranslateException(exception);
+        }
+    }
+
+    public async Task<MarketNavigationPage> BrowseMarketsAsync(
+        string? nodeId = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _igTradingApi.GetMarketNavigationAsync(nodeId, cancellationToken);
+            return IgTradingMapper.MapMarketNavigation(nodeId, response);
+        }
+        catch (IgApiException exception)
+        {
+            throw TranslateException(exception);
+        }
+    }
+
+    public async Task<PriceSeries> GetPricesAsync(
+        Trading.Abstractions.GetPricesRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        request.Validate();
+
+        try
+        {
+            var response = await _igTradingApi.GetPricesAsync(
+                new SdkGetPricesRequest(
+                    request.Instrument.Value,
+                    request.Resolution is null ? null : IgTradingConversions.ToIgPriceResolution(request.Resolution.Value),
+                    request.MaxPoints,
+                    request.FromUtc,
+                    request.ToUtc),
+                cancellationToken);
+
+            return IgTradingMapper.MapPrices(request, response);
         }
         catch (IgApiException exception)
         {

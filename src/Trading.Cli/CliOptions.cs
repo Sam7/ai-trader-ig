@@ -74,6 +74,12 @@ public sealed class CliOptions
         return TryGet(key, out var raw) && int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out value);
     }
 
+    public bool TryGetDecimal(string key, out decimal value)
+    {
+        value = default;
+        return TryGet(key, out var raw) && decimal.TryParse(raw, NumberStyles.Number, CultureInfo.InvariantCulture, out value);
+    }
+
     public bool TryGetDateTimeOffset(string key, out DateTimeOffset value)
     {
         value = default;

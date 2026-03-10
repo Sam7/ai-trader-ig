@@ -22,4 +22,8 @@ public interface IIgPositionsApi
     [Get("/positions/{dealId}")]
     [Headers("Version: 2")]
     Task<PositionEnvelope> GetPositionByDealIdAsync(string dealId, CancellationToken cancellationToken = default);
+
+    [Put("/positions/otc/{dealId}")]
+    [Headers("Version: 2")]
+    Task<UpdatePositionResponse> UpdatePositionAsync(string dealId, [Body] UpdatePositionRequest request, CancellationToken cancellationToken = default);
 }

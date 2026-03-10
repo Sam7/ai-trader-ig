@@ -6,4 +6,8 @@ public sealed record PositionSummary(
     TradeDirection Direction,
     decimal Size,
     string Currency,
-    DateTimeOffset CreatedAtUtc);
+    DateTimeOffset CreatedAtUtc,
+    decimal? StopLevel,
+    decimal? LimitLevel,
+    decimal? TrailingStopDistance,
+    decimal? TrailingStopIncrement);
