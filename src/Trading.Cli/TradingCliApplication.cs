@@ -42,6 +42,11 @@ public sealed class TradingCliApplication
             _renderer.WriteCancellation();
             return 130;
         }
+        catch (CliUsageException exception)
+        {
+            _renderer.WriteUsageError(exception.Message);
+            return 1;
+        }
         catch (CommandParseException exception)
         {
             _renderer.WriteUsageError(exception.Message);
@@ -93,6 +98,7 @@ public sealed class TradingCliApplication
             markets.AddCommand<SearchMarketsCommand>("search");
             markets.AddCommand<BrowseMarketsCommand>("browse");
             markets.AddCommand<ShowPricesCommand>("prices");
+            markets.AddCommand<RenderMarketChartCommand>("chart");
         });
 
         configurator.AddBranch("orders", orders =>
@@ -106,6 +112,7 @@ public sealed class TradingCliApplication
         configurator.AddExample(["markets", "search", "--query", "VIX"]);
         configurator.AddExample(["markets", "browse"]);
         configurator.AddExample(["markets", "prices", "--instrument", "CC.D.VIX.UMA.IP", "--resolution", "hour", "--max", "10"]);
+        configurator.AddExample(["markets", "chart", "--instrument", "CC.D.VIX.UMA.IP", "--resolution", "hour", "--max", "50", "--output", "artifacts\\vix-chart.png", "--style", "candlestick", "--sma", "20,50", "--bollinger", "20"]);
         configurator.AddExample(["positions", "list"]);
         configurator.AddExample(["positions", "update", "--deal-id", "DIAAAAAAA", "--stop-level", "1", "--limit-level", "100"]);
         configurator.AddExample(["positions", "close", "--deal-id", "DIAAAAAAA"]);

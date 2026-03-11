@@ -147,7 +147,9 @@ internal static class IgTradingMapper
     {
         var bars = (source.Prices ?? [])
             .Select(price => new PriceBar(
-                IgTradingConversions.ParseDate(price.SnapshotTimeUtc),
+                price.TimestampUtc ?? throw new TradingGatewayException(
+                    TradingErrorCode.BrokerError,
+                    "IG returned a price bar without a normalized UTC timestamp."),
                 price.OpenPrice?.Bid ?? 0m,
                 price.HighPrice?.Bid ?? 0m,
                 price.LowPrice?.Bid ?? 0m,

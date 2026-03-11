@@ -4,4 +4,5 @@ public sealed record IgSessionContext(
     string? Cst,
     string? SecurityToken,
     string? CurrentAccountId,
-    DateTimeOffset? AuthenticatedAtUtc);
+    DateTimeOffset? AuthenticatedAtUtc,
+    int? TimezoneOffsetHours = null);

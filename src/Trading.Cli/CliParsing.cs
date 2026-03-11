@@ -2,6 +2,7 @@ using System.Globalization;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Trading.Abstractions;
+using Trading.Charting;
 
 internal static class CliParsing
 {
@@ -78,6 +79,73 @@ internal static class CliParsing
         {
             return false;
         }
+    }
+
+    public static PriceChartStyle ParsePriceChartStyle(string value)
+        => value.ToLowerInvariant() switch
+        {
+            "candlestick" => PriceChartStyle.Candlestick,
+            "ohlc" => PriceChartStyle.Ohlc,
+            _ => throw new ArgumentException($"Unsupported chart style '{value}'.", nameof(value)),
+        };
+
+    public static bool IsValidPriceChartStyle(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = ParsePriceChartStyle(value);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    public static PriceGapMode ParsePriceGapMode(string value)
+        => value.ToLowerInvariant() switch
+        {
+            "compress" => PriceGapMode.Compress,
+            "preserve" => PriceGapMode.Preserve,
+            _ => throw new ArgumentException($"Unsupported gap mode '{value}'.", nameof(value)),
+        };
+
+    public static bool IsValidPriceGapMode(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = ParsePriceGapMode(value);
+            return true;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
+    }
+
+    public static IReadOnlyList<int> ParseIntegerList(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return [];
+        }
+
+        var values = value
+            .Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(part => int.Parse(part, CultureInfo.InvariantCulture))
+            .ToArray();
+
+        return values;
     }
 
     public static string FormatDecimal(decimal? value)

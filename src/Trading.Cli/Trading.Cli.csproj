@@ -2,6 +2,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Trading.Abstractions\Trading.Abstractions.csproj" />
+    <ProjectReference Include="..\Trading.Charting\Trading.Charting.csproj" />
     <ProjectReference Include="..\Trading.IG\Trading.IG.csproj" />
   </ItemGroup>
 

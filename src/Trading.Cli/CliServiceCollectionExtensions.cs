@@ -19,6 +19,7 @@ public static class CliServiceCollectionExtensions
         services.AddTransient<SearchMarketsCommand>();
         services.AddTransient<BrowseMarketsCommand>();
         services.AddTransient<ShowPricesCommand>();
+        services.AddTransient<RenderMarketChartCommand>();
         services.AddTransient<ListOrdersCommand>();
         services.AddTransient<ShowOrderStatusCommand>();
 

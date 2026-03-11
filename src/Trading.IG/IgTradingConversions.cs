@@ -1,4 +1,5 @@
 using Ig.Trading.Sdk.Models;
+using System.Globalization;
 using Trading.Abstractions;
 
 namespace Trading.IG;
@@ -92,10 +93,29 @@ internal static class IgTradingConversions
         };
 
     public static DateTimeOffset ParseDate(string? value)
-        => DateTimeOffset.TryParse(value, out var parsed) ? parsed : DateTimeOffset.UtcNow;
+    {
+        if (DateTimeOffset.TryParse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AllowWhiteSpaces,
+            out var parsed))
+        {
+            return parsed;
+        }
+
+        throw new TradingGatewayException(
+            TradingErrorCode.BrokerError,
+            $"IG returned an invalid date value '{value ?? "<null>"}'.");
+    }
 
     public static DateTimeOffset? ParseNullableDate(string? value)
-        => DateTimeOffset.TryParse(value, out var parsed) ? parsed : null;
+        => DateTimeOffset.TryParse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AllowWhiteSpaces,
+            out var parsed)
+                ? parsed
+                : null;
 
     public static string CreateDealReference(string prefix)
     {

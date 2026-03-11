@@ -13,6 +13,10 @@ public interface IIgSessionApi
     [Headers("Version: 2")]
     Task<ApiResponse<SessionResponse>> CreateSessionAsync([Body] SessionRequest request, CancellationToken cancellationToken = default);
 
+    [Get("/session")]
+    [Headers("Version: 1")]
+    Task<ApiResponse<SessionResponse>> GetSessionAsync(CancellationToken cancellationToken = default);
+
     [Put("/session")]
     [Headers("Version: 1")]
     Task<ApiResponse<SessionResponse>> SwitchAccountAsync([Body] SwitchAccountRequest request, CancellationToken cancellationToken = default);

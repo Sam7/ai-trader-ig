@@ -171,6 +171,16 @@ public sealed class TradingCliRenderer
         _console.Write(table);
     }
 
+    public void WriteChartSaved(PriceSeries series, string outputPath)
+    {
+        WriteKeyValuePanel(
+            "Chart Saved",
+            ("Instrument", series.Instrument.Value),
+            ("Resolution", series.Resolution?.ToString() ?? "n/a"),
+            ("Bars", series.Bars.Count.ToString()),
+            ("Path", outputPath));
+    }
+
     public void WriteOrders(IReadOnlyList<OrderSummary> orders)
     {
         if (orders.Count == 0)

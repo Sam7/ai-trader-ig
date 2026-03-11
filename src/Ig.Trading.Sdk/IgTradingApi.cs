@@ -6,6 +6,7 @@ using Ig.Trading.Sdk.Models;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Refit;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Headers;
 
@@ -67,7 +68,12 @@ internal sealed class IgTradingApi : IIgTradingApi
             throw new IgApiException(null, response.StatusCode, "IG authentication succeeded but security tokens were missing.");
         }
 
-        var session = new IgSessionContext(cst, securityToken, currentAccountId, DateTimeOffset.UtcNow);
+        var session = new IgSessionContext(
+            cst,
+            securityToken,
+            currentAccountId,
+            DateTimeOffset.UtcNow,
+            response.Content?.TimezoneOffsetHours);
         _sessionStore.Set(session);
 
         if (!string.IsNullOrWhiteSpace(_options.AccountId))
@@ -76,7 +82,14 @@ internal sealed class IgTradingApi : IIgTradingApi
                 () => _sessionApi.SwitchAccountAsync(new SwitchAccountRequest(_options.AccountId!), cancellationToken));
             EnsureSuccess(switchResponse);
 
-            session = session with { CurrentAccountId = _options.AccountId };
+            var refreshedSession = await ExecuteAsync(() => _sessionApi.GetSessionAsync(cancellationToken));
+            EnsureSuccess(refreshedSession);
+
+            session = session with
+            {
+                CurrentAccountId = refreshedSession.Content?.CurrentAccountId ?? _options.AccountId,
+                TimezoneOffsetHours = refreshedSession.Content?.TimezoneOffsetHours,
+            };
             _sessionStore.Set(session);
         }
 
@@ -99,7 +112,7 @@ internal sealed class IgTradingApi : IIgTradingApi
     {
         if (request.FromUtc is not null && request.ToUtc is not null && request.Resolution is not null)
         {
-            return ExecuteAsync(() => _marketsApi.GetPricesByRangeAsync(
+            return ExecuteAndNormalizePricesAsync(() => _marketsApi.GetPricesByRangeAsync(
                 request.Epic,
                 request.Resolution,
                 request.FromUtc.Value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss"),
@@ -109,14 +122,14 @@ internal sealed class IgTradingApi : IIgTradingApi
 
         if (request.MaxPoints is not null && request.Resolution is not null)
         {
-            return ExecuteAsync(() => _marketsApi.GetPricesByPointsAsync(
+            return ExecuteAndNormalizePricesAsync(() => _marketsApi.GetPricesByPointsAsync(
                 request.Epic,
                 request.Resolution,
                 request.MaxPoints.Value,
                 cancellationToken));
         }
 
-        return ExecuteAsync(() => _marketsApi.GetRecentPricesAsync(request.Epic, cancellationToken));
+        return ExecuteAndNormalizePricesAsync(() => _marketsApi.GetRecentPricesAsync(request.Epic, cancellationToken));
     }
 
     public Task<CreatePositionResponse> CreatePositionAsync(CreatePositionRequest request, CancellationToken cancellationToken = default)
@@ -227,6 +240,12 @@ internal sealed class IgTradingApi : IIgTradingApi
         }
     }
 
+    private async Task<PricesResponse> ExecuteAndNormalizePricesAsync(Func<Task<PricesResponse>> action)
+    {
+        var response = await ExecuteAsync(action);
+        return NormalizePriceTimestamps(response);
+    }
+
     private static void EnsureSuccess<T>(ApiResponse<T> response)
     {
         if (response.IsSuccessStatusCode)
@@ -241,5 +260,80 @@ internal sealed class IgTradingApi : IIgTradingApi
 
         var content = response.Content?.ToString();
         throw IgErrorParser.Create(response.StatusCode, content);
+    }
+
+    private PricesResponse NormalizePriceTimestamps(PricesResponse response)
+    {
+        if (response.Prices is null || response.Prices.Count == 0)
+        {
+            return response;
+        }
+
+        var timezoneOffsetHours = _sessionStore.Current.TimezoneOffsetHours;
+        var normalizedPrices = response.Prices
+            .Select(price => price with
+            {
+                TimestampUtc = ResolvePriceTimestampUtc(price, timezoneOffsetHours),
+            })
+            .ToList();
+
+        return response with { Prices = normalizedPrices };
+    }
+
+    private static DateTimeOffset ResolvePriceTimestampUtc(PricePoint price, int? timezoneOffsetHours)
+    {
+        if (!string.IsNullOrWhiteSpace(price.SnapshotTimeUtc))
+        {
+            return ParseUtcTimestamp(price.SnapshotTimeUtc, "snapshotTimeUTC");
+        }
+
+        if (!string.IsNullOrWhiteSpace(price.SnapshotTime))
+        {
+            if (timezoneOffsetHours is null)
+            {
+                throw new IgApiException(
+                    null,
+                    HttpStatusCode.OK,
+                    "IG returned snapshotTime without a session timezone offset.");
+            }
+
+            if (!DateTime.TryParseExact(
+                price.SnapshotTime,
+                "yyyy/MM/dd HH:mm:ss",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out var parsedLocalTime))
+            {
+                throw new IgApiException(
+                    null,
+                    HttpStatusCode.OK,
+                    $"IG returned an invalid snapshotTime value '{price.SnapshotTime}'.");
+            }
+
+            var offset = TimeSpan.FromHours(timezoneOffsetHours.Value);
+            return new DateTimeOffset(DateTime.SpecifyKind(parsedLocalTime, DateTimeKind.Unspecified), offset).ToUniversalTime();
+        }
+
+        throw new IgApiException(
+            null,
+            HttpStatusCode.OK,
+            "IG returned a price point without snapshotTimeUTC or snapshotTime.");
+    }
+
+    private static DateTimeOffset ParseUtcTimestamp(string value, string fieldName)
+    {
+        if (DateTimeOffset.TryParse(
+            value,
+            CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
+            out var parsed))
+        {
+            return parsed.ToUniversalTime();
+        }
+
+        throw new IgApiException(
+            null,
+            HttpStatusCode.OK,
+            $"IG returned an invalid {fieldName} value '{value}'.");
     }
 }

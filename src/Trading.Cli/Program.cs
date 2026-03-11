@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Spectre.Console;
+using Trading.Charting.DependencyInjection;
 using Trading.IG;
 using Trading.IG.DependencyInjection;
 
@@ -10,6 +11,7 @@ builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, relo
 builder.Configuration.AddUserSecrets<Program>(optional: true);
 
 builder.Services.AddIgTradingGateway(builder.Configuration);
+builder.Services.AddTradingCharting();
 builder.Services.AddSingleton<IOrderReferenceJournal, FileOrderReferenceJournal>();
 builder.Services.AddSingleton<IAnsiConsole>(AnsiConsole.Console);
 builder.Services.AddTradingCli();

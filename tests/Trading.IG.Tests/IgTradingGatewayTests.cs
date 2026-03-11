@@ -345,6 +345,9 @@ public class IgTradingGatewayTests
                     new PriceLevel(9m, 10m),
                     new PriceLevel(11m, 12m),
                     42)
+                {
+                    TimestampUtc = DateTimeOffset.Parse("2026-03-11T00:00:00Z"),
+                }
             ],
             "INDICES",
             null)),
@@ -358,8 +361,44 @@ public class IgTradingGatewayTests
             1));
 
         series.Bars.Should().ContainSingle();
+        series.Bars[0].TimestampUtc.Should().Be(DateTimeOffset.Parse("2026-03-11T00:00:00Z"));
         series.Bars[0].BidOpen.Should().Be(10m);
         series.Bars[0].AskClose.Should().Be(12m);
+    }
+
+    [Fact]
+    public async Task GetWorkingOrdersAsync_WithInvalidBrokerDate_ShouldThrowBrokerError()
+    {
+        var api = new FakeIgTradingApi
+        {
+            WorkingOrders = _ => Task.FromResult(new WorkingOrdersResponse(
+            [
+                new WorkingOrderEnvelope(
+                    new WorkingOrderData(
+                        "WO1",
+                        "BUY",
+                        "CC.D.VIX.UMA.IP",
+                        1m,
+                        10m,
+                        "GOOD_TILL_CANCELLED",
+                        null,
+                        null,
+                        "not-a-date",
+                        false,
+                        "LIMIT",
+                        null,
+                        null,
+                        "AUD"),
+                    new WorkingOrderMarketData("Volatility Index", "CC.D.VIX.UMA.IP", "-", "TRADEABLE"))
+            ])),
+        };
+
+        var gateway = CreateGateway(api);
+
+        var action = () => gateway.GetWorkingOrdersAsync();
+
+        var exception = await action.Should().ThrowAsync<TradingGatewayException>();
+        exception.Which.ErrorCode.Should().Be(TradingErrorCode.BrokerError);
     }
 
     [Fact]

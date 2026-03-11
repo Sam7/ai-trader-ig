@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Spectre.Console.Testing;
 using Trading.Abstractions;
+using Trading.Charting;
 
 public sealed class TradingCliApplicationTests
 {
@@ -59,6 +60,107 @@ public sealed class TradingCliApplicationTests
 
         exitCode.Should().Be(1);
         console.Output.Should().Contain("Option --resolution is required");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketChartCommand_ShouldFetchRenderAndSaveChart()
+    {
+        var console = CreateConsole();
+        var gateway = new FakeTradingGateway
+        {
+            PricesResult = new PriceSeries(
+                new InstrumentId("CC.D.VIX.UMA.IP"),
+                PriceResolution.Hour,
+                [
+                    new PriceBar(
+                        DateTimeOffset.Parse("2026-03-10T00:00:00Z"),
+                        10m,
+                        12m,
+                        9m,
+                        11m,
+                        10.5m,
+                        12.5m,
+                        9.5m,
+                        11.5m,
+                        100),
+                    new PriceBar(
+                        DateTimeOffset.Parse("2026-03-10T01:00:00Z"),
+                        11m,
+                        13m,
+                        10m,
+                        12m,
+                        11.5m,
+                        13.5m,
+                        10.5m,
+                        12.5m,
+                        120),
+                ])
+        };
+        var chartRenderer = new FakePriceChartRenderer
+        {
+            RenderedBytes = [1, 2, 3, 4],
+        };
+
+        var tempDirectory = Directory.CreateTempSubdirectory();
+        var outputPath = Path.Combine(tempDirectory.FullName, "chart.png");
+
+        try
+        {
+            var application = CreateApplication(gateway, chartRenderer, console);
+
+            var exitCode = await application.RunAsync(
+                ["markets", "chart", "--instrument", "CC.D.VIX.UMA.IP", "--resolution", "hour", "--max", "2", "--output", outputPath, "--style", "ohlc", "--gaps", "preserve", "--sma", "3,5", "--bollinger", "4"]);
+
+            exitCode.Should().Be(0);
+            gateway.AuthenticateCalls.Should().Be(1);
+            gateway.GetPricesRequests.Should().ContainSingle();
+            gateway.GetPricesRequests[0].Instrument.Value.Should().Be("CC.D.VIX.UMA.IP");
+            gateway.GetPricesRequests[0].Resolution.Should().Be(PriceResolution.Hour);
+            gateway.GetPricesRequests[0].MaxPoints.Should().Be(2);
+            chartRenderer.Calls.Should().ContainSingle();
+            chartRenderer.Calls[0].Style.Should().Be(PriceChartStyle.Ohlc);
+            chartRenderer.Calls[0].GapMode.Should().Be(PriceGapMode.Preserve);
+            chartRenderer.Calls[0].SimpleMovingAverageWindows.Should().Equal(3, 5);
+            chartRenderer.Calls[0].BollingerPeriod.Should().Be(4);
+            File.ReadAllBytes(outputPath).Should().Equal(chartRenderer.RenderedBytes);
+            console.Output.Should().Contain("Chart Saved");
+            console.Output.Should().Contain("CC.D.VIX.UMA.IP");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketChartCommandAndNoPrices_ShouldReturnUsageExitCodeWithoutSavingFile()
+    {
+        var console = CreateConsole();
+        var gateway = new FakeTradingGateway
+        {
+            PricesResult = new PriceSeries(
+                new InstrumentId("CC.D.VIX.UMA.IP"),
+                PriceResolution.Hour,
+                []),
+        };
+        var tempDirectory = Directory.CreateTempSubdirectory();
+        var outputPath = Path.Combine(tempDirectory.FullName, "chart.png");
+
+        try
+        {
+            var application = CreateApplication(gateway, new FakePriceChartRenderer(), console);
+
+            var exitCode = await application.RunAsync(
+                ["markets", "chart", "--instrument", "CC.D.VIX.UMA.IP", "--resolution", "hour", "--max", "2", "--output", outputPath]);
+
+            exitCode.Should().Be(1);
+            File.Exists(outputPath).Should().BeFalse();
+            console.Output.Should().Contain("No prices returned for the requested range.");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
     }
 
     [Fact]
@@ -141,9 +243,13 @@ public sealed class TradingCliApplicationTests
     }
 
     private static TradingCliApplication CreateApplication(FakeTradingGateway gateway, TestConsole console)
+        => CreateApplication(gateway, new FakePriceChartRenderer(), console);
+
+    private static TradingCliApplication CreateApplication(FakeTradingGateway gateway, FakePriceChartRenderer chartRenderer, TestConsole console)
     {
         var services = new ServiceCollection();
         services.AddSingleton<ITradingGateway>(gateway);
+        services.AddSingleton<IPriceChartRenderer>(chartRenderer);
         services.AddSingleton<IAnsiConsole>(console);
         services.AddTradingCli();
 
@@ -168,6 +274,8 @@ public sealed class TradingCliApplicationTests
 
         public List<OrderQuery> OrderQueries { get; } = [];
 
+        public List<GetPricesRequest> GetPricesRequests { get; } = [];
+
         public PlaceOrderResult PlaceMarketOrderResult { get; init; } = new(
             "ref-default",
             "deal-default",
@@ -176,6 +284,11 @@ public sealed class TradingCliApplicationTests
             DateTimeOffset.Parse("2026-03-10T00:00:00Z"));
 
         public IReadOnlyList<OrderSummary> OrdersResult { get; init; } = [];
+
+        public PriceSeries PricesResult { get; init; } = new(
+            new InstrumentId("CC.D.VIX.UMA.IP"),
+            PriceResolution.Hour,
+            []);
 
         public Task<ITradingSession> AuthenticateAsync(CancellationToken cancellationToken = default)
         {
@@ -222,7 +335,10 @@ public sealed class TradingCliApplicationTests
             => Task.FromResult(new MarketNavigationPage(nodeId, "Root", [], []));
 
         public Task<PriceSeries> GetPricesAsync(GetPricesRequest request, CancellationToken cancellationToken = default)
-            => Task.FromResult(new PriceSeries(request.Instrument, request.Resolution, []));
+        {
+            GetPricesRequests.Add(request);
+            return Task.FromResult(PricesResult);
+        }
 
         public Task<IReadOnlyList<OrderSummary>> GetOrdersAsync(OrderQuery query, CancellationToken cancellationToken = default)
         {
@@ -249,4 +365,41 @@ public sealed class TradingCliApplicationTests
 
         public DateTimeOffset AuthenticatedAtUtc { get; }
     }
+
+    private sealed class FakePriceChartRenderer : IPriceChartRenderer
+    {
+        public List<RenderCall> Calls { get; } = [];
+
+        public byte[] RenderedBytes { get; init; } = [137, 80, 78, 71];
+
+        public byte[] RenderPng(
+            PriceSeries series,
+            PriceChartStyle style = PriceChartStyle.Candlestick,
+            PriceGapMode gapMode = PriceGapMode.Compress,
+            IReadOnlyList<int>? simpleMovingAverageWindows = null,
+            int? bollingerPeriod = null,
+            int width = 1200,
+            int height = 800)
+        {
+            Calls.Add(new RenderCall(
+                series,
+                style,
+                gapMode,
+                simpleMovingAverageWindows ?? [],
+                bollingerPeriod,
+                width,
+                height));
+
+            return RenderedBytes;
+        }
+    }
+
+    private sealed record RenderCall(
+        PriceSeries Series,
+        PriceChartStyle Style,
+        PriceGapMode GapMode,
+        IReadOnlyList<int> SimpleMovingAverageWindows,
+        int? BollingerPeriod,
+        int Width,
+        int Height);
 }

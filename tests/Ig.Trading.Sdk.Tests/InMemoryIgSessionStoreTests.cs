@@ -27,5 +27,6 @@ public class InMemoryIgSessionStoreTests
         store.Current.Cst.Should().BeNull();
         store.Current.SecurityToken.Should().BeNull();
         store.Current.CurrentAccountId.Should().BeNull();
+        store.Current.TimezoneOffsetHours.Should().BeNull();
     }
 }

@@ -5,13 +5,17 @@
   <Folder Name="/src/">
     <Project Path="src/Ig.Trading.Sdk/Ig.Trading.Sdk.csproj" />
     <Project Path="src/Trading.Abstractions/Trading.Abstractions.csproj" />
+    <Project Path="src/Trading.Charting/Trading.Charting.csproj" />
     <Project Path="src/Trading.Cli/Trading.Cli.csproj" />
     <Project Path="src/Trading.IG/Trading.IG.csproj" />
+    <Project Path="src/Trading.Strategy/Trading.Strategy.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Trading.Cli.Tests/Trading.Cli.Tests.csproj" />
     <Project Path="tests/Ig.Trading.Sdk.Tests/Ig.Trading.Sdk.Tests.csproj" />
     <Project Path="tests/Trading.Abstractions.Tests/Trading.Abstractions.Tests.csproj" />
+    <Project Path="tests/Trading.Charting.Tests/Trading.Charting.Tests.csproj" />
     <Project Path="tests/Trading.IG.Tests/Trading.IG.Tests.csproj" />
+    <Project Path="tests/Trading.Strategy.Tests/Trading.Strategy.Tests.csproj" />
   </Folder>
 </Solution>

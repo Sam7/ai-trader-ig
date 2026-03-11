@@ -18,7 +18,8 @@ public sealed record SwitchAccountRequest(
 public sealed record SessionResponse(
     [property: JsonPropertyName("currentAccountId")] string? CurrentAccountId,
     [property: JsonPropertyName("lightstreamerEndpoint")] string? LightstreamerEndpoint,
-    [property: JsonPropertyName("accounts")] IReadOnlyList<SessionAccount>? Accounts);
+    [property: JsonPropertyName("accounts")] IReadOnlyList<SessionAccount>? Accounts,
+    [property: JsonPropertyName("timezoneOffset")] int? TimezoneOffsetHours = null);
 
 public sealed record SessionAccount(
     [property: JsonPropertyName("accountId")] string AccountId,

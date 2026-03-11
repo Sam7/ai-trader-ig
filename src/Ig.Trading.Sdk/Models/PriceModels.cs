@@ -28,7 +28,11 @@ public sealed record PricePoint(
     [property: JsonPropertyName("highPrice")] PriceLevel? HighPrice,
     [property: JsonPropertyName("lowPrice")] PriceLevel? LowPrice,
     [property: JsonPropertyName("closePrice")] PriceLevel? ClosePrice,
-    [property: JsonPropertyName("lastTradedVolume")] long? LastTradedVolume);
+    [property: JsonPropertyName("lastTradedVolume")] long? LastTradedVolume,
+    [property: JsonPropertyName("snapshotTime")] string? SnapshotTime = null)
+{
+    public DateTimeOffset? TimestampUtc { get; init; }
+}
 
 public sealed record PriceLevel(
     [property: JsonPropertyName("bid")] decimal? Bid,

@@ -5,6 +5,8 @@ Small .NET 10 solution proving IG dealing behind a broker-neutral abstraction.
 ## Projects
 
 - `src/Trading.Abstractions` broker-neutral contracts and domain models.
+- `src/Trading.Charting` broker-neutral ScottPlot-based price chart renderer that turns `PriceSeries` into PNG bytes.
+- `src/Trading.Strategy` broker-neutral strategy and trade-decision workflow library. It models the daily briefing, shortlist, trigger handling, risk gating, and execution intent generation without tying itself to an LLM or broker adapter.
 - `src/Ig.Trading.Sdk` isolated IG SDK (Refit-based) intended to be extractable to its own OSS repo.
 - `src/Trading.IG` adapter implementing `ITradingGateway` using the SDK.
 - `src/Trading.Cli` small Spectre.Console CLI for manual flows and local verification.
@@ -12,10 +14,12 @@ Small .NET 10 solution proving IG dealing behind a broker-neutral abstraction.
 
 ## Architecture
 
-The solution is intentionally split into four layers so the broker-neutral model stays readable and stable:
+The solution is intentionally split into six layers so the broker-neutral model stays readable and stable:
 
 - `Trading.Cli` is the outermost shell. It loads configuration, wires DI, and exposes manual commands. It should stay thin and avoid business logic.
 - `Trading.Abstractions` defines the domain language the rest of the solution talks in: `ITradingGateway`, requests, results, and enums.
+- `Trading.Charting` renders broker-neutral price data into chart images and keeps ScottPlot concerns out of the CLI and broker adapter.
+- `Trading.Strategy` defines the business workflow around preparing the day, reacting to meaningful market events, gating risk, and producing mechanical execution intent. It stays broker-neutral and pushes data acquisition plus agent implementations behind small interfaces.
 - `Trading.IG` is the broker adapter. It maps abstraction requests into IG calls, translates IG failures into `TradingGatewayException`, and keeps order-status orchestration in one place.
 - `Ig.Trading.Sdk` owns IG-specific concerns: auth, session handling, request/response DTOs, Refit contracts, headers, and endpoint quirks.
 
@@ -31,6 +35,7 @@ This keeps the CLI and abstractions free from IG transport details, while keepin
 ## Testing approach
 
 - `tests/Trading.Abstractions.Tests` covers request and model behavior.
+- `tests/Trading.Charting.Tests` covers chart rendering behavior and option validation.
 - `tests/Ig.Trading.Sdk.Tests` covers IG SDK concerns in isolation.
 - `tests/Trading.IG.Tests` covers adapter behavior plus opt-in live integration tests.
 - `tests/Trading.Cli.Tests` covers command routing, exit codes, and rendered output without calling the live broker.
@@ -67,6 +72,7 @@ dotnet run --project src/Trading.Cli -- trades buy --instrument IX.D.SPTRD.DAILY
 dotnet run --project src/Trading.Cli -- markets search --query VIX
 dotnet run --project src/Trading.Cli -- markets browse
 dotnet run --project src/Trading.Cli -- markets prices --instrument CC.D.VIX.UMA.IP --resolution hour --max 10
+dotnet run --project src/Trading.Cli -- markets chart --instrument CC.D.VIX.UMA.IP --resolution hour --max 50 --output artifacts\vix-chart.png --style candlestick --sma 20,50 --bollinger 20
 dotnet run --project src/Trading.Cli -- positions list
 dotnet run --project src/Trading.Cli -- positions update --deal-id DIAAAAAAA --stop-level 1 --limit-level 100
 dotnet run --project src/Trading.Cli -- positions close --deal-id DIAAAAAAA
@@ -76,7 +82,7 @@ dotnet run --project src/Trading.Cli -- orders status --deal-reference spike-...
 ## Tests
 
 ```powershell
-dotnet test
+dotnet test Trading.slnx
 $env:RUN_IG_INTEGRATION='true'; dotnet test --filter Category=Integration
 ```
 
