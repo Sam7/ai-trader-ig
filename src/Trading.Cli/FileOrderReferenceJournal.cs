@@ -66,6 +66,7 @@ public sealed class FileOrderReferenceJournal : IOrderReferenceJournal
         }
         catch (JsonException)
         {
+            QuarantineCorruptJournal();
             return [];
         }
     }
@@ -97,5 +98,16 @@ public sealed class FileOrderReferenceJournal : IOrderReferenceJournal
             .OrderByDescending(pair => pair.Value.SubmittedAtUtc)
             .Take(MaxEntries)
             .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private void QuarantineCorruptJournal()
+    {
+        if (!File.Exists(_filePath))
+        {
+            return;
+        }
+
+        var corruptPath = $"{_filePath}.corrupt-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}";
+        File.Move(_filePath, corruptPath, overwrite: false);
     }
 }

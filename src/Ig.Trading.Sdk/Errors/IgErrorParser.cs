@@ -38,9 +38,9 @@ internal static class IgErrorParser
         }
         catch (JsonException)
         {
-            return content;
+            return null;
         }
 
-        return content;
+        return null;
     }
 }

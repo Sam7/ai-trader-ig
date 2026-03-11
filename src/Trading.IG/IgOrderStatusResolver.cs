@@ -28,7 +28,8 @@ internal sealed class IgOrderStatusResolver
             throw new ArgumentException("Deal reference is required.", nameof(dealReference));
         }
 
-        try
+        return await ExecuteTranslatedAsync(
+            async () =>
         {
             var confirmation = await _igTradingApi.GetDealConfirmationAsync(dealReference, cancellationToken);
             if (confirmation is not null)
@@ -67,6 +68,14 @@ internal sealed class IgOrderStatusResolver
 
             _logger.LogInformation("No confirm/activity found for deal reference {DealReference}; returning pending.", dealReference);
             return new OrderSummary(dealReference, null, null, null, null, OrderStatus.Pending, "Awaiting broker confirmation.", DateTimeOffset.UtcNow);
+        });
+    }
+
+    private static async Task<T> ExecuteTranslatedAsync<T>(Func<Task<T>> action)
+    {
+        try
+        {
+            return await action();
         }
         catch (IgApiException exception)
         {

@@ -7,9 +7,12 @@ using Trading.Charting;
 internal static class CliParsing
 {
     public static TradeDirection ParseDirection(string value)
-        => value.Equals("sell", StringComparison.OrdinalIgnoreCase)
-            ? TradeDirection.Sell
-            : TradeDirection.Buy;
+        => value.ToLowerInvariant() switch
+        {
+            "buy" => TradeDirection.Buy,
+            "sell" => TradeDirection.Sell,
+            _ => throw new ArgumentException($"Unsupported direction '{value}'.", nameof(value)),
+        };
 
     public static bool IsValidDirection(string? value)
         => value is not null
@@ -17,9 +20,12 @@ internal static class CliParsing
                || value.Equals("sell", StringComparison.OrdinalIgnoreCase));
 
     public static WorkingOrderType ParseWorkingOrderType(string value)
-        => value.Equals("stop", StringComparison.OrdinalIgnoreCase)
-            ? WorkingOrderType.Stop
-            : WorkingOrderType.Limit;
+        => value.ToLowerInvariant() switch
+        {
+            "limit" => WorkingOrderType.Limit,
+            "stop" => WorkingOrderType.Stop,
+            _ => throw new ArgumentException($"Unsupported working order type '{value}'.", nameof(value)),
+        };
 
     public static bool IsValidWorkingOrderType(string? value)
         => value is not null
@@ -27,11 +33,12 @@ internal static class CliParsing
                || value.Equals("stop", StringComparison.OrdinalIgnoreCase));
 
     public static WorkingOrderTimeInForce ParseTimeInForce(string value)
-        => value.Equals("gtd", StringComparison.OrdinalIgnoreCase)
-           || value.Equals("good_till_date", StringComparison.OrdinalIgnoreCase)
-           || value.Equals("good-till-date", StringComparison.OrdinalIgnoreCase)
-            ? WorkingOrderTimeInForce.GoodTillDate
-            : WorkingOrderTimeInForce.GoodTillCancelled;
+        => value.ToLowerInvariant() switch
+        {
+            "gtc" or "goodtillcancelled" or "good-till-cancelled" => WorkingOrderTimeInForce.GoodTillCancelled,
+            "gtd" or "good_till_date" or "good-till-date" => WorkingOrderTimeInForce.GoodTillDate,
+            _ => throw new ArgumentException($"Unsupported time in force '{value}'.", nameof(value)),
+        };
 
     public static bool IsValidTimeInForce(string? value)
         => value is not null
@@ -64,22 +71,31 @@ internal static class CliParsing
         };
 
     public static bool IsValidPriceResolution(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        try
-        {
-            _ = ParsePriceResolution(value);
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
+        => value?.ToLowerInvariant() is
+            "second"
+            or "minute"
+            or "2minute"
+            or "minute_2"
+            or "3minute"
+            or "minute_3"
+            or "5minute"
+            or "minute_5"
+            or "10minute"
+            or "minute_10"
+            or "15minute"
+            or "minute_15"
+            or "30minute"
+            or "minute_30"
+            or "hour"
+            or "2hour"
+            or "hour_2"
+            or "3hour"
+            or "hour_3"
+            or "4hour"
+            or "hour_4"
+            or "day"
+            or "week"
+            or "month";
 
     public static PriceChartStyle ParsePriceChartStyle(string value)
         => value.ToLowerInvariant() switch
@@ -90,22 +106,7 @@ internal static class CliParsing
         };
 
     public static bool IsValidPriceChartStyle(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        try
-        {
-            _ = ParsePriceChartStyle(value);
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
+        => value?.ToLowerInvariant() is "candlestick" or "ohlc";
 
     public static PriceGapMode ParsePriceGapMode(string value)
         => value.ToLowerInvariant() switch
@@ -116,22 +117,7 @@ internal static class CliParsing
         };
 
     public static bool IsValidPriceGapMode(string? value)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            return false;
-        }
-
-        try
-        {
-            _ = ParsePriceGapMode(value);
-            return true;
-        }
-        catch (ArgumentException)
-        {
-            return false;
-        }
-    }
+        => value?.ToLowerInvariant() is "compress" or "preserve";
 
     public static IReadOnlyList<int> ParseIntegerList(string? value)
     {

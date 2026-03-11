@@ -402,6 +402,95 @@ public class IgTradingGatewayTests
     }
 
     [Fact]
+    public async Task GetWorkingOrdersAsync_WithUnsupportedBrokerValues_ShouldThrowBrokerError()
+    {
+        var api = new FakeIgTradingApi
+        {
+            WorkingOrders = _ => Task.FromResult(new WorkingOrdersResponse(
+            [
+                new WorkingOrderEnvelope(
+                    new WorkingOrderData(
+                        "WO1",
+                        "HOLD",
+                        "CC.D.VIX.UMA.IP",
+                        1m,
+                        10m,
+                        "UNTIL_CANCELLED",
+                        null,
+                        null,
+                        DateTimeOffset.UtcNow.ToString("O"),
+                        false,
+                        "STOP_LIMIT",
+                        null,
+                        null,
+                        "AUD"),
+                    new WorkingOrderMarketData("Volatility Index", "CC.D.VIX.UMA.IP", "-", "TRADEABLE"))
+            ])),
+        };
+
+        var gateway = CreateGateway(api);
+
+        var action = () => gateway.GetWorkingOrdersAsync();
+
+        var exception = await action.Should().ThrowAsync<TradingGatewayException>();
+        exception.Which.ErrorCode.Should().Be(TradingErrorCode.BrokerError);
+    }
+
+    [Fact]
+    public async Task ClosePositionAsync_WithUnsupportedBrokerDirection_ShouldThrowBrokerError()
+    {
+        var api = new FakeIgTradingApi
+        {
+            OpenPositions = _ => Task.FromResult(new PositionsResponse(
+            [
+                new PositionEnvelope(
+                    new PositionData("P1", "FLAT", 1m, "USD", 12m, DateTimeOffset.UtcNow.ToString("O"), 15m, 10m, null, null),
+                    new PositionMarketData("IX.D.SPTRD.DAILY.IP", "DFB"))
+            ])),
+        };
+
+        var gateway = CreateGateway(api);
+
+        var action = () => gateway.ClosePositionAsync(new Trading.Abstractions.ClosePositionRequest("P1"));
+
+        var exception = await action.Should().ThrowAsync<TradingGatewayException>();
+        exception.Which.ErrorCode.Should().Be(TradingErrorCode.BrokerError);
+    }
+
+    [Fact]
+    public async Task GetOrderStatusAsync_WithInvalidTransactionSize_ShouldThrowBrokerError()
+    {
+        var api = new FakeIgTradingApi
+        {
+            Transactions = _ => Task.FromResult(new TransactionHistoryResponse(
+            [
+                new TransactionItem(
+                    "2026-03-10",
+                    DateTimeOffset.UtcNow.ToString("O"),
+                    null,
+                    "Volatility Index",
+                    "-",
+                    "A$54.00",
+                    "DEAL",
+                    "TY7AF8AV",
+                    null,
+                    null,
+                    "ten",
+                    "A$",
+                    false)
+            ],
+            new TransactionMetadata(1, new TransactionPageData(20, 1, 1)))),
+        };
+
+        var gateway = CreateGateway(api);
+
+        var action = () => gateway.GetOrderStatusAsync("DIAAAAWTY7AF8AV");
+
+        var exception = await action.Should().ThrowAsync<TradingGatewayException>();
+        exception.Which.ErrorCode.Should().Be(TradingErrorCode.BrokerError);
+    }
+
+    [Fact]
     public async Task PlaceWorkingOrderAsync_ShouldSubmitExpectedPayload()
     {
         Ig.Trading.Sdk.Models.CreateWorkingOrderRequest? capturedRequest = null;

@@ -235,7 +235,7 @@ public sealed class TradingCliRenderer
 
     public void WriteUnexpectedError(Exception exception)
     {
-        _console.MarkupLine($"[red]Unexpected error: {Markup.Escape(exception.Message)}[/]");
+        _console.MarkupLine($"[red]Unexpected error ({Markup.Escape(exception.GetType().Name)}): {Markup.Escape(exception.Message)}[/]");
     }
 
     public void WriteCancellation()

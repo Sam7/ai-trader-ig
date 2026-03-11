@@ -107,22 +107,14 @@ public sealed class RenderMarketChartCommand : AsyncCommand<RenderMarketChartSet
             throw new CliUsageException("No prices returned for the requested range.");
         }
 
-        byte[] imageBytes;
-        try
-        {
-            imageBytes = _chartRenderer.RenderPng(
-                series,
-                CliParsing.ParsePriceChartStyle(settings.Style),
-                CliParsing.ParsePriceGapMode(settings.Gaps),
-                CliParsing.ParseIntegerList(settings.SimpleMovingAverageWindows),
-                settings.BollingerPeriod,
-                settings.Width,
-                settings.Height);
-        }
-        catch (ArgumentException exception)
-        {
-            throw new CliUsageException(exception.Message);
-        }
+        var imageBytes = _chartRenderer.RenderPng(
+            series,
+            CliParsing.ParsePriceChartStyle(settings.Style),
+            CliParsing.ParsePriceGapMode(settings.Gaps),
+            CliParsing.ParseIntegerList(settings.SimpleMovingAverageWindows),
+            settings.BollingerPeriod,
+            settings.Width,
+            settings.Height);
 
         var outputPath = Path.GetFullPath(settings.Output);
         var outputDirectory = Path.GetDirectoryName(outputPath);

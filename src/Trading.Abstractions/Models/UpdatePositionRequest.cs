@@ -19,7 +19,7 @@ public sealed record UpdatePositionRequest(
             && TrailingStopDistance is null
             && TrailingStopIncrement is null)
         {
-            throw new ArgumentException("At least one amendment must be provided.", nameof(StopLevel));
+            throw new ArgumentException("At least one amendment must be provided.");
         }
 
         if (TrailingStopIncrement is not null && TrailingStopDistance is null)

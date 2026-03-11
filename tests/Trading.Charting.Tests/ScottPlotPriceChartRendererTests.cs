@@ -54,8 +54,11 @@ public sealed class ScottPlotPriceChartRendererTests
 
         var action = () => _renderer.RenderPng(series, simpleMovingAverageWindows: [5]);
 
-        action.Should().Throw<ArgumentOutOfRangeException>()
-            .WithMessage("*cannot exceed the number of bars*");
+        var exception = action.Should().Throw<ArgumentOutOfRangeException>()
+            .WithMessage("*cannot exceed the number of bars*")
+            .Which;
+
+        exception.ParamName.Should().Be("windows");
     }
 
     [Fact]

@@ -52,10 +52,15 @@ public sealed class TradingCliApplication
             _renderer.WriteUsageError(exception.Message);
             return 1;
         }
-        catch (CommandRuntimeException exception)
+        catch (CommandRuntimeException exception) when (exception.InnerException is null)
         {
             _renderer.WriteUsageError(exception.Message);
             return 1;
+        }
+        catch (CommandRuntimeException exception)
+        {
+            _renderer.WriteUnexpectedError(exception.InnerException ?? exception);
+            return 99;
         }
         catch (Exception exception)
         {

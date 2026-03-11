@@ -26,17 +26,12 @@ public sealed class IgTradingGateway : ITradingGateway
     }
 
     public async Task<ITradingSession> AuthenticateAsync(CancellationToken cancellationToken = default)
-    {
-        try
+        => await ExecuteTranslatedAsync(
+            async () =>
         {
             var session = await _igTradingApi.AuthenticateAsync(cancellationToken);
             return new IgTradingSession(session.CurrentAccountId ?? string.Empty, session.AuthenticatedAtUtc ?? DateTimeOffset.UtcNow);
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
-    }
+        });
 
     public async Task<PlaceOrderResult> PlaceMarketOrderAsync(
         PlaceOrderRequest request,
@@ -47,7 +42,8 @@ public sealed class IgTradingGateway : ITradingGateway
             throw new ArgumentOutOfRangeException(nameof(request.Size), "Order size must be greater than zero.");
         }
 
-        try
+        return await ExecuteTranslatedAsync(
+            async () =>
         {
             var market = await _igTradingApi.GetMarketByEpicAsync(request.Instrument.Value, cancellationToken);
             IgTradingConversions.EnsureMarketIsTradable(market);
@@ -87,11 +83,7 @@ public sealed class IgTradingGateway : ITradingGateway
                 summary?.Status ?? OrderStatus.Pending,
                 summary?.Message,
                 summary?.TimestampUtc ?? DateTimeOffset.UtcNow);
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
+        });
     }
 
     public async Task<WorkingOrderResult> PlaceWorkingOrderAsync(
@@ -103,7 +95,8 @@ public sealed class IgTradingGateway : ITradingGateway
             throw new ArgumentOutOfRangeException(nameof(request.Size), "Working order size must be greater than zero.");
         }
 
-        try
+        return await ExecuteTranslatedAsync(
+            async () =>
         {
             var market = await _igTradingApi.GetMarketByEpicAsync(request.Instrument.Value, cancellationToken);
             IgTradingConversions.EnsureMarketIsTradable(market);
@@ -134,11 +127,7 @@ public sealed class IgTradingGateway : ITradingGateway
                 cancellationToken);
 
             return new WorkingOrderResult(response.DealReference, null, OrderStatus.Accepted, "Working order submitted.", DateTimeOffset.UtcNow);
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
+        });
     }
 
     public async Task<ClosePositionResult> ClosePositionAsync(
@@ -147,10 +136,11 @@ public sealed class IgTradingGateway : ITradingGateway
     {
         if (string.IsNullOrWhiteSpace(request.DealId))
         {
-            throw new ArgumentException("DealId is required.", nameof(request));
+            throw new ArgumentException("DealId is required.", nameof(request.DealId));
         }
 
-        try
+        return await ExecuteTranslatedAsync(
+            async () =>
         {
             var openPositions = await _igTradingApi.GetOpenPositionsAsync(cancellationToken);
             var position = openPositions.Positions?.FirstOrDefault(x =>
@@ -196,11 +186,7 @@ public sealed class IgTradingGateway : ITradingGateway
                 status?.Status ?? OrderStatus.Pending,
                 status?.Message,
                 status?.TimestampUtc ?? DateTimeOffset.UtcNow);
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
+        });
     }
 
     public async Task<UpdatePositionResult> UpdatePositionAsync(
@@ -209,7 +195,8 @@ public sealed class IgTradingGateway : ITradingGateway
     {
         request.Validate();
 
-        try
+        return await ExecuteTranslatedAsync(
+            async () =>
         {
             var existing = await _igTradingApi.GetPositionByDealIdAsync(request.DealId, cancellationToken);
             if (existing is null)
@@ -245,11 +232,7 @@ public sealed class IgTradingGateway : ITradingGateway
                 status?.Status ?? OrderStatus.Pending,
                 status?.Message ?? "Position amendment submitted.",
                 status?.TimestampUtc ?? DateTimeOffset.UtcNow);
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
+        });
     }
 
     public async Task<WorkingOrderResult> UpdateWorkingOrderAsync(
@@ -258,10 +241,11 @@ public sealed class IgTradingGateway : ITradingGateway
     {
         if (string.IsNullOrWhiteSpace(request.DealId))
         {
-            throw new ArgumentException("DealId is required.", nameof(request));
+            throw new ArgumentException("DealId is required.", nameof(request.DealId));
         }
 
-        try
+        return await ExecuteTranslatedAsync(
+            async () =>
         {
             var existing = await _igTradingApi.GetWorkingOrdersAsync(cancellationToken);
             var workingOrder = (existing.WorkingOrders ?? [])
@@ -293,11 +277,7 @@ public sealed class IgTradingGateway : ITradingGateway
                 cancellationToken);
 
             return new WorkingOrderResult(response.DealReference, request.DealId, OrderStatus.Accepted, "Working order updated.", DateTimeOffset.UtcNow);
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
+        });
     }
 
     public async Task<WorkingOrderResult> CancelWorkingOrderAsync(
@@ -309,7 +289,8 @@ public sealed class IgTradingGateway : ITradingGateway
             throw new ArgumentException("DealId is required.", nameof(dealId));
         }
 
-        try
+        return await ExecuteTranslatedAsync(
+            async () =>
         {
             var response = await _igTradingApi.DeleteWorkingOrderAsync(dealId, cancellationToken);
 
@@ -325,42 +306,28 @@ public sealed class IgTradingGateway : ITradingGateway
                 cancellationToken);
 
             return new WorkingOrderResult(response.DealReference, dealId, OrderStatus.Accepted, "Working order cancelled.", DateTimeOffset.UtcNow);
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
+        });
     }
 
     public async Task<IReadOnlyList<PositionSummary>> GetOpenPositionsAsync(CancellationToken cancellationToken = default)
-    {
-        try
+        => await ExecuteTranslatedAsync(
+            async () =>
         {
             var response = await _igTradingApi.GetOpenPositionsAsync(cancellationToken);
             return (response.Positions ?? [])
                 .Select(IgTradingMapper.MapPosition)
                 .ToList();
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
-    }
+        });
 
     public async Task<IReadOnlyList<WorkingOrderSummary>> GetWorkingOrdersAsync(CancellationToken cancellationToken = default)
-    {
-        try
+        => await ExecuteTranslatedAsync(
+            async () =>
         {
             var response = await _igTradingApi.GetWorkingOrdersAsync(cancellationToken);
             return (response.WorkingOrders ?? [])
                 .Select(IgTradingMapper.MapWorkingOrder)
                 .ToList();
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
-    }
+        });
 
     public async Task<IReadOnlyList<MarketSearchResult>> SearchMarketsAsync(
         string searchTerm,
@@ -377,34 +344,26 @@ public sealed class IgTradingGateway : ITradingGateway
             throw new ArgumentOutOfRangeException(nameof(maxResults), "MaxResults must be greater than zero.");
         }
 
-        try
+        return await ExecuteTranslatedAsync(
+            async () =>
         {
             var response = await _igTradingApi.SearchMarketsAsync(searchTerm, cancellationToken);
             return (response.Markets ?? [])
                 .Take(maxResults)
                 .Select(IgTradingMapper.MapMarketSearchResult)
                 .ToList();
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
+        });
     }
 
     public async Task<MarketNavigationPage> BrowseMarketsAsync(
         string? nodeId = null,
         CancellationToken cancellationToken = default)
-    {
-        try
+        => await ExecuteTranslatedAsync(
+            async () =>
         {
             var response = await _igTradingApi.GetMarketNavigationAsync(nodeId, cancellationToken);
             return IgTradingMapper.MapMarketNavigation(nodeId, response);
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
-    }
+        });
 
     public async Task<PriceSeries> GetPricesAsync(
         Trading.Abstractions.GetPricesRequest request,
@@ -412,7 +371,8 @@ public sealed class IgTradingGateway : ITradingGateway
     {
         request.Validate();
 
-        try
+        return await ExecuteTranslatedAsync(
+            async () =>
         {
             var response = await _igTradingApi.GetPricesAsync(
                 new SdkGetPricesRequest(
@@ -424,11 +384,7 @@ public sealed class IgTradingGateway : ITradingGateway
                 cancellationToken);
 
             return IgTradingMapper.MapPrices(request, response);
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
+        });
     }
 
     public async Task<IReadOnlyList<OrderSummary>> GetOrdersAsync(
@@ -437,7 +393,8 @@ public sealed class IgTradingGateway : ITradingGateway
     {
         query.Validate();
 
-        try
+        return await ExecuteTranslatedAsync(
+            async () =>
         {
             var response = await _igTradingApi.GetActivityAsync(query.FromUtc, query.ToUtc, query.MaxItems, cancellationToken);
 
@@ -445,11 +402,7 @@ public sealed class IgTradingGateway : ITradingGateway
                 .Where(activity => !string.IsNullOrWhiteSpace(IgTradingMapper.ResolveActivityDealReference(activity)) || !string.IsNullOrWhiteSpace(activity.DealId))
                 .Select(IgTradingMapper.MapActivity)
                 .ToList();
-        }
-        catch (IgApiException exception)
-        {
-            throw TranslateException(exception);
-        }
+        });
     }
 
     public Task<OrderSummary?> GetOrderStatusAsync(
@@ -461,6 +414,18 @@ public sealed class IgTradingGateway : ITradingGateway
     {
         var code = MapErrorCode(exception.ErrorCode);
         return new TradingGatewayException(code, exception.Message, exception);
+    }
+
+    private static async Task<T> ExecuteTranslatedAsync<T>(Func<Task<T>> action)
+    {
+        try
+        {
+            return await action();
+        }
+        catch (IgApiException exception)
+        {
+            throw TranslateException(exception);
+        }
     }
 
     private static TradingErrorCode MapErrorCode(string? errorCode)

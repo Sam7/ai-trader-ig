@@ -23,9 +23,12 @@ internal static class IgTradingConversions
         };
 
     public static WorkingOrderType ParseWorkingOrderType(string type)
-        => string.Equals(type, "STOP", StringComparison.OrdinalIgnoreCase)
-            ? WorkingOrderType.Stop
-            : WorkingOrderType.Limit;
+        => type?.ToUpperInvariant() switch
+        {
+            "LIMIT" => WorkingOrderType.Limit,
+            "STOP" => WorkingOrderType.Stop,
+            _ => throw CreateInvalidBrokerValueException(nameof(type), type),
+        };
 
     public static string ToIgTimeInForce(WorkingOrderTimeInForce timeInForce)
         => timeInForce switch
@@ -36,19 +39,28 @@ internal static class IgTradingConversions
         };
 
     public static WorkingOrderTimeInForce ParseTimeInForce(string timeInForce)
-        => string.Equals(timeInForce, "GOOD_TILL_DATE", StringComparison.OrdinalIgnoreCase)
-            ? WorkingOrderTimeInForce.GoodTillDate
-            : WorkingOrderTimeInForce.GoodTillCancelled;
+        => timeInForce?.ToUpperInvariant() switch
+        {
+            "GOOD_TILL_CANCELLED" => WorkingOrderTimeInForce.GoodTillCancelled,
+            "GOOD_TILL_DATE" => WorkingOrderTimeInForce.GoodTillDate,
+            _ => throw CreateInvalidBrokerValueException(nameof(timeInForce), timeInForce),
+        };
 
     public static TradeDirection ParseDirection(string direction)
-        => string.Equals(direction, "SELL", StringComparison.OrdinalIgnoreCase)
-            ? TradeDirection.Sell
-            : TradeDirection.Buy;
+        => direction?.ToUpperInvariant() switch
+        {
+            "BUY" => TradeDirection.Buy,
+            "SELL" => TradeDirection.Sell,
+            _ => throw CreateInvalidBrokerValueException(nameof(direction), direction),
+        };
 
     public static string ToOppositeDirection(string direction)
-        => string.Equals(direction, "BUY", StringComparison.OrdinalIgnoreCase)
-            ? "SELL"
-            : "BUY";
+        => ParseDirection(direction) switch
+        {
+            TradeDirection.Buy => "SELL",
+            TradeDirection.Sell => "BUY",
+            _ => throw new InvalidOperationException("Unsupported trade direction."),
+        };
 
     public static string ToIgPriceResolution(PriceResolution resolution)
         => resolution switch
@@ -109,13 +121,25 @@ internal static class IgTradingConversions
     }
 
     public static DateTimeOffset? ParseNullableDate(string? value)
-        => DateTimeOffset.TryParse(
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (DateTimeOffset.TryParse(
             value,
             CultureInfo.InvariantCulture,
             DateTimeStyles.AllowWhiteSpaces,
-            out var parsed)
-                ? parsed
-                : null;
+            out var parsed))
+        {
+            return parsed;
+        }
+
+        throw new TradingGatewayException(
+            TradingErrorCode.BrokerError,
+            $"IG returned an invalid date value '{value}'.");
+    }
 
     public static string CreateDealReference(string prefix)
     {
@@ -156,4 +180,9 @@ internal static class IgTradingConversions
             "SUSPENDED" => MarketStatus.Suspended,
             _ => MarketStatus.Unknown,
         };
+
+    private static TradingGatewayException CreateInvalidBrokerValueException(string parameterName, string? value)
+        => new(
+            TradingErrorCode.BrokerError,
+            $"IG returned an unsupported value for {parameterName}: '{value ?? "<null>"}'.");
 }

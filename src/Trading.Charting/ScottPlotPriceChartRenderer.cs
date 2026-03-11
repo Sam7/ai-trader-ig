@@ -265,7 +265,7 @@ public sealed class ScottPlotPriceChartRenderer : IPriceChartRenderer
 
         foreach (var window in normalized)
         {
-            ValidateIndicatorPeriod(window, barCount, "SimpleMovingAverage");
+            ValidateIndicatorPeriod(window, barCount, nameof(windows), "Simple moving average");
         }
 
         return normalized;
@@ -278,20 +278,20 @@ public sealed class ScottPlotPriceChartRenderer : IPriceChartRenderer
             return null;
         }
 
-        ValidateIndicatorPeriod(bollingerPeriod.Value, barCount, "Bollinger");
+        ValidateIndicatorPeriod(bollingerPeriod.Value, barCount, nameof(bollingerPeriod), "Bollinger");
         return bollingerPeriod.Value;
     }
 
-    private static void ValidateIndicatorPeriod(int value, int barCount, string indicatorName)
+    private static void ValidateIndicatorPeriod(int value, int barCount, string paramName, string indicatorName)
     {
         if (value < 2)
         {
-            throw new ArgumentOutOfRangeException(indicatorName, $"{indicatorName} period must be at least 2.");
+            throw new ArgumentOutOfRangeException(paramName, $"{indicatorName} period must be at least 2.");
         }
 
         if (value > barCount)
         {
-            throw new ArgumentOutOfRangeException(indicatorName, $"{indicatorName} period cannot exceed the number of bars.");
+            throw new ArgumentOutOfRangeException(paramName, $"{indicatorName} period cannot exceed the number of bars.");
         }
     }
 

@@ -183,7 +183,14 @@ internal static class IgTradingMapper
             return null;
         }
 
-        return decimal.TryParse(value, out var parsed) ? parsed : null;
+        if (decimal.TryParse(value, out var parsed))
+        {
+            return parsed;
+        }
+
+        throw new TradingGatewayException(
+            TradingErrorCode.BrokerError,
+            $"IG returned an invalid decimal value '{value}'.");
     }
 
     private static OrderStatus MapOrderStatus(string? dealStatus, string? status)

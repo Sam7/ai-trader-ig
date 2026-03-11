@@ -239,7 +239,68 @@ public sealed class TradingCliApplicationTests
 
         exitCode.Should().Be(99);
         console.Output.Should().Contain("Unexpected error");
+        console.Output.Should().Contain("InvalidOperationException");
         console.Output.Should().Contain("boom");
+    }
+
+    [Fact]
+    public async Task RunAsync_WhenChartRendererThrowsArgumentException_ShouldReturnUnexpectedExitCode()
+    {
+        var console = CreateConsole();
+        var gateway = new FakeTradingGateway
+        {
+            PricesResult = new PriceSeries(
+                new InstrumentId("CC.D.VIX.UMA.IP"),
+                PriceResolution.Hour,
+                [
+                    new PriceBar(
+                        DateTimeOffset.Parse("2026-03-10T00:00:00Z"),
+                        10m,
+                        12m,
+                        9m,
+                        11m,
+                        10.5m,
+                        12.5m,
+                        9.5m,
+                        11.5m,
+                        100),
+                    new PriceBar(
+                        DateTimeOffset.Parse("2026-03-10T01:00:00Z"),
+                        11m,
+                        13m,
+                        10m,
+                        12m,
+                        11.5m,
+                        13.5m,
+                        10.5m,
+                        12.5m,
+                        120),
+                ])
+        };
+        var chartRenderer = new FakePriceChartRenderer
+        {
+            RenderException = new ArgumentException("broken renderer"),
+        };
+
+        var tempDirectory = Directory.CreateTempSubdirectory();
+        var outputPath = Path.Combine(tempDirectory.FullName, "chart.png");
+
+        try
+        {
+            var application = CreateApplication(gateway, chartRenderer, console);
+
+            var exitCode = await application.RunAsync(
+                ["markets", "chart", "--instrument", "CC.D.VIX.UMA.IP", "--resolution", "hour", "--max", "2", "--output", outputPath]);
+
+            exitCode.Should().Be(99);
+            console.Output.Should().Contain("Unexpected error");
+            console.Output.Should().Contain("ArgumentException");
+            console.Output.Should().Contain("broken renderer");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
     }
 
     private static TradingCliApplication CreateApplication(FakeTradingGateway gateway, TestConsole console)
@@ -370,6 +431,8 @@ public sealed class TradingCliApplicationTests
     {
         public List<RenderCall> Calls { get; } = [];
 
+        public Exception? RenderException { get; init; }
+
         public byte[] RenderedBytes { get; init; } = [137, 80, 78, 71];
 
         public byte[] RenderPng(
@@ -381,6 +444,11 @@ public sealed class TradingCliApplicationTests
             int width = 1200,
             int height = 800)
         {
+            if (RenderException is not null)
+            {
+                throw RenderException;
+            }
+
             Calls.Add(new RenderCall(
                 series,
                 style,
