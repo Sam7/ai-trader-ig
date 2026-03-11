@@ -19,7 +19,7 @@ The solution is intentionally split into six layers so the broker-neutral model 
 - `Trading.Cli` is the outermost shell. It loads configuration, wires DI, and exposes manual commands. It should stay thin and avoid business logic.
 - `Trading.Abstractions` defines the domain language the rest of the solution talks in: `ITradingGateway`, requests, results, and enums.
 - `Trading.Charting` renders broker-neutral price data into chart images and keeps ScottPlot concerns out of the CLI and broker adapter.
-- `Trading.Strategy` defines the business workflow around preparing the day, reacting to meaningful market events, gating risk, and producing mechanical execution intent. It stays broker-neutral and pushes data acquisition plus agent implementations behind small interfaces.
+- `Trading.Strategy` defines the business workflow around planning the trading day, assessing whether a market update deserves attention, reviewing a trade opportunity, reviewing an active trade, and applying execution reports. It stays broker-neutral and pushes data acquisition plus strategy-role implementations behind small interfaces.
 - `Trading.IG` is the broker adapter. It maps abstraction requests into IG calls, translates IG failures into `TradingGatewayException`, and keeps order-status orchestration in one place.
 - `Ig.Trading.Sdk` owns IG-specific concerns: auth, session handling, request/response DTOs, Refit contracts, headers, and endpoint quirks.
 
