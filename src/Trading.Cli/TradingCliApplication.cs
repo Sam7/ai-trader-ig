@@ -77,6 +77,16 @@ public sealed class TradingCliApplication
         configurator.SetApplicationName("trading");
         configurator.AddCommand<AuthenticateCommand>("auth");
 
+        configurator.AddBranch("automation", automation =>
+        {
+            automation.AddCommand<AutomationRunCommand>("run");
+            automation.AddBranch("brief", brief =>
+            {
+                brief.AddCommand<AutomationBriefResearchCommand>("research");
+                brief.AddCommand<AutomationBriefPlanCommand>("plan");
+            });
+        });
+
         configurator.AddBranch("trades", trades =>
         {
             trades.AddCommand<BuyTradeCommand>("buy");
@@ -113,6 +123,8 @@ public sealed class TradingCliApplication
         });
 
         configurator.AddExample(["auth"]);
+        configurator.AddExample(["automation", "brief", "research", "--date", "2026-03-12"]);
+        configurator.AddExample(["automation", "brief", "plan", "--date", "2026-03-12"]);
         configurator.AddExample(["trades", "buy", "--instrument", "IX.D.SPTRD.DAILY.IP", "--size", "1"]);
         configurator.AddExample(["markets", "search", "--query", "VIX"]);
         configurator.AddExample(["markets", "browse"]);

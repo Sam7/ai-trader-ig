@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <ItemGroup>
+    <ProjectReference Include="..\Trading.Automation\Trading.Automation.csproj" />
+    <ProjectReference Include="..\Trading.IG\Trading.IG.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UserSecretsId>trading-worker-9e9fdb2a-a9db-4ba1-a8f2-fab7be91b9eb</UserSecretsId>
+  </PropertyGroup>
+
+</Project>

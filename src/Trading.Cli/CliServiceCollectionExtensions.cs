@@ -5,8 +5,12 @@ public static class CliServiceCollectionExtensions
     public static IServiceCollection AddTradingCli(this IServiceCollection services)
     {
         services.AddSingleton<TradingCliRenderer>();
+        services.AddSingleton<IAutomationRuntime, AutomationRuntime>();
 
         services.AddTransient<AuthenticateCommand>();
+        services.AddTransient<AutomationRunCommand>();
+        services.AddTransient<AutomationBriefResearchCommand>();
+        services.AddTransient<AutomationBriefPlanCommand>();
         services.AddTransient<BuyTradeCommand>();
         services.AddTransient<SellTradeCommand>();
         services.AddTransient<CreateWorkingOrderCommand>();

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Trading.Strategy.ActiveTradeManagement;
 using Trading.Strategy.DayPlanning;
 using Trading.Strategy.ExecutionReporting;
@@ -20,7 +21,7 @@ public static class ServiceCollectionExtensions
         rules.Validate();
 
         services.AddSingleton(rules);
-        services.AddSingleton<ITradingDayStore, InMemoryTradingDayStore>();
+        services.TryAddSingleton<ITradingDayStore, InMemoryTradingDayStore>();
         services.AddSingleton<PositionSizer>();
         services.AddSingleton<BreakEvenStopRule>();
         services.AddTransient<TradingDayPlanner>();

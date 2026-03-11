@@ -1,5 +1,7 @@
 using Spectre.Console;
+using Trading.AI.DailyBriefing;
 using Trading.Abstractions;
+using Trading.Strategy.Shared;
 
 public sealed class TradingCliRenderer
 {
@@ -246,6 +248,37 @@ public sealed class TradingCliRenderer
     public void WriteInfo(string message)
     {
         _console.MarkupLine($"[grey]{Markup.Escape(message)}[/]");
+    }
+
+    public void WriteDailyBriefResearch(DateOnly tradingDate, DailyBriefResearchResult result)
+    {
+        WriteKeyValuePanel(
+            "Daily Brief",
+            ("Trading Date", tradingDate.ToString("yyyy-MM-dd")),
+            ("Generated At", CliParsing.FormatDate(result.CompletedAtUtc)),
+            ("Artifact", result.ArtifactPath));
+    }
+
+    public void WriteTradingDayPlan(TradingDayPlan plan)
+    {
+        WriteKeyValuePanel(
+            "Trading Day Plan",
+            ("Trading Date", plan.TradingDate.ToString("yyyy-MM-dd")),
+            ("Regime", plan.MarketRegime.ToString()),
+            ("Planned At", CliParsing.FormatDate(plan.PlannedAtUtc)),
+            ("Watch List", plan.WatchList.Count.ToString()));
+
+        var table = CreateTable("Rank", "Instrument", "Entry Zone", "Rationale");
+        foreach (var market in plan.WatchList)
+        {
+            table.AddRow(
+                market.Rank.ToString(),
+                market.Instrument.Value,
+                $"{CliParsing.FormatDecimal(market.EntryZoneLowerBound)} - {CliParsing.FormatDecimal(market.EntryZoneUpperBound)}",
+                market.Rationale);
+        }
+
+        _console.Write(table);
     }
 
     private void WriteKeyValuePanel(string title, params (string Key, string Value)[] rows)

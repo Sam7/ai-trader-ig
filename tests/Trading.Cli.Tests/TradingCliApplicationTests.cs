@@ -17,6 +17,7 @@ public sealed class TradingCliApplicationTests
 
         exitCode.Should().Be(1);
         console.Output.Should().Contain("USAGE");
+        console.Output.Should().Contain("automation");
         console.Output.Should().Contain("trades");
         console.Output.Should().Contain("markets");
     }
@@ -304,14 +305,19 @@ public sealed class TradingCliApplicationTests
     }
 
     private static TradingCliApplication CreateApplication(FakeTradingGateway gateway, TestConsole console)
-        => CreateApplication(gateway, new FakePriceChartRenderer(), console);
+        => CreateApplication(gateway, new FakePriceChartRenderer(), console, new FakeAutomationRuntime());
 
-    private static TradingCliApplication CreateApplication(FakeTradingGateway gateway, FakePriceChartRenderer chartRenderer, TestConsole console)
+    private static TradingCliApplication CreateApplication(
+        FakeTradingGateway gateway,
+        FakePriceChartRenderer chartRenderer,
+        TestConsole console,
+        FakeAutomationRuntime? automationRuntime = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<ITradingGateway>(gateway);
         services.AddSingleton<IPriceChartRenderer>(chartRenderer);
         services.AddSingleton<IAnsiConsole>(console);
+        services.AddSingleton<IAutomationRuntime>(automationRuntime ?? new FakeAutomationRuntime());
         services.AddTradingCli();
 
         return new TradingCliApplication(services, console);
@@ -470,4 +476,9 @@ public sealed class TradingCliApplicationTests
         int? BollingerPeriod,
         int Width,
         int Height);
+
+    private sealed class FakeAutomationRuntime : IAutomationRuntime
+    {
+        public Task RunAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+    }
 }

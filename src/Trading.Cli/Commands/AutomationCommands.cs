@@ -1,0 +1,107 @@
+using System.ComponentModel;
+using Microsoft.Extensions.Options;
+using Spectre.Console;
+using Spectre.Console.Cli;
+using Trading.AI.DailyBriefing;
+using Trading.Automation.Configuration;
+using Trading.Automation.Execution;
+using Trading.Strategy.Shared;
+
+[Description("Start the background automation worker in the foreground.")]
+public sealed class AutomationRunCommand : AsyncCommand<EmptyCommandSettings>
+{
+    private readonly IAutomationRuntime _runtime;
+
+    public AutomationRunCommand(IAutomationRuntime runtime)
+    {
+        _runtime = runtime;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, EmptyCommandSettings settings, CancellationToken cancellationToken)
+    {
+        await _runtime.RunAsync(cancellationToken);
+        return 0;
+    }
+}
+
+[Description("Generate the research markdown brief for a trading date.")]
+public sealed class AutomationBriefResearchCommand : AsyncCommand<AutomationBriefSettings>
+{
+    private readonly DailyBriefingResearchService _service;
+    private readonly TradingCliRenderer _renderer;
+    private readonly AutomationOptions _options;
+
+    public AutomationBriefResearchCommand(
+        DailyBriefingResearchService service,
+        TradingCliRenderer renderer,
+        IOptions<AutomationOptions> options)
+    {
+        _service = service;
+        _renderer = renderer;
+        _options = options.Value;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, AutomationBriefSettings settings, CancellationToken cancellationToken)
+    {
+        var tradingDate = AutomationBriefSettings.ResolveTradingDate(settings.Date, _options.Timezone);
+        var result = await _service.RunAsync(tradingDate, cancellationToken);
+        _renderer.WriteDailyBriefResearch(tradingDate, result);
+        return 0;
+    }
+}
+
+[Description("Generate and save the trading-day plan for a trading date.")]
+public sealed class AutomationBriefPlanCommand : AsyncCommand<AutomationBriefSettings>
+{
+    private readonly DailyBriefingPlanService _service;
+    private readonly TradingCliRenderer _renderer;
+    private readonly AutomationOptions _options;
+
+    public AutomationBriefPlanCommand(
+        DailyBriefingPlanService service,
+        TradingCliRenderer renderer,
+        IOptions<AutomationOptions> options)
+    {
+        _service = service;
+        _renderer = renderer;
+        _options = options.Value;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, AutomationBriefSettings settings, CancellationToken cancellationToken)
+    {
+        var tradingDate = AutomationBriefSettings.ResolveTradingDate(settings.Date, _options.Timezone);
+        var plan = await _service.RunAsync(tradingDate, cancellationToken);
+        _renderer.WriteTradingDayPlan(plan);
+        return 0;
+    }
+}
+
+public sealed class AutomationBriefSettings : CommandSettings
+{
+    [CommandOption("--date <YYYY-MM-DD>")]
+    public string? Date { get; init; }
+
+    public override ValidationResult Validate()
+    {
+        if (Date is null)
+        {
+            return ValidationResult.Success();
+        }
+
+        return DateOnly.TryParseExact(Date, "yyyy-MM-dd", out _)
+            ? ValidationResult.Success()
+            : ValidationResult.Error("Option --date must be in yyyy-MM-dd format.");
+    }
+
+    internal static DateOnly ResolveTradingDate(string? value, string timezoneId)
+    {
+        if (value is not null)
+        {
+            return DateOnly.ParseExact(value, "yyyy-MM-dd");
+        }
+
+        var timezone = TimeZoneInfo.FindSystemTimeZoneById(timezoneId);
+        var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timezone);
+        return DateOnly.FromDateTime(localNow.DateTime);
+    }
+}

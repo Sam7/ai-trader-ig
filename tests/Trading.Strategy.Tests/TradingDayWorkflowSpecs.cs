@@ -193,7 +193,7 @@ public class TradingDayWorkflowSpecs
             var store = new InMemoryTradingDayStore();
             var rules = StrategyRules.Default;
             var workflow = new TradingDayWorkflow(
-                new TradingDayPlanner(rules, composer, marketSnapshotSource, newsHeadlineSource, economicCalendarSource, clock, store),
+                new TradingDayPlanner(rules, composer, clock, store),
                 new MarketAttentionService(rules, store),
                 new OpportunityReviewer(riskContextSource, setupPlanner, tradeApprover, store, clock, new PositionSizer()),
                 new ActiveTradeReviewer(clock, store, rules, new BreakEvenStopRule()),

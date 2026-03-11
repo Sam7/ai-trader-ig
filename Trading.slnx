@@ -5,15 +5,20 @@
   <Folder Name="/src/">
     <Project Path="src/Ig.Trading.Sdk/Ig.Trading.Sdk.csproj" />
     <Project Path="src/Trading.Abstractions/Trading.Abstractions.csproj" />
+    <Project Path="src/Trading.AI/Trading.AI.csproj" />
+    <Project Path="src/Trading.Automation/Trading.Automation.csproj" />
     <Project Path="src/Trading.Charting/Trading.Charting.csproj" />
     <Project Path="src/Trading.Cli/Trading.Cli.csproj" />
     <Project Path="src/Trading.IG/Trading.IG.csproj" />
     <Project Path="src/Trading.Strategy/Trading.Strategy.csproj" />
+    <Project Path="src/Trading.Worker/Trading.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Trading.Cli.Tests/Trading.Cli.Tests.csproj" />
     <Project Path="tests/Ig.Trading.Sdk.Tests/Ig.Trading.Sdk.Tests.csproj" />
     <Project Path="tests/Trading.Abstractions.Tests/Trading.Abstractions.Tests.csproj" />
+    <Project Path="tests/Trading.AI.Tests/Trading.AI.Tests.csproj" />
+    <Project Path="tests/Trading.Automation.Tests/Trading.Automation.Tests.csproj" />
     <Project Path="tests/Trading.Charting.Tests/Trading.Charting.Tests.csproj" />
     <Project Path="tests/Trading.IG.Tests/Trading.IG.Tests.csproj" />
     <Project Path="tests/Trading.Strategy.Tests/Trading.Strategy.Tests.csproj" />
