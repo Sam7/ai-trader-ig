@@ -56,6 +56,9 @@ public sealed class DailyBriefingPlanServiceTests
                 DateTimeOffset.Parse("2026-03-12T08:00:00Z")));
         }
 
+        public Task<IntradayOpportunityReviewResult> ReviewIntradayOpportunitiesAsync(IntradayOpportunityBatch batch, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException();
+
         public Task<MarketAssessment> AssessMarketAsync(MarketEvent marketEvent, CancellationToken cancellationToken = default)
             => throw new NotSupportedException();
 

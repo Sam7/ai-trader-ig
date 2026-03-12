@@ -2,11 +2,11 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
-using OpenAI.Responses;
 using Trading.AI.Configuration;
 using Trading.AI.DailyBriefing;
 using Trading.AI.Observability;
 using Trading.AI.Prompts;
+using OpenAI.Responses;
 
 namespace Trading.AI.PromptExecution;
 
@@ -47,7 +47,7 @@ public sealed class PromptExecutor
         IReadOnlyDictionary<string, string> variables,
         PromptTextArtifactKind artifactKind = PromptTextArtifactKind.Markdown,
         CancellationToken cancellationToken = default)
-        => ExecuteTextCoreAsync(CreateInvocation(prompt, model, _inputConverter.Convert(variables), null, artifactKind), cancellationToken);
+        => ExecuteTextCoreAsync(CreateInvocation(prompt, model, _inputConverter.Convert(variables), null, artifactKind, []), cancellationToken);
 
     public Task<PromptTextResult> ExecuteTextAsync<TInput>(
         PromptDefinition prompt,
@@ -55,7 +55,7 @@ public sealed class PromptExecutor
         TInput input,
         PromptTextArtifactKind artifactKind = PromptTextArtifactKind.Markdown,
         CancellationToken cancellationToken = default)
-        => ExecuteTextCoreAsync(CreateInvocation(prompt, model, _inputConverter.Convert(input), null, artifactKind), cancellationToken);
+        => ExecuteTextCoreAsync(CreateInvocation(prompt, model, _inputConverter.Convert(input), null, artifactKind, []), cancellationToken);
 
     public Task<PromptStructuredResult<T>> ExecuteStructuredAsync<T>(
         PromptDefinition prompt,
@@ -63,7 +63,7 @@ public sealed class PromptExecutor
         IReadOnlyDictionary<string, string> variables,
         ChatResponseFormat? responseFormat = null,
         CancellationToken cancellationToken = default)
-        => ExecuteStructuredCoreAsync<T>(CreateInvocation(prompt, model, _inputConverter.Convert(variables), responseFormat, PromptTextArtifactKind.None), cancellationToken);
+        => ExecuteStructuredCoreAsync<T>(CreateInvocation(prompt, model, _inputConverter.Convert(variables), responseFormat, PromptTextArtifactKind.None, []), cancellationToken);
 
     public Task<PromptStructuredResult<TResult>> ExecuteStructuredAsync<TInput, TResult>(
         PromptDefinition prompt,
@@ -71,7 +71,16 @@ public sealed class PromptExecutor
         TInput input,
         ChatResponseFormat? responseFormat = null,
         CancellationToken cancellationToken = default)
-        => ExecuteStructuredCoreAsync<TResult>(CreateInvocation(prompt, model, _inputConverter.Convert(input), responseFormat, PromptTextArtifactKind.None), cancellationToken);
+        => ExecuteStructuredCoreAsync<TResult>(CreateInvocation(prompt, model, _inputConverter.Convert(input), responseFormat, PromptTextArtifactKind.None, []), cancellationToken);
+
+    public Task<PromptStructuredResult<TResult>> ExecuteStructuredAsync<TInput, TResult>(
+        PromptDefinition prompt,
+        PromptModelOptions model,
+        TInput input,
+        IReadOnlyList<PromptAttachment> attachments,
+        ChatResponseFormat? responseFormat = null,
+        CancellationToken cancellationToken = default)
+        => ExecuteStructuredCoreAsync<TResult>(CreateInvocation(prompt, model, _inputConverter.Convert(input), responseFormat, PromptTextArtifactKind.None, attachments), cancellationToken);
 
     private async Task<PromptTextResult> ExecuteTextCoreAsync(
         PromptInvocation invocation,
@@ -79,15 +88,17 @@ public sealed class PromptExecutor
     {
         var promptTemplate = _promptRegistry.GetPromptText(invocation.Prompt);
         var requestText = _templateRenderer.Render(promptTemplate, invocation.Variables);
+        var requestMessages = BuildRequestMessages(requestText, invocation.Attachments);
         using var chatClient = _chatClientFactory.CreateClient(invocation.Model.ModelId);
         var options = BuildChatOptions(invocation.Model, invocation.ResponseFormat);
         var requestOptions = options.RawRepresentationFactory?.Invoke(chatClient);
         var session = await _observabilityWriter.StartAsync(invocation, requestText, requestOptions, cancellationToken);
+        await _observabilityWriter.WriteAttachmentsAsync(session, invocation.Attachments, cancellationToken);
         var stopwatch = Stopwatch.StartNew();
 
         try
         {
-            var response = await chatClient.GetResponseAsync(requestText, options, cancellationToken);
+            var response = await chatClient.GetResponseAsync(requestMessages, options, cancellationToken);
             await _observabilityWriter.WriteTextAsync(session, response.Text, cancellationToken);
 
             await _observabilityWriter.CompleteAsync(session, invocation, requestText, requestOptions, response, response.Text, null, stopwatch.Elapsed, cancellationToken);
@@ -110,10 +121,12 @@ public sealed class PromptExecutor
         {
             var promptTemplate = _promptRegistry.GetPromptText(invocation.Prompt);
             var requestText = _templateRenderer.Render(promptTemplate, invocation.Variables);
+            var requestMessages = BuildRequestMessages(requestText, invocation.Attachments);
             using var chatClient = _chatClientFactory.CreateClient(invocation.Model.ModelId);
             var options = BuildChatOptions(invocation.Model, invocation.ResponseFormat);
             var requestOptions = options.RawRepresentationFactory?.Invoke(chatClient);
             var session = await _observabilityWriter.StartAsync(invocation, requestText, requestOptions, cancellationToken);
+            await _observabilityWriter.WriteAttachmentsAsync(session, invocation.Attachments, cancellationToken);
             var stopwatch = Stopwatch.StartNew();
 
             try
@@ -123,13 +136,13 @@ public sealed class PromptExecutor
 
                 if (invocation.ResponseFormat is not null)
                 {
-                    response = await chatClient.GetResponseAsync(requestText, options, cancellationToken);
+                    response = await chatClient.GetResponseAsync(requestMessages, options, cancellationToken);
                     structured = DeserializeStructuredResponse<T>(response, invocation.Prompt.Name);
                 }
                 else
                 {
                     var typedResponse = await chatClient.GetResponseAsync<T>(
-                        requestText,
+                        requestMessages,
                         options,
                         useJsonSchemaResponseFormat: true,
                         cancellationToken: cancellationToken);
@@ -166,7 +179,8 @@ public sealed class PromptExecutor
         PromptModelOptions model,
         PromptInputData input,
         ChatResponseFormat? responseFormat,
-        PromptTextArtifactKind textArtifactKind)
+        PromptTextArtifactKind textArtifactKind,
+        IReadOnlyList<PromptAttachment> attachments)
         => new(
             prompt,
             model,
@@ -174,7 +188,8 @@ public sealed class PromptExecutor
             input.PromptDate,
             input.RequestedAtUtc,
             responseFormat,
-            textArtifactKind);
+            textArtifactKind,
+            attachments);
 
     private static ChatOptions BuildChatOptions(PromptModelOptions model, ChatResponseFormat? responseFormat)
     {
@@ -199,6 +214,27 @@ public sealed class PromptExecutor
 
     private static bool ShouldRetryStructuredFailure(Exception exception)
         => exception is StructuredOutputException;
+
+    private static IReadOnlyList<ChatMessage> BuildRequestMessages(string requestText, IReadOnlyList<PromptAttachment> attachments)
+    {
+        if (attachments.Count == 0)
+        {
+            return [new ChatMessage(ChatRole.User, requestText)];
+        }
+
+        var contents = new List<AIContent>(1 + (attachments.Count * 2))
+        {
+            new TextContent(requestText)
+        };
+
+        foreach (var attachment in attachments)
+        {
+            contents.Add(new TextContent($"Attachment: {attachment.Label}"));
+            contents.Add(new DataContent(attachment.Data, attachment.MediaType));
+        }
+
+        return [new ChatMessage(ChatRole.User, contents)];
+    }
 
     private static T DeserializeStructuredResponse<T>(ChatResponse response, string promptName)
     {

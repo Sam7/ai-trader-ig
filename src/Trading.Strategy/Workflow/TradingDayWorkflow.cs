@@ -15,6 +15,7 @@ namespace Trading.Strategy.Workflow;
 public sealed class TradingDayWorkflow : ITradingDayWorkflow
 {
     private readonly TradingDayPlanner _tradingDayPlanner;
+    private readonly IntradayOpportunityReviewService _intradayOpportunityReviewService;
     private readonly MarketAttentionService _marketAttentionService;
     private readonly OpportunityReviewer _opportunityReviewer;
     private readonly ActiveTradeReviewer _activeTradeReviewer;
@@ -22,12 +23,14 @@ public sealed class TradingDayWorkflow : ITradingDayWorkflow
 
     public TradingDayWorkflow(
         TradingDayPlanner tradingDayPlanner,
+        IntradayOpportunityReviewService intradayOpportunityReviewService,
         MarketAttentionService marketAttentionService,
         OpportunityReviewer opportunityReviewer,
         ActiveTradeReviewer activeTradeReviewer,
         ExecutionReportApplier executionReportApplier)
     {
         _tradingDayPlanner = tradingDayPlanner;
+        _intradayOpportunityReviewService = intradayOpportunityReviewService;
         _marketAttentionService = marketAttentionService;
         _opportunityReviewer = opportunityReviewer;
         _activeTradeReviewer = activeTradeReviewer;
@@ -39,6 +42,14 @@ public sealed class TradingDayWorkflow : ITradingDayWorkflow
     /// </summary>
     public Task<TradingDayPlan> PlanTradingDayAsync(TradingDayRequest request, CancellationToken cancellationToken = default)
         => _tradingDayPlanner.PlanAsync(request, cancellationToken);
+
+    /// <summary>
+    /// Runs on a timed intraday cadence and gives the workflow a validated batch of AI-ranked opportunities from today's watch list.
+    /// </summary>
+    public Task<IntradayOpportunityReviewResult> ReviewIntradayOpportunitiesAsync(
+        IntradayOpportunityBatch batch,
+        CancellationToken cancellationToken = default)
+        => _intradayOpportunityReviewService.ReviewAsync(batch, cancellationToken);
 
     /// <summary>
     /// Runs for each incoming market update and decides whether it should be ignored or promoted into a focused review.

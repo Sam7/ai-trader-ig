@@ -19,6 +19,9 @@ public static class ServiceCollectionExtensions
         services.AddOptions<DailyBriefingOptions>()
             .Bind(configuration.GetSection(DailyBriefingOptions.SectionName));
 
+        services.AddOptions<IntradayOpportunityReviewOptions>()
+            .Bind(configuration.GetSection(IntradayOpportunityReviewOptions.SectionName));
+
         services.AddOptions<PromptObservabilityOptions>()
             .Bind(configuration.GetSection(PromptObservabilityOptions.SectionName));
         services.PostConfigure<PromptObservabilityOptions>(options =>
@@ -37,10 +40,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PromptInputConverter>();
         services.AddSingleton<PromptObservabilityWriter>();
         services.AddSingleton<DailyPlanMapper>();
+        services.AddSingleton<IntradayOpportunityMapper>();
         services.AddSingleton<IChatClientFactory, OpenAiChatClientFactory>();
         services.AddTransient<PromptExecutor>();
         services.AddTransient<DailyBriefResearcher>();
         services.AddTransient<DailyPlanConverter>();
+        services.AddTransient<IntradayOpportunityReviewer>();
         services.AddTransient<IDailyBriefingComposer, OpenAiDailyBriefingComposer>();
         return services;
     }

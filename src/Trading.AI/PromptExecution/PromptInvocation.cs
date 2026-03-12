@@ -11,4 +11,5 @@ internal sealed record PromptInvocation(
     DateOnly PromptDate,
     DateTimeOffset RequestedAtUtc,
     ChatResponseFormat? ResponseFormat,
-    PromptTextArtifactKind TextArtifactKind);
+    PromptTextArtifactKind TextArtifactKind,
+    IReadOnlyList<PromptAttachment> Attachments);

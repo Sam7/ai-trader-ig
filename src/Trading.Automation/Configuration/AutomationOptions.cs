@@ -13,4 +13,6 @@ public sealed class AutomationOptions
     public string Timezone { get; init; } = "Australia/Melbourne";
 
     public string JobName { get; init; } = DailyBriefingConstants.JobName;
+
+    public IntradayOpportunityScanOptions IntradayOpportunities { get; init; } = new();
 }

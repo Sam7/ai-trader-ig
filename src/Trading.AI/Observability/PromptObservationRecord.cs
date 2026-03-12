@@ -37,6 +37,8 @@ public sealed class PromptObservationRecord
     public string? TextArtifactPath { get; set; }
 
     public string? StructuredArtifactPath { get; set; }
+
+    public IReadOnlyList<string>? AttachmentArtifactPaths { get; set; }
 }
 
 public sealed record CostBreakdown(

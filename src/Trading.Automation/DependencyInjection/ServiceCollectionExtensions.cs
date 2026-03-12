@@ -28,8 +28,12 @@ public static class ServiceCollectionExtensions
 
         services.AddTransient<DailyBriefingResearchService>();
         services.AddTransient<DailyBriefingPlanService>();
+        services.AddSingleton<IntradayPriceSeriesCache>();
+        services.AddTransient<IntradayOpportunityScanService>();
         services.AddTransient<DailyBriefingTickerJob>();
+        services.AddTransient<IntradayOpportunityTickerJob>();
         services.AddHostedService<DailyBriefingScheduleInitializer>();
+        services.AddHostedService<IntradayOpportunityScheduleInitializer>();
         return services;
     }
 }

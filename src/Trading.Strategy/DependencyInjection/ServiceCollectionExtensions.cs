@@ -25,6 +25,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<PositionSizer>();
         services.AddSingleton<BreakEvenStopRule>();
         services.AddTransient<TradingDayPlanner>();
+        services.AddTransient<IntradayOpportunityReviewService>();
         services.AddTransient<MarketAttentionService>();
         services.AddTransient<OpportunityReviewer>();
         services.AddTransient<ActiveTradeReviewer>();

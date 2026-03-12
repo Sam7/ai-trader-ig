@@ -31,7 +31,8 @@ public sealed class PromptObservabilityWriterTests
                 new DateOnly(2026, 3, 12),
                 DateTimeOffset.Parse("2026-03-12T06:30:45Z"),
                 null,
-                PromptTextArtifactKind.Markdown);
+                PromptTextArtifactKind.Markdown,
+                []);
 
             var session = await writer.StartAsync(invocation, "request text", new { mode = "test" }, CancellationToken.None);
 
@@ -75,7 +76,8 @@ public sealed class PromptObservabilityWriterTests
                 new DateOnly(2026, 3, 12),
                 DateTimeOffset.Parse("2026-03-12T06:30:45Z"),
                 null,
-                PromptTextArtifactKind.None);
+                PromptTextArtifactKind.None,
+                []);
 
             var session = await writer.StartAsync(invocation, "request text", null, CancellationToken.None);
             var document = new DailyPlanDocument(
@@ -92,6 +94,44 @@ public sealed class PromptObservabilityWriterTests
 
             var json = await File.ReadAllTextAsync(session.StructuredArtifactPath);
             json.Should().Contain("\"marketRegime\": \"EventDriven\"");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task WriteAttachmentsAsync_ShouldPersistAttachmentPaths()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var writer = new PromptObservabilityWriter(
+                Options.Create(new PromptObservabilityOptions
+                {
+                    ObservabilityRootPath = tempDirectory.FullName,
+                }));
+
+            var invocation = new PromptInvocation(
+                PromptRegistry.IntradayOpportunityReview,
+                new PromptModelOptions { ModelId = "gpt-test" },
+                new Dictionary<string, string> { ["TRADING_DATE"] = "2026-03-12" },
+                new DateOnly(2026, 3, 12),
+                DateTimeOffset.Parse("2026-03-12T06:30:45Z"),
+                null,
+                PromptTextArtifactKind.None,
+                []);
+
+            var session = await writer.StartAsync(invocation, "request text", null, CancellationToken.None);
+            await writer.WriteAttachmentsAsync(
+                session,
+                [new PromptAttachment("WTI Crude Oil chart", "image/png", [1, 2, 3])],
+                CancellationToken.None);
+
+            session.AttachmentArtifactPaths.Should().ContainSingle();
+            File.Exists(session.AttachmentArtifactPaths[0]).Should().BeTrue();
         }
         finally
         {

@@ -10,6 +10,7 @@ using Trading.AI.PromptExecution;
 using Trading.AI.Prompts;
 using Trading.AI.Prompts.DailyBriefResearch;
 using Trading.AI.Prompts.DailyPlanJson;
+using Trading.AI.Prompts.IntradayOpportunityReview;
 using Trading.Strategy.Inputs;
 
 public sealed class PromptExecutorTests
@@ -150,6 +151,66 @@ public sealed class PromptExecutorTests
 
             await action.Should().ThrowAsync<ClientResultException>();
             chatClient.CallCount.Should().Be(1);
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteStructuredAsync_WithAttachments_ShouldPersistAttachmentArtifacts()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var chatClient = new TestChatClient(messages =>
+            {
+                messages.Should().ContainSingle();
+                messages.Single().Contents.Should().HaveCountGreaterThan(1);
+
+                return Task.FromResult(CreateResponse("""
+                    {
+                      "recentDevelopmentsSummary": "USD softer and energy stable.",
+                      "marketAssessments": [
+                        {
+                          "instrumentId": "CC.D.WTI.UMA.IP",
+                          "instrumentName": "WTI Crude Oil",
+                          "opportunityScore": 68,
+                          "directionalBias": "Buy",
+                          "summary": "Constructive intraday structure.",
+                          "whyNow": "Momentum improved in the last hour.",
+                          "standAsideReason": ""
+                        }
+                      ],
+                      "candidateOpportunities": []
+                    }
+                    """));
+            });
+            var executor = CreateExecutor(tempDirectory.FullName, chatClient);
+
+            var result = await executor.ExecuteStructuredAsync<IntradayOpportunityReviewInput, IntradayOpportunityReviewDocument>(
+                PromptRegistry.IntradayOpportunityReview,
+                new PromptModelOptions { ModelId = "gpt-test", EnableWebSearch = true },
+                new IntradayOpportunityReviewInput(
+                    new DateOnly(2026, 3, 12),
+                    DateTimeOffset.Parse("2026-03-12T05:30:00Z"),
+                    DateTimeOffset.Parse("2026-03-12T06:30:00Z"),
+                    1,
+                    4,
+                    "Australia/Melbourne",
+                    "Macro summary",
+                    "One watched market",
+                    "No calendar events",
+                    new DateOnly(2026, 3, 12),
+                    DateTimeOffset.Parse("2026-03-12T06:30:45Z")),
+                [new PromptAttachment("WTI Crude Oil chart", "image/png", [1, 2, 3, 4])],
+                IntradayOpportunityReviewResponseFormat.Create(),
+                CancellationToken.None);
+
+            result.StructuredValue.MarketAssessments.Should().HaveCount(1);
+            Directory.GetFiles(Path.Combine(tempDirectory.FullName, "2026-03-12"), "*.png").Should().HaveCount(1);
         }
         finally
         {

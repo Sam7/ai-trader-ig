@@ -113,6 +113,40 @@ public sealed class AutomationBriefConvertCommand : AsyncCommand<AutomationBrief
     }
 }
 
+[Description("Run the 15-minute intraday opportunity scan once.")]
+public sealed class AutomationIntradayScanCommand : AsyncCommand<AutomationIntradayScanSettings>
+{
+    private readonly IntradayOpportunityScanService _service;
+    private readonly TradingCliRenderer _renderer;
+    private readonly AutomationOptions _options;
+
+    public AutomationIntradayScanCommand(
+        IntradayOpportunityScanService service,
+        TradingCliRenderer renderer,
+        IOptions<AutomationOptions> options)
+    {
+        _service = service;
+        _renderer = renderer;
+        _options = options.Value;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, AutomationIntradayScanSettings settings, CancellationToken cancellationToken)
+    {
+        var requestedAtUtc = settings.ResolveRequestedAtUtc();
+        var tradingDate = settings.ResolveTradingDate(_options.Timezone, requestedAtUtc);
+        var result = await _service.RunAsync(tradingDate, requestedAtUtc, cancellationToken);
+
+        if (result is null)
+        {
+            _renderer.WriteInfo("No eligible intraday opportunity scan result was produced.");
+            return 0;
+        }
+
+        _renderer.WriteIntradayOpportunityReview(result);
+        return 0;
+    }
+}
+
 public class AutomationBriefSettings : CommandSettings
 {
     [CommandOption("--date <YYYY-MM-DD>")]
@@ -164,5 +198,39 @@ public sealed class AutomationBriefConvertSettings : AutomationBriefSettings
         return File.Exists(Input)
             ? ValidationResult.Success()
             : ValidationResult.Error("Option --input must point to an existing markdown file.");
+    }
+}
+
+public sealed class AutomationIntradayScanSettings : AutomationBriefSettings
+{
+    [CommandOption("--at <UTC-ISO>")]
+    public string? At { get; init; }
+
+    public override ValidationResult Validate()
+    {
+        var baseValidation = base.Validate();
+        if (!baseValidation.Successful)
+        {
+            return baseValidation;
+        }
+
+        return At is null || DateTimeOffset.TryParse(At, out _)
+            ? ValidationResult.Success()
+            : ValidationResult.Error("Option --at must be a valid UTC timestamp.");
+    }
+
+    public DateTimeOffset ResolveRequestedAtUtc()
+        => At is null ? DateTimeOffset.UtcNow : DateTimeOffset.Parse(At).ToUniversalTime();
+
+    public DateOnly ResolveTradingDate(string timezoneId, DateTimeOffset requestedAtUtc)
+    {
+        if (Date is not null)
+        {
+            return DateOnly.ParseExact(Date, "yyyy-MM-dd");
+        }
+
+        var timezone = TimeZoneInfo.FindSystemTimeZoneById(timezoneId);
+        var localNow = TimeZoneInfo.ConvertTime(requestedAtUtc, timezone);
+        return DateOnly.FromDateTime(localNow.DateTime);
     }
 }

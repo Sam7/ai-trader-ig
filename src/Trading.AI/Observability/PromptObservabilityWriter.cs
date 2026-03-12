@@ -50,6 +50,22 @@ public sealed class PromptObservabilityWriter
         return session;
     }
 
+    internal async Task WriteAttachmentsAsync(
+        PromptObservationSession session,
+        IReadOnlyList<PromptAttachment> attachments,
+        CancellationToken cancellationToken)
+    {
+        for (var index = 0; index < attachments.Count; index++)
+        {
+            var attachment = attachments[index];
+            var extension = GetFileExtension(attachment.MediaType);
+            var labelSlug = ToSlug(attachment.Label);
+            var path = $"{session.BasePath}-{index + 1:D2}-{labelSlug}{extension}";
+            await File.WriteAllBytesAsync(path, attachment.Data, cancellationToken);
+            session.AttachmentArtifactPaths.Add(path);
+        }
+    }
+
     internal Task WriteTextAsync(PromptObservationSession session, string text, CancellationToken cancellationToken)
         => string.IsNullOrWhiteSpace(session.TextArtifactPath)
             ? Task.CompletedTask
@@ -92,6 +108,7 @@ public sealed class PromptObservabilityWriter
             DurationMs = duration.TotalMilliseconds,
             TextArtifactPath = TryGetArtifactPath(session.TextArtifactPath),
             StructuredArtifactPath = TryGetArtifactPath(session.StructuredArtifactPath),
+            AttachmentArtifactPaths = TryGetArtifactPaths(session.AttachmentArtifactPaths),
         };
 
         await WriteJsonAsync(session.JsonPath, record, cancellationToken);
@@ -121,6 +138,7 @@ public sealed class PromptObservabilityWriter
             DurationMs = duration.TotalMilliseconds,
             TextArtifactPath = TryGetArtifactPath(session.TextArtifactPath),
             StructuredArtifactPath = TryGetArtifactPath(session.StructuredArtifactPath),
+            AttachmentArtifactPaths = TryGetArtifactPaths(session.AttachmentArtifactPaths),
         };
 
         await WriteJsonAsync(session.JsonPath, record, cancellationToken);
@@ -208,4 +226,41 @@ public sealed class PromptObservabilityWriter
 
     private static string? TryGetArtifactPath(string? path)
         => !string.IsNullOrWhiteSpace(path) && File.Exists(path) ? path : null;
+
+    private static IReadOnlyList<string>? TryGetArtifactPaths(IEnumerable<string> paths)
+    {
+        var existing = paths.Where(File.Exists).ToArray();
+        return existing.Length == 0 ? null : existing;
+    }
+
+    private static string GetFileExtension(string mediaType)
+        => mediaType switch
+        {
+            "image/png" => ".png",
+            "image/jpeg" => ".jpg",
+            "text/plain" => ".txt",
+            _ => ".bin",
+        };
+
+    private static string ToSlug(string value)
+    {
+        Span<char> buffer = stackalloc char[value.Length];
+        var count = 0;
+
+        foreach (var character in value)
+        {
+            if (char.IsLetterOrDigit(character))
+            {
+                buffer[count++] = char.ToLowerInvariant(character);
+                continue;
+            }
+
+            if (count > 0 && buffer[count - 1] != '-')
+            {
+                buffer[count++] = '-';
+            }
+        }
+
+        return count == 0 ? "attachment" : new string(buffer[..count]).Trim('-');
+    }
 }

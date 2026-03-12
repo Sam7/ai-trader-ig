@@ -14,10 +14,16 @@ public sealed class PromptRegistry
         "daily-plan-json",
         "Trading.AI.Prompts.DailyPlanJson.DailyPlanJson.md");
 
+    public static PromptDefinition IntradayOpportunityReview { get; } = new(
+        "intraday-opportunity-review",
+        "intraday-opportunity-review",
+        "Trading.AI.Prompts.IntradayOpportunityReview.IntradayOpportunityReview.md");
+
     private static readonly IReadOnlyDictionary<string, PromptDefinition> Definitions = new Dictionary<string, PromptDefinition>(StringComparer.OrdinalIgnoreCase)
     {
         [DailyBriefResearch.Id] = DailyBriefResearch,
         [DailyPlanJson.Id] = DailyPlanJson,
+        [IntradayOpportunityReview.Id] = IntradayOpportunityReview,
     };
 
     private readonly Assembly _assembly = typeof(PromptRegistry).Assembly;

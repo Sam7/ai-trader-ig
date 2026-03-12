@@ -38,4 +38,19 @@ public sealed class PromptContractTests
         prompt.Should().ContainEquivalentOf("marketRegime` must be exactly one of");
         prompt.Should().NotContain("entryZoneLowerBound");
     }
+
+    [Fact]
+    public void IntradayOpportunityReview_ShouldRequireDeepReasoningAndStructuredTradingFields()
+    {
+        var registry = new PromptRegistry();
+
+        var prompt = registry.GetPromptText(PromptRegistry.IntradayOpportunityReview);
+
+        prompt.Should().Contain("Your job is not to aggregate headlines");
+        prompt.Should().Contain("deep judgement");
+        prompt.Should().Contain("rewardRiskRatio");
+        prompt.Should().Contain("currentSpread");
+        prompt.Should().Contain("candidateOpportunities");
+        prompt.Should().Contain("stand aside");
+    }
 }

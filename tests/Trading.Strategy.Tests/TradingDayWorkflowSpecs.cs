@@ -134,6 +134,50 @@ public class TradingDayWorkflowSpecs
         decision.Should().BeOfType<ExitTrade>();
     }
 
+    [Fact]
+    public async Task ReviewIntradayOpportunitiesAsync_should_accept_candidates_for_watched_markets()
+    {
+        var harness = WorkflowHarness.Create();
+        await harness.Workflow.PlanTradingDayAsync(new TradingDayRequest(new DateOnly(2026, 03, 11)));
+
+        var result = await harness.Workflow.ReviewIntradayOpportunitiesAsync(new IntradayOpportunityBatch(
+            new DateOnly(2026, 03, 11),
+            harness.Clock.UtcNow,
+            harness.Clock.UtcNow.AddMinutes(-60),
+            harness.Clock.UtcNow,
+            [
+                new IntradayMarketAssessment(
+                    new InstrumentId("CS.D.EURUSD.CFD.IP"),
+                    "EUR/USD",
+                    74,
+                    TradeDirection.Buy,
+                    "Clean continuation structure.",
+                    "USD softness and stable spread.",
+                    string.Empty),
+            ],
+            [
+                new IntradayOpportunityCandidate(
+                    new InstrumentId("CS.D.EURUSD.CFD.IP"),
+                    "EUR/USD",
+                    TradeDirection.Buy,
+                    78,
+                    TradeEntryMethod.Limit,
+                    1.1000m,
+                    1.0975m,
+                    1.1050m,
+                    2.0m,
+                    1.1002m,
+                    0.0002m,
+                    "Buy pullback into support.",
+                    "Breaks back below intraday support.",
+                    "Momentum and structure align now.",
+                    harness.Clock.UtcNow.AddMinutes(45))
+            ]));
+
+        result.CandidateOpportunities.Should().HaveCount(1);
+        result.Outcome.Should().Contain("Decision logic pending");
+    }
+
     private sealed class WorkflowHarness
     {
         private WorkflowHarness(
@@ -194,6 +238,7 @@ public class TradingDayWorkflowSpecs
             var rules = StrategyRules.Default;
             var workflow = new TradingDayWorkflow(
                 new TradingDayPlanner(rules, composer, clock, store),
+                new IntradayOpportunityReviewService(store),
                 new MarketAttentionService(rules, store),
                 new OpportunityReviewer(riskContextSource, setupPlanner, tradeApprover, store, clock, new PositionSizer()),
                 new ActiveTradeReviewer(clock, store, rules, new BreakEvenStopRule()),

@@ -280,6 +280,53 @@ public sealed class TradingCliRenderer
         _console.Write(table);
     }
 
+    public void WriteIntradayOpportunityReview(IntradayOpportunityReviewResult result)
+    {
+        WriteKeyValuePanel(
+            "Intraday Opportunity Scan",
+            ("Trading Date", result.TradingDate.ToString("yyyy-MM-dd")),
+            ("Reviewed At", CliParsing.FormatDate(result.ReviewedAtUtc)),
+            ("Assessments", result.MarketAssessments.Count.ToString()),
+            ("Candidates", result.CandidateOpportunities.Count.ToString()),
+            ("Outcome", result.Outcome));
+
+        var assessments = CreateTable("Instrument", "Bias", "Score", "Why Now", "Stand Aside");
+        foreach (var assessment in result.MarketAssessments)
+        {
+            assessments.AddRow(
+                assessment.Instrument.Value,
+                assessment.DirectionalBias.ToString(),
+                assessment.OpportunityScore.ToString(),
+                assessment.WhyNow,
+                string.IsNullOrWhiteSpace(assessment.StandAsideReason) ? "n/a" : assessment.StandAsideReason);
+        }
+
+        _console.Write(assessments);
+
+        if (result.CandidateOpportunities.Count == 0)
+        {
+            WriteInfo("No actionable intraday candidates were returned.");
+            return;
+        }
+
+        var candidates = CreateTable("Instrument", "Direction", "Score", "Entry", "Stop", "Target", "R:R", "Spread", "Method");
+        foreach (var candidate in result.CandidateOpportunities)
+        {
+            candidates.AddRow(
+                candidate.Instrument.Value,
+                candidate.Direction.ToString(),
+                candidate.OpportunityScore.ToString(),
+                CliParsing.FormatDecimal(candidate.EntryPrice),
+                CliParsing.FormatDecimal(candidate.StopLossPrice),
+                CliParsing.FormatDecimal(candidate.TakeProfitPrice),
+                CliParsing.FormatDecimal(candidate.RewardRiskRatio),
+                CliParsing.FormatDecimal(candidate.CurrentSpread),
+                candidate.EntryMethod.ToString());
+        }
+
+        _console.Write(candidates);
+    }
+
     private void WriteKeyValuePanel(string title, params (string Key, string Value)[] rows)
     {
         var table = new Table()

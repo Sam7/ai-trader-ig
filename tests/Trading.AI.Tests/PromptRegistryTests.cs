@@ -23,4 +23,15 @@ public sealed class PromptRegistryTests
 
         definition.Should().Be(PromptRegistry.DailyPlanJson);
     }
+
+    [Fact]
+    public void GetPromptText_ForIntradayPrompt_ShouldLoadEmbeddedMarkdown()
+    {
+        var registry = new PromptRegistry();
+
+        var prompt = registry.GetPromptText(PromptRegistry.IntradayOpportunityReview);
+
+        prompt.Should().Contain("WATCHED_MARKETS_CONTEXT");
+        prompt.Should().Contain("4-day OHLC chart");
+    }
 }

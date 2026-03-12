@@ -5,6 +5,8 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using TickerQ.DependencyInjection;
 using Trading.Automation.DependencyInjection;
+using Trading.Charting.DependencyInjection;
+using Trading.IG.DependencyInjection;
 
 namespace Trading.Automation;
 
@@ -35,6 +37,8 @@ public static class TradingWorkerApplication
             });
         });
         builder.Services.AddTradingAutomation(builder.Configuration);
+        builder.Services.AddIgTradingGateway(builder.Configuration);
+        builder.Services.AddTradingCharting();
 
         var app = builder.Build();
         app.UseTickerQ();

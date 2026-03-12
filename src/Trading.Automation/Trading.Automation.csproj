@@ -2,6 +2,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Trading.AI\Trading.AI.csproj" />
+    <ProjectReference Include="..\Trading.Charting\Trading.Charting.csproj" />
+    <ProjectReference Include="..\Trading.IG\Trading.IG.csproj" />
     <ProjectReference Include="..\Trading.Strategy\Trading.Strategy.csproj" />
   </ItemGroup>
 

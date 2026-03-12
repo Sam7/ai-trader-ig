@@ -1,0 +1,89 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "recentDevelopmentsSummary",
+    "marketAssessments",
+    "candidateOpportunities"
+  ],
+  "properties": {
+    "recentDevelopmentsSummary": {
+      "type": "string"
+    },
+    "marketAssessments": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/marketAssessment"
+      }
+    },
+    "candidateOpportunities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/candidateOpportunity"
+      }
+    }
+  },
+  "$defs": {
+    "marketAssessment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrumentId",
+        "instrumentName",
+        "opportunityScore",
+        "directionalBias",
+        "summary",
+        "whyNow",
+        "standAsideReason"
+      ],
+      "properties": {
+        "instrumentId": { "type": "string" },
+        "instrumentName": { "type": "string" },
+        "opportunityScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "directionalBias": { "type": "string", "enum": [ "Buy", "Sell" ] },
+        "summary": { "type": "string" },
+        "whyNow": { "type": "string" },
+        "standAsideReason": { "type": "string" }
+      }
+    },
+    "candidateOpportunity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "instrumentId",
+        "instrumentName",
+        "direction",
+        "opportunityScore",
+        "entryMethod",
+        "entryPrice",
+        "stopLossPrice",
+        "takeProfitPrice",
+        "rewardRiskRatio",
+        "currentPrice",
+        "currentSpread",
+        "thesis",
+        "invalidation",
+        "whyNow",
+        "setupExpiresAtUtc"
+      ],
+      "properties": {
+        "instrumentId": { "type": "string" },
+        "instrumentName": { "type": "string" },
+        "direction": { "type": "string", "enum": [ "Buy", "Sell" ] },
+        "opportunityScore": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "entryMethod": { "type": "string", "enum": [ "Market", "Limit", "StopEntry" ] },
+        "entryPrice": { "type": "number", "exclusiveMinimum": 0 },
+        "stopLossPrice": { "type": "number", "exclusiveMinimum": 0 },
+        "takeProfitPrice": { "type": "number", "exclusiveMinimum": 0 },
+        "rewardRiskRatio": { "type": "number", "exclusiveMinimum": 0 },
+        "currentPrice": { "type": "number", "exclusiveMinimum": 0 },
+        "currentSpread": { "type": "number", "minimum": 0 },
+        "thesis": { "type": "string" },
+        "invalidation": { "type": "string" },
+        "whyNow": { "type": "string" },
+        "setupExpiresAtUtc": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

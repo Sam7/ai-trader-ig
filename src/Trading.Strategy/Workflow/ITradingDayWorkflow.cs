@@ -11,6 +11,10 @@ public interface ITradingDayWorkflow
 {
     Task<TradingDayPlan> PlanTradingDayAsync(TradingDayRequest request, CancellationToken cancellationToken = default);
 
+    Task<IntradayOpportunityReviewResult> ReviewIntradayOpportunitiesAsync(
+        IntradayOpportunityBatch batch,
+        CancellationToken cancellationToken = default);
+
     Task<MarketAssessment> AssessMarketAsync(MarketEvent marketEvent, CancellationToken cancellationToken = default);
 
     Task<OpportunityReviewResult> ReviewOpportunityAsync(ReviewMarketUpdate review, CancellationToken cancellationToken = default);

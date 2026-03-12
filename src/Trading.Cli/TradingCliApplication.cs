@@ -86,6 +86,10 @@ public sealed class TradingCliApplication
                 brief.AddCommand<AutomationBriefPlanCommand>("plan");
                 brief.AddCommand<AutomationBriefConvertCommand>("convert");
             });
+            automation.AddBranch("intraday", intraday =>
+            {
+                intraday.AddCommand<AutomationIntradayScanCommand>("scan");
+            });
         });
 
         configurator.AddBranch("trades", trades =>
@@ -127,6 +131,7 @@ public sealed class TradingCliApplication
         configurator.AddExample(["automation", "brief", "research", "--date", "2026-03-12"]);
         configurator.AddExample(["automation", "brief", "plan", "--date", "2026-03-12"]);
         configurator.AddExample(["automation", "brief", "convert", "--date", "2026-03-12", "--input", "Logs\\Observability\\2026-03-12\\002044798-daily-brief-research.md"]);
+        configurator.AddExample(["automation", "intraday", "scan", "--date", "2026-03-12", "--at", "2026-03-12T10:15:00Z"]);
         configurator.AddExample(["trades", "buy", "--instrument", "IX.D.SPTRD.DAILY.IP", "--size", "1"]);
         configurator.AddExample(["markets", "search", "--query", "VIX"]);
         configurator.AddExample(["markets", "browse"]);
