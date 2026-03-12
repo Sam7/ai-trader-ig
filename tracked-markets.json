@@ -1,0 +1,36 @@
+{
+  "AI": {
+    "DailyBriefing": {
+      "TrackedMarkets": [
+        {
+          "DisplayName": "WTI Crude Oil",
+          "InstrumentId": "CC.D.WTI.UMA.IP",
+          "Sector": "Energy",
+          "Aliases": [
+            "WTI",
+            "Crude Oil",
+            "US Oil"
+          ]
+        },
+        {
+          "DisplayName": "Brent Crude Oil",
+          "InstrumentId": "CC.D.LCO.UMA.IP",
+          "Sector": "Energy",
+          "Aliases": [
+            "Brent",
+            "Brent Crude"
+          ]
+        },
+        {
+          "DisplayName": "Gold",
+          "InstrumentId": "CS.D.GC.UMA.IP",
+          "Sector": "Metals",
+          "Aliases": [
+            "XAUUSD",
+            "Gold Futures"
+          ]
+        }
+      ]
+    }
+  }
+}
