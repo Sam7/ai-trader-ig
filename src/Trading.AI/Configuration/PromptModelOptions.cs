@@ -1,6 +1,6 @@
 namespace Trading.AI.Configuration;
 
-public sealed class DailyBriefingModelOptions
+public sealed class PromptModelOptions
 {
     public string ModelId { get; init; } = string.Empty;
 

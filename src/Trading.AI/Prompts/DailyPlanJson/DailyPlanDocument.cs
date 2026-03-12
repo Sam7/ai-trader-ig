@@ -1,6 +1,6 @@
 using Trading.Strategy.Inputs;
 
-namespace Trading.AI.DailyBriefing;
+namespace Trading.AI.Prompts.DailyPlanJson;
 
 public sealed record DailyPlanDocument(
     string MacroSummary,

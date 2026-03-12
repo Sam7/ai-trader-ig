@@ -6,11 +6,45 @@ using System.ClientModel;
 using Trading.AI.Configuration;
 using Trading.AI.DailyBriefing;
 using Trading.AI.Observability;
+using Trading.AI.PromptExecution;
 using Trading.AI.Prompts;
+using Trading.AI.Prompts.DailyBriefResearch;
+using Trading.AI.Prompts.DailyPlanJson;
 using Trading.Strategy.Inputs;
 
 public sealed class PromptExecutorTests
 {
+    [Fact]
+    public async Task ExecuteTextAsync_ShouldWriteMarkdownArtifactByDefault()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var chatClient = new TestChatClient(_ => Task.FromResult(CreateResponse("# brief")));
+            var executor = CreateExecutor(tempDirectory.FullName, chatClient);
+
+            var result = await executor.ExecuteTextAsync(
+                PromptRegistry.DailyBriefResearch,
+                new PromptModelOptions { ModelId = "gpt-test" },
+                new DailyBriefResearchInput(
+                    new DateOnly(2026, 3, 12),
+                    "Australia/Melbourne",
+                    3,
+                    "- WTI Crude Oil | instrumentId: CC.D.WTI.UMA.IP | sector: Energy | aliases: WTI",
+                    new DateOnly(2026, 3, 12),
+                    DateTimeOffset.Parse("2026-03-12T06:30:45Z")),
+                cancellationToken: CancellationToken.None);
+
+            result.TextArtifactPath.Should().EndWith(".md");
+            File.Exists(result.TextArtifactPath).Should().BeTrue();
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
     [Fact]
     public async Task ExecuteStructuredAsync_ShouldRetryOnce_WhenResponseJsonIsInvalid()
     {
@@ -18,8 +52,6 @@ public sealed class PromptExecutorTests
 
         try
         {
-            var executor = CreateExecutor(tempDirectory.FullName);
-            var context = CreateStructuredContext();
             var chatClient = new TestChatClient(
                 _ => Task.FromResult(CreateResponse("{")),
                 _ => Task.FromResult(CreateResponse("""
@@ -55,11 +87,17 @@ public sealed class PromptExecutorTests
                       "calendarEvents": []
                     }
                     """)));
+            var executor = CreateExecutor(tempDirectory.FullName, chatClient);
 
-            var (_, structured) = await executor.ExecuteStructuredAsync<DailyPlanDocument>(chatClient, context, CancellationToken.None);
+            var structured = await executor.ExecuteStructuredAsync<DailyPlanJsonInput, DailyPlanDocument>(
+                PromptRegistry.DailyPlanJson,
+                new PromptModelOptions { ModelId = "gpt-test" },
+                CreateStructuredInput(),
+                DailyPlanJsonResponseFormat.Create(3),
+                CancellationToken.None);
 
             chatClient.CallCount.Should().Be(2);
-            structured.MarketRegime.Should().Be(MarketRegime.Mixed);
+            structured.StructuredValue.MarketRegime.Should().Be(MarketRegime.Mixed);
         }
         finally
         {
@@ -74,11 +112,15 @@ public sealed class PromptExecutorTests
 
         try
         {
-            var executor = CreateExecutor(tempDirectory.FullName);
-            var context = CreateStructuredContext();
             var chatClient = new TestChatClient(_ => throw new HttpRequestException("dns failed"));
+            var executor = CreateExecutor(tempDirectory.FullName, chatClient);
 
-            var action = () => executor.ExecuteStructuredAsync<DailyPlanDocument>(chatClient, context, CancellationToken.None);
+            var action = () => executor.ExecuteStructuredAsync<DailyPlanJsonInput, DailyPlanDocument>(
+                PromptRegistry.DailyPlanJson,
+                new PromptModelOptions { ModelId = "gpt-test" },
+                CreateStructuredInput(),
+                DailyPlanJsonResponseFormat.Create(3),
+                CancellationToken.None);
 
             await action.Should().ThrowAsync<HttpRequestException>();
             chatClient.CallCount.Should().Be(1);
@@ -96,11 +138,15 @@ public sealed class PromptExecutorTests
 
         try
         {
-            var executor = CreateExecutor(tempDirectory.FullName);
-            var context = CreateStructuredContext();
             var chatClient = new TestChatClient(_ => throw new ClientResultException("boom", null, null));
+            var executor = CreateExecutor(tempDirectory.FullName, chatClient);
 
-            var action = () => executor.ExecuteStructuredAsync<DailyPlanDocument>(chatClient, context, CancellationToken.None);
+            var action = () => executor.ExecuteStructuredAsync<DailyPlanJsonInput, DailyPlanDocument>(
+                PromptRegistry.DailyPlanJson,
+                new PromptModelOptions { ModelId = "gpt-test" },
+                CreateStructuredInput(),
+                DailyPlanJsonResponseFormat.Create(3),
+                CancellationToken.None);
 
             await action.Should().ThrowAsync<ClientResultException>();
             chatClient.CallCount.Should().Be(1);
@@ -111,9 +157,9 @@ public sealed class PromptExecutorTests
         }
     }
 
-    private static PromptExecutor CreateExecutor(string observabilityRootPath)
+    private static PromptExecutor CreateExecutor(string observabilityRootPath, IChatClient chatClient)
     {
-        var options = Options.Create(new DailyBriefingOptions
+        var options = Options.Create(new PromptObservabilityOptions
         {
             ObservabilityRootPath = observabilityRootPath,
         });
@@ -121,24 +167,20 @@ public sealed class PromptExecutorTests
         return new PromptExecutor(
             new PromptRegistry(),
             new PromptTemplateRenderer(),
-            new PromptObservabilityWriter(options));
+            new PromptObservabilityWriter(options),
+            new StubChatClientFactory(chatClient),
+            new PromptInputConverter());
     }
 
-    private static PromptExecutionContext CreateStructuredContext()
+    private static DailyPlanJsonInput CreateStructuredInput()
         => new(
-            PromptRegistry.DailyPlanJson,
-            new DailyBriefingModelOptions { ModelId = "gpt-test" },
-            new Dictionary<string, string>
-            {
-                ["TRADING_DATE"] = "2026-03-12",
-                ["REPORT_TIMEZONE"] = "Australia/Melbourne",
-                ["WATCHLIST_SIZE"] = "3",
-                ["TRACKED_MARKETS"] = "- WTI Crude Oil | instrumentId: CC.D.WTI.UMA.IP | sector: Energy | aliases: WTI",
-                ["RESEARCH_BRIEF"] = "# 1. Executive Snapshot",
-            },
-            DateTimeOffset.Parse("2026-03-12T06:30:45Z"),
             new DateOnly(2026, 3, 12),
-            DailyPlanJsonResponseFormat.Create(3));
+            "Australia/Melbourne",
+            3,
+            2m,
+            "- WTI Crude Oil | instrumentId: CC.D.WTI.UMA.IP | sector: Energy | aliases: WTI",
+            "# 1. Executive Snapshot",
+            DateTimeOffset.Parse("2026-03-12T06:30:45Z"));
 
     private static ChatResponse CreateResponse(string text)
         => new(new ChatMessage(ChatRole.Assistant, text))
@@ -176,5 +218,18 @@ public sealed class PromptExecutorTests
         public void Dispose()
         {
         }
+    }
+
+    private sealed class StubChatClientFactory : IChatClientFactory
+    {
+        private readonly IChatClient _chatClient;
+
+        public StubChatClientFactory(IChatClient chatClient)
+        {
+            _chatClient = chatClient;
+        }
+
+        public IChatClient CreateClient(string modelId)
+            => _chatClient;
     }
 }

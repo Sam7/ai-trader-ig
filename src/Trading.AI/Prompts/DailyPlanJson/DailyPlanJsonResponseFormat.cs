@@ -3,11 +3,11 @@ using System.Reflection;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 
-namespace Trading.AI.DailyBriefing;
+namespace Trading.AI.Prompts.DailyPlanJson;
 
 public static class DailyPlanJsonResponseFormat
 {
-    private const string ResourceName = "Trading.AI.Schemas.DailyPlanJson.schema.json";
+    private const string ResourceName = "Trading.AI.Prompts.DailyPlanJson.DailyPlanJson.schema.json";
     private static readonly Assembly Assembly = typeof(DailyPlanJsonResponseFormat).Assembly;
 
     public static ChatResponseFormat Create(int watchListSize)

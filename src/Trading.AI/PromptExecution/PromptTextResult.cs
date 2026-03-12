@@ -1,11 +1,12 @@
 using Microsoft.Extensions.AI;
 
-namespace Trading.AI.DailyBriefing;
+namespace Trading.AI.PromptExecution;
 
-public sealed record PromptExecutionResult(
+public sealed record PromptTextResult(
     string PromptId,
     string PromptName,
     string ModelId,
     string RequestText,
     ChatResponse Response,
-    string ResponseText);
+    string ResponseText,
+    string? TextArtifactPath);

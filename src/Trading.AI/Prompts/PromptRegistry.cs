@@ -7,12 +7,12 @@ public sealed class PromptRegistry
     public static PromptDefinition DailyBriefResearch { get; } = new(
         "daily-brief-research",
         "daily-brief-research",
-        "Trading.AI.Prompts.DailyBriefResearch.md");
+        "Trading.AI.Prompts.DailyBriefResearch.DailyBriefResearch.md");
 
     public static PromptDefinition DailyPlanJson { get; } = new(
         "daily-plan-json",
         "daily-plan-json",
-        "Trading.AI.Prompts.DailyPlanJson.md");
+        "Trading.AI.Prompts.DailyPlanJson.DailyPlanJson.md");
 
     private static readonly IReadOnlyDictionary<string, PromptDefinition> Definitions = new Dictionary<string, PromptDefinition>(StringComparer.OrdinalIgnoreCase)
     {

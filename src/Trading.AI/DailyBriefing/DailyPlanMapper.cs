@@ -1,5 +1,6 @@
 using Trading.Abstractions;
 using Trading.AI.Configuration;
+using Trading.AI.Prompts.DailyPlanJson;
 using Trading.Strategy.DayPlanning;
 using Trading.Strategy.Inputs;
 using Trading.Strategy.Shared;

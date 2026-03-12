@@ -3,7 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using Trading.AI.Configuration;
-using Trading.AI.DailyBriefing;
+using Trading.AI.PromptExecution;
 
 namespace Trading.AI.Observability;
 
@@ -18,26 +18,30 @@ public sealed class PromptObservabilityWriter
         }
     };
 
-    private readonly DailyBriefingOptions _options;
+    private readonly PromptObservabilityOptions _options;
 
-    public PromptObservabilityWriter(IOptions<DailyBriefingOptions> options)
+    public PromptObservabilityWriter(IOptions<PromptObservabilityOptions> options)
     {
         _options = options.Value;
     }
 
-    public async Task<PromptObservationSession> StartAsync(PromptExecutionContext context, string requestText, object? requestOptions, CancellationToken cancellationToken)
+    internal async Task<PromptObservationSession> StartAsync(PromptInvocation invocation, string requestText, object? requestOptions, CancellationToken cancellationToken)
     {
-        var basePath = BuildBasePath(context.TradingDate, context.Prompt.Name, context.RequestedAtUtc);
-        var session = new PromptObservationSession($"{basePath}.json", basePath);
+        var basePath = BuildBasePath(invocation.PromptDate, invocation.Prompt.Name, invocation.RequestedAtUtc);
+        var session = new PromptObservationSession(
+            $"{basePath}.json",
+            basePath,
+            BuildTextArtifactPath(basePath, invocation.TextArtifactKind),
+            $"{basePath}-extracted.json");
 
         var record = new PromptObservationRecord
         {
-            PromptId = context.Prompt.Id,
-            PromptName = context.Prompt.Name,
+            PromptId = invocation.Prompt.Id,
+            PromptName = invocation.Prompt.Name,
             Status = "Pending",
-            RequestedAtUtc = context.RequestedAtUtc,
-            TradingDate = context.TradingDate,
-            ModelId = context.Model.ModelId,
+            RequestedAtUtc = invocation.RequestedAtUtc,
+            PromptDate = invocation.PromptDate,
+            ModelId = invocation.Model.ModelId,
             RequestText = requestText,
             RequestOptions = requestOptions,
         };
@@ -46,15 +50,17 @@ public sealed class PromptObservabilityWriter
         return session;
     }
 
-    public Task WriteMarkdownAsync(PromptObservationSession session, string markdown, CancellationToken cancellationToken)
-        => File.WriteAllTextAsync($"{session.BasePath}.md", markdown, cancellationToken);
+    internal Task WriteTextAsync(PromptObservationSession session, string text, CancellationToken cancellationToken)
+        => string.IsNullOrWhiteSpace(session.TextArtifactPath)
+            ? Task.CompletedTask
+            : File.WriteAllTextAsync(session.TextArtifactPath, text, cancellationToken);
 
-    public Task WriteStructuredAsync(PromptObservationSession session, object structuredResponse, CancellationToken cancellationToken)
-        => File.WriteAllTextAsync($"{session.BasePath}-extracted.json", JsonSerializer.Serialize(structuredResponse, JsonOptions), cancellationToken);
+    internal Task WriteStructuredAsync(PromptObservationSession session, object structuredResponse, CancellationToken cancellationToken)
+        => File.WriteAllTextAsync(session.StructuredArtifactPath, JsonSerializer.Serialize(structuredResponse, JsonOptions), cancellationToken);
 
-    public async Task CompleteAsync(
+    internal async Task CompleteAsync(
         PromptObservationSession session,
-        PromptExecutionContext context,
+        PromptInvocation invocation,
         string requestText,
         object? requestOptions,
         ChatResponse response,
@@ -65,17 +71,17 @@ public sealed class PromptObservabilityWriter
     {
         var usage = response.Usage ?? new UsageDetails();
         var cachedInputTokens = TryGetCachedInputTokenCount(usage);
-        var cost = CalculateCost(usage, cachedInputTokens, context.Model.Pricing);
+        var cost = CalculateCost(usage, cachedInputTokens, invocation.Model.Pricing);
 
         var record = new PromptObservationRecord
         {
-            PromptId = context.Prompt.Id,
-            PromptName = context.Prompt.Name,
+            PromptId = invocation.Prompt.Id,
+            PromptName = invocation.Prompt.Name,
             Status = "Completed",
-            RequestedAtUtc = context.RequestedAtUtc,
+            RequestedAtUtc = invocation.RequestedAtUtc,
             CompletedAtUtc = DateTimeOffset.UtcNow,
-            TradingDate = context.TradingDate,
-            ModelId = response.ModelId ?? context.Model.ModelId,
+            PromptDate = invocation.PromptDate,
+            ModelId = response.ModelId ?? invocation.Model.ModelId,
             RequestText = requestText,
             RequestOptions = requestOptions,
             ResponseText = responseText,
@@ -84,16 +90,16 @@ public sealed class PromptObservabilityWriter
             Cost = cost,
             RawResponse = ConvertRawRepresentation(response.RawRepresentation),
             DurationMs = duration.TotalMilliseconds,
-            MarkdownArtifactPath = TryGetMarkdownPath(session),
-            StructuredArtifactPath = TryGetStructuredPath(session),
+            TextArtifactPath = TryGetArtifactPath(session.TextArtifactPath),
+            StructuredArtifactPath = TryGetArtifactPath(session.StructuredArtifactPath),
         };
 
         await WriteJsonAsync(session.JsonPath, record, cancellationToken);
     }
 
-    public async Task FailAsync(
+    internal async Task FailAsync(
         PromptObservationSession session,
-        PromptExecutionContext context,
+        PromptInvocation invocation,
         string requestText,
         object? requestOptions,
         Exception exception,
@@ -102,19 +108,19 @@ public sealed class PromptObservabilityWriter
     {
         var record = new PromptObservationRecord
         {
-            PromptId = context.Prompt.Id,
-            PromptName = context.Prompt.Name,
+            PromptId = invocation.Prompt.Id,
+            PromptName = invocation.Prompt.Name,
             Status = "Failed",
-            RequestedAtUtc = context.RequestedAtUtc,
+            RequestedAtUtc = invocation.RequestedAtUtc,
             CompletedAtUtc = DateTimeOffset.UtcNow,
-            TradingDate = context.TradingDate,
-            ModelId = context.Model.ModelId,
+            PromptDate = invocation.PromptDate,
+            ModelId = invocation.Model.ModelId,
             RequestText = requestText,
             RequestOptions = requestOptions,
             Error = exception.ToString(),
             DurationMs = duration.TotalMilliseconds,
-            MarkdownArtifactPath = TryGetMarkdownPath(session),
-            StructuredArtifactPath = TryGetStructuredPath(session),
+            TextArtifactPath = TryGetArtifactPath(session.TextArtifactPath),
+            StructuredArtifactPath = TryGetArtifactPath(session.StructuredArtifactPath),
         };
 
         await WriteJsonAsync(session.JsonPath, record, cancellationToken);
@@ -134,6 +140,14 @@ public sealed class PromptObservabilityWriter
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(record, JsonOptions), cancellationToken);
     }
+
+    private static string? BuildTextArtifactPath(string basePath, PromptTextArtifactKind artifactKind)
+        => artifactKind switch
+        {
+            PromptTextArtifactKind.Text => $"{basePath}.txt",
+            PromptTextArtifactKind.Markdown => $"{basePath}.md",
+            _ => null,
+        };
 
     private static int TryGetCachedInputTokenCount(UsageDetails usage)
     {
@@ -192,15 +206,6 @@ public sealed class PromptObservabilityWriter
         }
     }
 
-    private static string? TryGetMarkdownPath(PromptObservationSession session)
-    {
-        var path = $"{session.BasePath}.md";
-        return File.Exists(path) ? path : null;
-    }
-
-    private static string? TryGetStructuredPath(PromptObservationSession session)
-    {
-        var path = $"{session.BasePath}-extracted.json";
-        return File.Exists(path) ? path : null;
-    }
+    private static string? TryGetArtifactPath(string? path)
+        => !string.IsNullOrWhiteSpace(path) && File.Exists(path) ? path : null;
 }

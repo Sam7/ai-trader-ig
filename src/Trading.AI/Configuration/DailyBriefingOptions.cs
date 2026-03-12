@@ -4,11 +4,9 @@ public sealed class DailyBriefingOptions
 {
     public const string SectionName = "AI:DailyBriefing";
 
-    public DailyBriefingModelOptions Research { get; init; } = new();
+    public PromptModelOptions Research { get; init; } = new();
 
-    public DailyBriefingModelOptions PlanJson { get; init; } = new();
-
-    public string ObservabilityRootPath { get; init; } = Path.Combine("Logs", "Observability");
+    public PromptModelOptions PlanJson { get; init; } = new();
 
     public string DefaultTimezone { get; init; } = "Australia/Melbourne";
 

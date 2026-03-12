@@ -6,7 +6,7 @@ using OpenAI;
 using OpenAI.Responses;
 using Trading.AI.Configuration;
 
-namespace Trading.AI.DailyBriefing;
+namespace Trading.AI.PromptExecution;
 
 public sealed class OpenAiChatClientFactory : IChatClientFactory
 {

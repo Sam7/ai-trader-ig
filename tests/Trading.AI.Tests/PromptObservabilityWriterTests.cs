@@ -4,7 +4,9 @@ using Microsoft.Extensions.Options;
 using Trading.AI.Configuration;
 using Trading.AI.DailyBriefing;
 using Trading.AI.Observability;
+using Trading.AI.PromptExecution;
 using Trading.AI.Prompts;
+using Trading.AI.Prompts.DailyPlanJson;
 using Trading.Strategy.Inputs;
 
 public sealed class PromptObservabilityWriterTests
@@ -17,32 +19,34 @@ public sealed class PromptObservabilityWriterTests
         try
         {
             var writer = new PromptObservabilityWriter(
-                Options.Create(new DailyBriefingOptions
+                Options.Create(new PromptObservabilityOptions
                 {
                     ObservabilityRootPath = tempDirectory.FullName,
                 }));
 
-            var context = new PromptExecutionContext(
+            var invocation = new PromptInvocation(
                 PromptRegistry.DailyBriefResearch,
-                new DailyBriefingModelOptions { ModelId = "gpt-test" },
+                new PromptModelOptions { ModelId = "gpt-test" },
                 new Dictionary<string, string> { ["REPORT_DATE"] = "2026-03-12" },
+                new DateOnly(2026, 3, 12),
                 DateTimeOffset.Parse("2026-03-12T06:30:45Z"),
-                new DateOnly(2026, 3, 12));
+                null,
+                PromptTextArtifactKind.Markdown);
 
-            var session = await writer.StartAsync(context, "request text", new { mode = "test" }, CancellationToken.None);
+            var session = await writer.StartAsync(invocation, "request text", new { mode = "test" }, CancellationToken.None);
 
             File.Exists(session.JsonPath).Should().BeTrue();
             var pending = JsonDocument.Parse(await File.ReadAllTextAsync(session.JsonPath));
             pending.RootElement.GetProperty("status").GetString().Should().Be("Pending");
 
-            await writer.WriteMarkdownAsync(session, "# brief", CancellationToken.None);
+            await writer.WriteTextAsync(session, "# brief", CancellationToken.None);
             await writer.WriteStructuredAsync(session, new { marketRegime = "EventDriven" }, CancellationToken.None);
-            await writer.FailAsync(session, context, "request text", null, new InvalidOperationException("boom"), TimeSpan.FromSeconds(2), CancellationToken.None);
+            await writer.FailAsync(session, invocation, "request text", null, new InvalidOperationException("boom"), TimeSpan.FromSeconds(2), CancellationToken.None);
 
             var failed = JsonDocument.Parse(await File.ReadAllTextAsync(session.JsonPath));
             failed.RootElement.GetProperty("status").GetString().Should().Be("Failed");
             failed.RootElement.GetProperty("error").GetString().Should().Contain("boom");
-            failed.RootElement.GetProperty("markdownArtifactPath").GetString().Should().EndWith(".md");
+            failed.RootElement.GetProperty("textArtifactPath").GetString().Should().EndWith(".md");
             failed.RootElement.GetProperty("structuredArtifactPath").GetString().Should().EndWith("-extracted.json");
         }
         finally
@@ -59,19 +63,21 @@ public sealed class PromptObservabilityWriterTests
         try
         {
             var writer = new PromptObservabilityWriter(
-                Options.Create(new DailyBriefingOptions
+                Options.Create(new PromptObservabilityOptions
                 {
                     ObservabilityRootPath = tempDirectory.FullName,
                 }));
 
-            var context = new PromptExecutionContext(
+            var invocation = new PromptInvocation(
                 PromptRegistry.DailyPlanJson,
-                new DailyBriefingModelOptions { ModelId = "gpt-test" },
+                new PromptModelOptions { ModelId = "gpt-test" },
                 new Dictionary<string, string> { ["TRADING_DATE"] = "2026-03-12" },
+                new DateOnly(2026, 3, 12),
                 DateTimeOffset.Parse("2026-03-12T06:30:45Z"),
-                new DateOnly(2026, 3, 12));
+                null,
+                PromptTextArtifactKind.None);
 
-            var session = await writer.StartAsync(context, "request text", null, CancellationToken.None);
+            var session = await writer.StartAsync(invocation, "request text", null, CancellationToken.None);
             var document = new DailyPlanDocument(
                 "Macro",
                 "Summary",
@@ -84,7 +90,7 @@ public sealed class PromptObservabilityWriterTests
 
             await writer.WriteStructuredAsync(session, document, CancellationToken.None);
 
-            var json = await File.ReadAllTextAsync($"{session.BasePath}-extracted.json");
+            var json = await File.ReadAllTextAsync(session.StructuredArtifactPath);
             json.Should().Contain("\"marketRegime\": \"EventDriven\"");
         }
         finally

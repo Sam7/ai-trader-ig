@@ -12,7 +12,7 @@ public sealed class PromptObservationRecord
 
     public DateTimeOffset? CompletedAtUtc { get; set; }
 
-    public required DateOnly TradingDate { get; init; }
+    public required DateOnly PromptDate { get; init; }
 
     public required string ModelId { get; init; }
 
@@ -34,7 +34,7 @@ public sealed class PromptObservationRecord
 
     public double? DurationMs { get; set; }
 
-    public string? MarkdownArtifactPath { get; set; }
+    public string? TextArtifactPath { get; set; }
 
     public string? StructuredArtifactPath { get; set; }
 }

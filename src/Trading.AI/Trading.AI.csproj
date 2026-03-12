@@ -12,8 +12,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <EmbeddedResource Include="Prompts\*.md" />
-    <EmbeddedResource Include="Schemas\*.json" />
+    <EmbeddedResource Include="Prompts\**\*.md" />
+    <EmbeddedResource Include="Prompts\**\*.json" />
   </ItemGroup>
 
   <PropertyGroup>

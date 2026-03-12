@@ -1,6 +1,6 @@
 using Microsoft.Extensions.AI;
 
-namespace Trading.AI.DailyBriefing;
+namespace Trading.AI.PromptExecution;
 
 public interface IChatClientFactory
 {
