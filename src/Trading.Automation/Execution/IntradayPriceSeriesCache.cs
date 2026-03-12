@@ -13,7 +13,7 @@ public sealed class IntradayPriceSeriesCache
         _tradingGateway = tradingGateway;
     }
 
-    public async Task<PriceSeries> GetSeriesAsync(
+    public async Task<CachedPriceSeriesResult> GetSeriesAsync(
         InstrumentId instrument,
         DateTimeOffset requestedAtUtc,
         int chartLookbackHours,
@@ -21,6 +21,7 @@ public sealed class IntradayPriceSeriesCache
         CancellationToken cancellationToken = default)
     {
         var lookbackFromUtc = requestedAtUtc.AddHours(-chartLookbackHours);
+        var totalPoints = CalculateLookbackPoints(chartLookbackHours, resolution);
         var key = (instrument.Value, resolution);
 
         await _gate.WaitAsync(cancellationToken);
@@ -34,27 +35,25 @@ public sealed class IntradayPriceSeriesCache
                     new GetPricesRequest(
                         instrument,
                         resolution,
-                        FromUtc: lookbackFromUtc,
-                        ToUtc: requestedAtUtc),
+                        MaxPoints: totalPoints),
                     cancellationToken);
 
                 _seriesByInstrument[key] = TrimSeries(bootstrap, lookbackFromUtc);
-                return _seriesByInstrument[key];
+                return new CachedPriceSeriesResult(_seriesByInstrument[key], PriceSeriesRefreshMode.Bootstrap, bootstrap.Bars.Count);
             }
 
             var latestCachedBar = existing.Bars.MaxBy(bar => bar.TimestampUtc)!;
-            var incrementalFromUtc = latestCachedBar.TimestampUtc.AddMinutes(-GetResolutionMinutes(resolution));
-            if (incrementalFromUtc > requestedAtUtc)
-            {
-                incrementalFromUtc = requestedAtUtc;
-            }
+            var resolutionMinutes = GetResolutionMinutes(resolution);
+            var missingBars = requestedAtUtc <= latestCachedBar.TimestampUtc
+                ? 0
+                : (int)Math.Ceiling((requestedAtUtc - latestCachedBar.TimestampUtc).TotalMinutes / resolutionMinutes);
+            var incrementalPoints = Math.Min(totalPoints, Math.Max(2, missingBars + 2));
 
             var incremental = await _tradingGateway.GetPricesAsync(
                 new GetPricesRequest(
                     instrument,
                     resolution,
-                    FromUtc: incrementalFromUtc,
-                    ToUtc: requestedAtUtc),
+                    MaxPoints: incrementalPoints),
                 cancellationToken);
 
             var mergedBars = existing.Bars
@@ -67,7 +66,7 @@ public sealed class IntradayPriceSeriesCache
 
             var merged = new PriceSeries(instrument, resolution, mergedBars);
             _seriesByInstrument[key] = merged;
-            return merged;
+            return new CachedPriceSeriesResult(merged, PriceSeriesRefreshMode.Incremental, incremental.Bars.Count);
         }
         finally
         {
@@ -93,4 +92,11 @@ public sealed class IntradayPriceSeriesCache
             PriceResolution.Hour => 60,
             _ => throw new InvalidOperationException($"Intraday cache does not support resolution '{resolution}'."),
         };
+
+    private static int CalculateLookbackPoints(int chartLookbackHours, PriceResolution resolution)
+    {
+        var resolutionMinutes = GetResolutionMinutes(resolution);
+        var lookbackMinutes = chartLookbackHours * 60;
+        return Math.Max(2, (int)Math.Ceiling(lookbackMinutes / (double)resolutionMinutes));
+    }
 }

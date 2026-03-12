@@ -142,7 +142,63 @@ public sealed class AutomationIntradayScanCommand : AsyncCommand<AutomationIntra
             return 0;
         }
 
-        _renderer.WriteIntradayOpportunityReview(result);
+        _renderer.WriteIntradayOpportunitySubmitResult(result);
+        return 0;
+    }
+}
+
+[Description("Prepare the intraday prompt payload and chart artifacts without calling OpenAI.")]
+public sealed class AutomationIntradayPrepareCommand : AsyncCommand<AutomationIntradayScanSettings>
+{
+    private readonly IntradayOpportunityScanService _service;
+    private readonly TradingCliRenderer _renderer;
+    private readonly AutomationOptions _options;
+
+    public AutomationIntradayPrepareCommand(
+        IntradayOpportunityScanService service,
+        TradingCliRenderer renderer,
+        IOptions<AutomationOptions> options)
+    {
+        _service = service;
+        _renderer = renderer;
+        _options = options.Value;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, AutomationIntradayScanSettings settings, CancellationToken cancellationToken)
+    {
+        var requestedAtUtc = settings.ResolveRequestedAtUtc();
+        var tradingDate = settings.ResolveTradingDate(_options.Timezone, requestedAtUtc);
+        var result = await _service.PrepareAsync(tradingDate, requestedAtUtc, cancellationToken);
+
+        if (result is null)
+        {
+            _renderer.WriteInfo("No eligible intraday preparation result was produced.");
+            return 0;
+        }
+
+        _renderer.WriteIntradayOpportunityPreparation(result);
+        return 0;
+    }
+}
+
+[Description("Submit a prepared intraday prompt payload to OpenAI.")]
+public sealed class AutomationIntradaySubmitCommand : AsyncCommand<AutomationIntradaySubmitSettings>
+{
+    private readonly IntradayOpportunityScanService _service;
+    private readonly TradingCliRenderer _renderer;
+
+    public AutomationIntradaySubmitCommand(
+        IntradayOpportunityScanService service,
+        TradingCliRenderer renderer)
+    {
+        _service = service;
+        _renderer = renderer;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, AutomationIntradaySubmitSettings settings, CancellationToken cancellationToken)
+    {
+        var result = await _service.SubmitAsync(settings.Input, cancellationToken);
+        _renderer.WriteIntradayOpportunitySubmitResult(result);
         return 0;
     }
 }
@@ -232,5 +288,23 @@ public sealed class AutomationIntradayScanSettings : AutomationBriefSettings
         var timezone = TimeZoneInfo.FindSystemTimeZoneById(timezoneId);
         var localNow = TimeZoneInfo.ConvertTime(requestedAtUtc, timezone);
         return DateOnly.FromDateTime(localNow.DateTime);
+    }
+}
+
+public sealed class AutomationIntradaySubmitSettings : CommandSettings
+{
+    [CommandOption("--input <PATH>")]
+    public string Input { get; init; } = string.Empty;
+
+    public override ValidationResult Validate()
+    {
+        if (string.IsNullOrWhiteSpace(Input))
+        {
+            return ValidationResult.Error("Missing required option --input.");
+        }
+
+        return File.Exists(Input)
+            ? ValidationResult.Success()
+            : ValidationResult.Error("Option --input must point to an existing preparation JSON file.");
     }
 }

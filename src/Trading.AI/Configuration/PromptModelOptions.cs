@@ -2,13 +2,13 @@ namespace Trading.AI.Configuration;
 
 public class PromptModelOptions
 {
-    public string ModelId { get; init; } = string.Empty;
+    public string ModelId { get; set; } = string.Empty;
 
-    public decimal? Temperature { get; init; }
+    public decimal? Temperature { get; set; }
 
-    public int? MaxOutputTokens { get; init; }
+    public int? MaxOutputTokens { get; set; }
 
-    public bool EnableWebSearch { get; init; }
+    public bool EnableWebSearch { get; set; }
 
-    public ModelPricingOptions Pricing { get; init; } = new();
+    public ModelPricingOptions Pricing { get; set; } = new();
 }

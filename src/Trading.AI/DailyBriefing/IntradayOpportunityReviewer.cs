@@ -23,7 +23,10 @@ public sealed class IntradayOpportunityReviewer
         _mapper = mapper;
     }
 
-    public async Task<IntradayOpportunityBatch> ReviewAsync(
+    public string RenderRequestText(IntradayOpportunityReviewInput input)
+        => _promptExecutor.RenderRequestText(PromptRegistry.IntradayOpportunityReview, input);
+
+    public async Task<IntradayOpportunityReviewExecution> ReviewAsync(
         IntradayOpportunityReviewInput input,
         IReadOnlyList<PromptAttachment> attachments,
         CancellationToken cancellationToken = default)
@@ -37,12 +40,19 @@ public sealed class IntradayOpportunityReviewer
             cancellationToken);
 
         var reviewedAtUtc = execution.Response.CreatedAt ?? DateTimeOffset.UtcNow;
-        return _mapper.Map(
+        var batch = _mapper.Map(
             execution.StructuredValue,
             input.TradingDate,
             input.LookbackStartUtc,
             input.LookbackEndUtc,
             reviewedAtUtc,
             input.MaxCandidatesPerRun);
+
+        return new IntradayOpportunityReviewExecution(
+            batch,
+            execution.RequestText,
+            execution.EnvelopeArtifactPath,
+            execution.StructuredArtifactPath,
+            execution.AttachmentArtifactPaths);
     }
 }

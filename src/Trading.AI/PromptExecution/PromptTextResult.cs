@@ -9,4 +9,6 @@ public sealed record PromptTextResult(
     string RequestText,
     ChatResponse Response,
     string ResponseText,
-    string? TextArtifactPath);
+    string? TextArtifactPath,
+    string EnvelopeArtifactPath,
+    IReadOnlyList<string> AttachmentArtifactPaths);

@@ -1,10 +1,11 @@
-using System.Text;
 using System.Globalization;
+using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Trading.AI.Configuration;
 using Trading.AI.DailyBriefing;
 using Trading.AI.PromptExecution;
+using Trading.AI.Prompts;
 using Trading.AI.Prompts.IntradayOpportunityReview;
 using Trading.Abstractions;
 using Trading.Automation.Configuration;
@@ -22,6 +23,7 @@ public sealed class IntradayOpportunityScanService
     private readonly IntradayPriceSeriesCache _priceSeriesCache;
     private readonly IPriceChartRenderer _priceChartRenderer;
     private readonly IntradayOpportunityReviewer _intradayOpportunityReviewer;
+    private readonly IntradayOpportunityPreparationWriter _preparationWriter;
     private readonly ITradingDayWorkflow _workflow;
     private readonly AutomationOptions _automationOptions;
     private readonly IReadOnlyDictionary<string, string> _instrumentNames;
@@ -32,6 +34,7 @@ public sealed class IntradayOpportunityScanService
         IntradayPriceSeriesCache priceSeriesCache,
         IPriceChartRenderer priceChartRenderer,
         IntradayOpportunityReviewer intradayOpportunityReviewer,
+        IntradayOpportunityPreparationWriter preparationWriter,
         ITradingDayWorkflow workflow,
         IOptions<AutomationOptions> automationOptions,
         IOptions<DailyBriefingOptions> dailyBriefingOptions,
@@ -41,6 +44,7 @@ public sealed class IntradayOpportunityScanService
         _priceSeriesCache = priceSeriesCache;
         _priceChartRenderer = priceChartRenderer;
         _intradayOpportunityReviewer = intradayOpportunityReviewer;
+        _preparationWriter = preparationWriter;
         _workflow = workflow;
         _automationOptions = automationOptions.Value;
         _instrumentNames = dailyBriefingOptions.Value.TrackedMarkets.ToDictionary(
@@ -50,10 +54,16 @@ public sealed class IntradayOpportunityScanService
         _logger = logger;
     }
 
-    public Task<IntradayOpportunityReviewResult?> RunForTodayAsync(CancellationToken cancellationToken = default)
+    public Task<IntradayOpportunitySubmitResult?> RunForTodayAsync(CancellationToken cancellationToken = default)
         => RunAsync(ResolveTradingDate(DateTimeOffset.UtcNow), DateTimeOffset.UtcNow, cancellationToken);
 
-    public async Task<IntradayOpportunityReviewResult?> RunAsync(
+    public async Task<IntradayOpportunityPreparationDocument?> PrepareForTodayAsync(CancellationToken cancellationToken = default)
+    {
+        var requestedAtUtc = DateTimeOffset.UtcNow;
+        return await PrepareAsync(ResolveTradingDate(requestedAtUtc), requestedAtUtc, cancellationToken);
+    }
+
+    public async Task<IntradayOpportunityPreparationDocument?> PrepareAsync(
         DateOnly tradingDate,
         DateTimeOffset requestedAtUtc,
         CancellationToken cancellationToken = default)
@@ -61,6 +71,88 @@ public sealed class IntradayOpportunityScanService
         var options = _automationOptions.IntradayOpportunities;
         options.Validate();
 
+        var preparedRun = await BuildPreparedRunAsync(tradingDate, requestedAtUtc, options, cancellationToken);
+        if (preparedRun is null)
+        {
+            return null;
+        }
+
+        var document = await _preparationWriter.WriteAsync(tradingDate, requestedAtUtc, preparedRun, cancellationToken);
+        _logger.LogInformation(
+            "Prepared intraday opportunity review for {TradingDate}. Saved request artifact at {PreparedPath}.",
+            tradingDate,
+            document.PreparedArtifact.Path);
+        return document;
+    }
+
+    public async Task<IntradayOpportunitySubmitResult> SubmitAsync(string preparedJsonPath, CancellationToken cancellationToken = default)
+    {
+        var prepared = await _preparationWriter.LoadAsync(preparedJsonPath, cancellationToken);
+        return await SubmitAsync(prepared, cancellationToken);
+    }
+
+    public async Task<IntradayOpportunitySubmitResult?> RunAsync(
+        DateOnly tradingDate,
+        DateTimeOffset requestedAtUtc,
+        CancellationToken cancellationToken = default)
+    {
+        var prepared = await PrepareAsync(tradingDate, requestedAtUtc, cancellationToken);
+        if (prepared is null)
+        {
+            return null;
+        }
+
+        return await SubmitAsync(prepared, cancellationToken);
+    }
+
+    private async Task<IntradayOpportunitySubmitResult> SubmitAsync(
+        IntradayOpportunityPreparationDocument prepared,
+        CancellationToken cancellationToken)
+    {
+        var renderedRequestText = _intradayOpportunityReviewer.RenderRequestText(prepared.Input);
+        if (!string.Equals(renderedRequestText, prepared.RenderedRequestText, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Prepared request text for '{prepared.PreparedArtifact.Path}' no longer matches the current prompt template. Regenerate the prepared run before submitting.");
+        }
+
+        var attachments = prepared.Attachments
+            .Select(attachment => new PromptAttachment(
+                attachment.Label,
+                attachment.MediaType,
+                File.ReadAllBytes(attachment.Artifact.Path)))
+            .ToArray();
+
+        var execution = await _intradayOpportunityReviewer.ReviewAsync(prepared.Input, attachments, cancellationToken);
+        var workflowResult = await _workflow.ReviewIntradayOpportunitiesAsync(execution.Batch, cancellationToken);
+
+        var artifactReferences = execution.AttachmentArtifactPaths
+            .Select(ToArtifactReference)
+            .ToArray();
+        var result = new IntradayOpportunitySubmitResult(
+            prepared,
+            new IntradayOpportunityExecutionArtifacts(
+                ToArtifactReference(execution.EnvelopeArtifactPath),
+                ToArtifactReference(execution.StructuredArtifactPath),
+                artifactReferences),
+            execution.Batch,
+            workflowResult);
+
+        _logger.LogInformation(
+            "Submitted intraday opportunity review for {TradingDate}. Envelope: {EnvelopePath}. Extracted JSON: {StructuredPath}.",
+            prepared.TradingDate,
+            result.ExecutionArtifacts.PromptEnvelopeArtifact.Path,
+            result.ExecutionArtifacts.ExtractedJsonArtifact.Path);
+
+        return result;
+    }
+
+    private async Task<IntradayPreparedRun?> BuildPreparedRunAsync(
+        DateOnly tradingDate,
+        DateTimeOffset requestedAtUtc,
+        IntradayOpportunityScanOptions options,
+        CancellationToken cancellationToken)
+    {
         var record = await _tradingDayStore.GetAsync(tradingDate, cancellationToken);
         if (record?.Plan is null)
         {
@@ -74,7 +166,7 @@ public sealed class IntradayOpportunityScanService
             return null;
         }
 
-        var preparedMarkets = new List<PreparedMarketContext>(record.Plan.WatchList.Count);
+        var preparedMarkets = new List<PreparedIntradayMarket>(record.Plan.WatchList.Count);
         foreach (var market in record.Plan.WatchList)
         {
             var prepared = await TryPrepareMarketAsync(market, requestedAtUtc, options, cancellationToken);
@@ -108,34 +200,25 @@ public sealed class IntradayOpportunityScanService
             tradingDate,
             requestedAtUtc);
 
-        var attachments = preparedMarkets
-            .Select(market => new PromptAttachment($"{market.InstrumentName} 4-day 10-minute chart", "image/png", market.ChartBytes))
-            .ToArray();
-
-        var batch = await _intradayOpportunityReviewer.ReviewAsync(input, attachments, cancellationToken);
-        var result = await _workflow.ReviewIntradayOpportunitiesAsync(batch, cancellationToken);
-
-        _logger.LogInformation(
-            "Completed intraday opportunity scan for {TradingDate}. Assessed {AssessmentCount} markets and returned {CandidateCount} actionable candidates.",
-            tradingDate,
-            result.MarketAssessments.Count,
-            result.CandidateOpportunities.Count);
-
-        return result;
+        return new IntradayPreparedRun(
+            input,
+            _intradayOpportunityReviewer.RenderRequestText(input),
+            preparedMarkets);
     }
 
-    private async Task<PreparedMarketContext?> TryPrepareMarketAsync(
+    private async Task<PreparedIntradayMarket?> TryPrepareMarketAsync(
         MarketWatch market,
         DateTimeOffset requestedAtUtc,
         IntradayOpportunityScanOptions options,
         CancellationToken cancellationToken)
     {
-        var series = await _priceSeriesCache.GetSeriesAsync(
+        var cachedSeries = await _priceSeriesCache.GetSeriesAsync(
             market.Instrument,
             requestedAtUtc,
             options.ChartLookbackHours,
             options.ChartResolution,
             cancellationToken);
+        var series = cachedSeries.Series;
 
         if (series.Bars.Count == 0)
         {
@@ -159,11 +242,12 @@ public sealed class IntradayOpportunityScanService
         var currentAsk = latestBar.AskClose;
         var currentPrice = (currentBid + currentAsk) / 2m;
         var currentSpread = Math.Max(0m, currentAsk - currentBid);
+        var instrumentName = ResolveInstrumentName(market.Instrument);
         var chartBytes = _priceChartRenderer.RenderPng(series, PriceChartStyle.Ohlc, PriceGapMode.Compress);
 
-        return new PreparedMarketContext(
+        return new PreparedIntradayMarket(
             market.Instrument,
-            ResolveInstrumentName(market.Instrument),
+            instrumentName,
             market.Rank,
             market.Rationale,
             market.LongScenario,
@@ -173,6 +257,9 @@ public sealed class IntradayOpportunityScanService
             currentPrice,
             currentSpread,
             latestBar.TimestampUtc,
+            cachedSeries.RefreshMode,
+            cachedSeries.FetchedBarCount,
+            $"{instrumentName} 4-day 10-minute chart",
             chartBytes);
     }
 
@@ -188,6 +275,9 @@ public sealed class IntradayOpportunityScanService
         return DateOnly.FromDateTime(localNow.DateTime);
     }
 
+    private static ArtifactReference ToArtifactReference(string path)
+        => new(Path.GetFullPath(path), new Uri(Path.GetFullPath(path)).AbsoluteUri);
+
     private static string FormatDailyPlanSummary(TradingDayPlan plan)
     {
         var builder = new StringBuilder();
@@ -197,7 +287,7 @@ public sealed class IntradayOpportunityScanService
         return builder.ToString().TrimEnd();
     }
 
-    private static string FormatWatchedMarketsContext(IReadOnlyList<PreparedMarketContext> markets)
+    private static string FormatWatchedMarketsContext(IReadOnlyList<PreparedIntradayMarket> markets)
     {
         var builder = new StringBuilder();
         foreach (var market in markets.OrderBy(market => market.Rank))
@@ -236,20 +326,6 @@ public sealed class IntradayOpportunityScanService
                 $"- {calendarEvent.Id} | {calendarEvent.ScheduledAtUtc:O} | {calendarEvent.Impact} | {calendarEvent.Title} | affected instruments: {string.Join(", ", calendarEvent.AffectedInstruments.Select(instrument => instrument.Value))}");
         }
 
-        return builder.ToString();
+        return builder.ToString().TrimEnd();
     }
-
-    private sealed record PreparedMarketContext(
-        InstrumentId Instrument,
-        string InstrumentName,
-        int Rank,
-        string Rationale,
-        TradeScenario LongScenario,
-        TradeScenario ShortScenario,
-        decimal CurrentBid,
-        decimal CurrentAsk,
-        decimal CurrentPrice,
-        decimal CurrentSpread,
-        DateTimeOffset LatestBarAtUtc,
-        byte[] ChartBytes);
 }

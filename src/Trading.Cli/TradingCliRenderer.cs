@@ -1,6 +1,7 @@
 using Spectre.Console;
 using Trading.AI.DailyBriefing;
 using Trading.Abstractions;
+using Trading.Automation.Execution;
 using Trading.Strategy.Shared;
 
 public sealed class TradingCliRenderer
@@ -325,6 +326,56 @@ public sealed class TradingCliRenderer
         }
 
         _console.Write(candidates);
+    }
+
+    public void WriteIntradayOpportunityPreparation(IntradayOpportunityPreparationDocument preparation)
+    {
+        WriteKeyValuePanel(
+            "Intraday Preparation",
+            ("Trading Date", preparation.TradingDate.ToString("yyyy-MM-dd")),
+            ("Prepared At", CliParsing.FormatDate(preparation.RequestedAtUtc)),
+            ("Prepared JSON", preparation.PreparedArtifact.Path),
+            ("Prepared URI", preparation.PreparedArtifact.Uri),
+            ("Request Text", preparation.RequestTextArtifact.Path),
+            ("Request URI", preparation.RequestTextArtifact.Uri));
+
+        var table = CreateTable("Instrument", "Rank", "Refresh", "Fetched Bars", "Chart Path", "Chart URI");
+        foreach (var market in preparation.Markets)
+        {
+            table.AddRow(
+                market.InstrumentName,
+                market.Rank.ToString(),
+                market.PriceSeriesRefreshMode.ToString(),
+                market.FetchedBarCount.ToString(),
+                market.ChartArtifact.Path,
+                market.ChartArtifact.Uri);
+        }
+
+        _console.Write(table);
+    }
+
+    public void WriteIntradayOpportunitySubmitResult(IntradayOpportunitySubmitResult result)
+    {
+        WriteIntradayOpportunityPreparation(result.PreparedRun);
+        WriteKeyValuePanel(
+            "OpenAI Observability",
+            ("Envelope JSON", result.ExecutionArtifacts.PromptEnvelopeArtifact.Path),
+            ("Envelope URI", result.ExecutionArtifacts.PromptEnvelopeArtifact.Uri),
+            ("Extracted JSON", result.ExecutionArtifacts.ExtractedJsonArtifact.Path),
+            ("Extracted URI", result.ExecutionArtifacts.ExtractedJsonArtifact.Uri));
+
+        if (result.ExecutionArtifacts.AttachmentArtifacts.Count > 0)
+        {
+            var attachments = CreateTable("Attachment Path", "Attachment URI");
+            foreach (var attachment in result.ExecutionArtifacts.AttachmentArtifacts)
+            {
+                attachments.AddRow(attachment.Path, attachment.Uri);
+            }
+
+            _console.Write(attachments);
+        }
+
+        WriteIntradayOpportunityReview(result.WorkflowResult);
     }
 
     private void WriteKeyValuePanel(string title, params (string Key, string Value)[] rows)

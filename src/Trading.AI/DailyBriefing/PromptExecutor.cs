@@ -82,6 +82,12 @@ public sealed class PromptExecutor
         CancellationToken cancellationToken = default)
         => ExecuteStructuredCoreAsync<TResult>(CreateInvocation(prompt, model, _inputConverter.Convert(input), responseFormat, PromptTextArtifactKind.None, attachments), cancellationToken);
 
+    public string RenderRequestText<TInput>(PromptDefinition prompt, TInput input)
+    {
+        var promptTemplate = _promptRegistry.GetPromptText(prompt);
+        return _templateRenderer.Render(promptTemplate, _inputConverter.Convert(input).Variables);
+    }
+
     private async Task<PromptTextResult> ExecuteTextCoreAsync(
         PromptInvocation invocation,
         CancellationToken cancellationToken)
@@ -102,7 +108,16 @@ public sealed class PromptExecutor
             await _observabilityWriter.WriteTextAsync(session, response.Text, cancellationToken);
 
             await _observabilityWriter.CompleteAsync(session, invocation, requestText, requestOptions, response, response.Text, null, stopwatch.Elapsed, cancellationToken);
-            return new PromptTextResult(invocation.Prompt.Id, invocation.Prompt.Name, response.ModelId ?? invocation.Model.ModelId, requestText, response, response.Text, session.TextArtifactPath);
+            return new PromptTextResult(
+                invocation.Prompt.Id,
+                invocation.Prompt.Name,
+                response.ModelId ?? invocation.Model.ModelId,
+                requestText,
+                response,
+                response.Text,
+                session.TextArtifactPath,
+                session.JsonPath,
+                session.AttachmentArtifactPaths.AsReadOnly());
         }
         catch (Exception exception)
         {
@@ -157,7 +172,17 @@ public sealed class PromptExecutor
 
                 await _observabilityWriter.WriteStructuredAsync(session, structured!, cancellationToken);
                 await _observabilityWriter.CompleteAsync(session, invocation, requestText, requestOptions, response, response.Text, structured!, stopwatch.Elapsed, cancellationToken);
-                return new PromptStructuredResult<T>(invocation.Prompt.Id, invocation.Prompt.Name, response.ModelId ?? invocation.Model.ModelId, requestText, response, response.Text, structured, session.StructuredArtifactPath);
+                return new PromptStructuredResult<T>(
+                    invocation.Prompt.Id,
+                    invocation.Prompt.Name,
+                    response.ModelId ?? invocation.Model.ModelId,
+                    requestText,
+                    response,
+                    response.Text,
+                    structured,
+                    session.StructuredArtifactPath,
+                    session.JsonPath,
+                    session.AttachmentArtifactPaths.AsReadOnly());
             }
             catch (Exception exception) when (attempt < 2 && ShouldRetryStructuredFailure(exception))
             {

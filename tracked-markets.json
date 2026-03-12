@@ -3,14 +3,50 @@
     "DailyBriefing": {
       "TrackedMarkets": [
         {
+          "DisplayName": "Gold",
+          "InstrumentId": "CS.D.CFAGOLD.CFA.IP",
+          "Sector": "Metals",
+          "Aliases": [
+            "Gold",
+            "Spot Gold",
+            "XAUUSD"
+          ],
+          "ExactInstrumentName": "Spot Gold (A$1 Contract)",
+          "InstrumentType": "CURRENCIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "XAUUSD",
+          "SelectionPriority": 1,
+          "SelectionReason": "Core macro precious-metals benchmark with reliable intraday and daily price history.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
+        },
+        {
           "DisplayName": "WTI Crude Oil",
-          "InstrumentId": "CC.D.WTI.UMA.IP",
+          "InstrumentId": "CC.D.CL.UMA.IP",
           "Sector": "Energy",
           "Aliases": [
             "WTI",
             "Crude Oil",
             "US Oil"
-          ]
+          ],
+          "ExactInstrumentName": "Oil - US Crude (A$1)",
+          "InstrumentType": "COMMODITIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "WTI",
+          "SelectionPriority": 2,
+          "SelectionReason": "Primary US crude benchmark and one of the highest-signal global energy markets.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
         },
         {
           "DisplayName": "Brent Crude Oil",
@@ -18,17 +54,229 @@
           "Sector": "Energy",
           "Aliases": [
             "Brent",
-            "Brent Crude"
-          ]
+            "Brent Crude",
+            "UK Oil"
+          ],
+          "ExactInstrumentName": "Oil - Brent Crude (A$1)",
+          "InstrumentType": "COMMODITIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "Brent",
+          "SelectionPriority": 3,
+          "SelectionReason": "Primary global crude benchmark that complements WTI and broadens oil-market coverage.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
         },
         {
-          "DisplayName": "Gold",
-          "InstrumentId": "CS.D.GC.UMA.IP",
+          "DisplayName": "Natural Gas",
+          "InstrumentId": "CC.D.NG.UMA.IP",
+          "Sector": "Energy",
+          "Aliases": [
+            "Natural Gas",
+            "Nat Gas",
+            "Henry Hub"
+          ],
+          "ExactInstrumentName": "Natural Gas (A$1)",
+          "InstrumentType": "COMMODITIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "Natural Gas",
+          "SelectionPriority": 4,
+          "SelectionReason": "Major energy market with strong macro, weather, and inventory-driven catalysts.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
+        },
+        {
+          "DisplayName": "Copper",
+          "InstrumentId": "CS.D.COPPER.CAF.IP",
           "Sector": "Metals",
           "Aliases": [
-            "XAUUSD",
-            "Gold Futures"
-          ]
+            "Copper",
+            "Dr Copper",
+            "HG Copper"
+          ],
+          "ExactInstrumentName": "Copper (A$1)",
+          "InstrumentType": "CURRENCIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "Copper",
+          "SelectionPriority": 5,
+          "SelectionReason": "Liquid industrial-metals proxy for growth, China demand, and risk sentiment.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
+        },
+        {
+          "DisplayName": "Silver",
+          "InstrumentId": "CS.D.CFASILVER.CFA.IP",
+          "Sector": "Metals",
+          "Aliases": [
+            "Silver",
+            "Spot Silver",
+            "XAGUSD"
+          ],
+          "ExactInstrumentName": "Spot Silver (A$1 Contract)",
+          "InstrumentType": "CURRENCIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "Silver",
+          "SelectionPriority": 6,
+          "SelectionReason": "High-beta precious metal that adds a distinct risk and momentum profile beside gold.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
+        },
+        {
+          "DisplayName": "Corn",
+          "InstrumentId": "CC.D.C.UMA.IP",
+          "Sector": "Agriculture",
+          "Aliases": [
+            "Corn",
+            "US Corn",
+            "ZC"
+          ],
+          "ExactInstrumentName": "Corn (A$1)",
+          "InstrumentType": "COMMODITIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "Corn",
+          "SelectionPriority": 7,
+          "SelectionReason": "Most liquid grain benchmark and a strong anchor for agricultural macro coverage.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
+        },
+        {
+          "DisplayName": "Soybeans",
+          "InstrumentId": "CC.D.S.UMA.IP",
+          "Sector": "Agriculture",
+          "Aliases": [
+            "Soybeans",
+            "Soybean Futures",
+            "ZS"
+          ],
+          "ExactInstrumentName": "Soybeans (A$1)",
+          "InstrumentType": "COMMODITIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "Soybeans",
+          "SelectionPriority": 8,
+          "SelectionReason": "Widely watched grain and oilseed benchmark that broadens agricultural exposure beyond corn.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
+        },
+        {
+          "DisplayName": "Iron Ore",
+          "InstrumentId": "CC.D.IRON.UMA.IP",
+          "Sector": "Metals",
+          "Aliases": [
+            "Iron Ore",
+            "Iron",
+            "SGX Iron Ore"
+          ],
+          "ExactInstrumentName": "Iron Ore (A$1)",
+          "InstrumentType": "COMMODITIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "Iron Ore",
+          "SelectionPriority": 9,
+          "SelectionReason": "Adds bulk-industrial commodity coverage tied to China demand and steel-market sentiment.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
+        },
+        {
+          "DisplayName": "Aluminium",
+          "InstrumentId": "CS.D.ALUMINIUM.CAF.IP",
+          "Sector": "Metals",
+          "Aliases": [
+            "Aluminium",
+            "Aluminum",
+            "LME Aluminium"
+          ],
+          "ExactInstrumentName": "Aluminium (A$1)",
+          "InstrumentType": "CURRENCIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "Aluminium",
+          "SelectionPriority": 10,
+          "SelectionReason": "Adds another liquid industrial metal with distinct supply, smelter, and power-cost drivers.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
+        },
+        {
+          "DisplayName": "Coffee",
+          "InstrumentId": "CC.D.KC.UMA.IP",
+          "Sector": "Softs",
+          "Aliases": [
+            "Coffee",
+            "Arabica",
+            "Coffee Futures"
+          ],
+          "ExactInstrumentName": "Coffee Arabica (A$1)",
+          "InstrumentType": "COMMODITIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "Coffee",
+          "SelectionPriority": 11,
+          "SelectionReason": "Adds a globally watched soft commodity with weather and crop-driven catalyst flow.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
+        },
+        {
+          "DisplayName": "Cocoa",
+          "InstrumentId": "CC.D.CC.UMA.IP",
+          "Sector": "Softs",
+          "Aliases": [
+            "Cocoa",
+            "New York Cocoa",
+            "Cocoa Futures"
+          ],
+          "ExactInstrumentName": "New York Cocoa (A$1)",
+          "InstrumentType": "COMMODITIES",
+          "Expiry": "Undated",
+          "CurrencyCode": null,
+          "MarketStatus": "Tradeable",
+          "DiscoveryQuery": "Cocoa",
+          "SelectionPriority": 12,
+          "SelectionReason": "Adds a high-volatility soft commodity with strong supply-shock and weather sensitivity.",
+          "ValidatedPriceResolutions": [
+            "Hour",
+            "Day"
+          ],
+          "LastValidatedUtc": "2026-03-12T14:15:00Z"
         }
       ]
     }

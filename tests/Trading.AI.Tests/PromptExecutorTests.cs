@@ -39,6 +39,8 @@ public sealed class PromptExecutorTests
 
             result.TextArtifactPath.Should().EndWith(".md");
             File.Exists(result.TextArtifactPath).Should().BeTrue();
+            result.EnvelopeArtifactPath.Should().EndWith(".json");
+            File.Exists(result.EnvelopeArtifactPath).Should().BeTrue();
         }
         finally
         {
@@ -210,12 +212,40 @@ public sealed class PromptExecutorTests
                 CancellationToken.None);
 
             result.StructuredValue.MarketAssessments.Should().HaveCount(1);
-            Directory.GetFiles(Path.Combine(tempDirectory.FullName, "2026-03-12"), "*.png").Should().HaveCount(1);
+            result.AttachmentArtifactPaths.Should().ContainSingle();
+            File.Exists(result.AttachmentArtifactPaths[0]).Should().BeTrue();
+            File.Exists(result.EnvelopeArtifactPath).Should().BeTrue();
+            File.Exists(result.StructuredArtifactPath).Should().BeTrue();
         }
         finally
         {
             tempDirectory.Delete(true);
         }
+    }
+
+    [Fact]
+    public void RenderRequestText_ShouldMatchPromptTemplateRendering()
+    {
+        var executor = CreateExecutor(Path.GetTempPath(), new TestChatClient(_ => Task.FromResult(CreateResponse("unused"))));
+
+        var text = executor.RenderRequestText(
+            PromptRegistry.IntradayOpportunityReview,
+            new IntradayOpportunityReviewInput(
+                new DateOnly(2026, 3, 12),
+                DateTimeOffset.Parse("2026-03-12T05:30:00Z"),
+                DateTimeOffset.Parse("2026-03-12T06:30:00Z"),
+                1,
+                4,
+                "Australia/Melbourne",
+                "Macro summary",
+                "One watched market",
+                "No calendar events",
+                new DateOnly(2026, 3, 12),
+                DateTimeOffset.Parse("2026-03-12T06:30:45Z")));
+
+        text.Should().Contain("Trading date: 2026-03-12");
+        text.Should().Contain("Maximum actionable candidates: 4");
+        text.Should().Contain("One watched market");
     }
 
     private static PromptExecutor CreateExecutor(string observabilityRootPath, IChatClient chatClient)

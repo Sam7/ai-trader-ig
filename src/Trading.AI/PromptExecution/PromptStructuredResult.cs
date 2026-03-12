@@ -10,4 +10,6 @@ public sealed record PromptStructuredResult<TResult>(
     ChatResponse Response,
     string ResponseText,
     TResult StructuredValue,
-    string StructuredArtifactPath);
+    string StructuredArtifactPath,
+    string EnvelopeArtifactPath,
+    IReadOnlyList<string> AttachmentArtifactPaths);
