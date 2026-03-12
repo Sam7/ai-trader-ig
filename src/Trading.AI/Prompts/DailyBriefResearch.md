@@ -134,7 +134,6 @@ For each catalyst, use this format:
 - **What would confirm it further:** ...
 - **What would weaken it:** ...
 - **Follow-up candidate:** Yes / No
-- **Source note:** ...   <!-- only when useful -->
 
 # 5. Sector Deep Dives
 

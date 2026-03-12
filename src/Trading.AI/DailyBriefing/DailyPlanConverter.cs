@@ -33,6 +33,8 @@ public sealed class DailyPlanConverter
         string researchBriefMarkdown,
         CancellationToken cancellationToken)
     {
+        EnsureTrackedMarketsSatisfyShortlist(request);
+
         var trackedMarkets = _options.TrackedMarkets.ToDictionary(x => x.InstrumentId, StringComparer.Ordinal);
         var planModel = new DailyBriefingModelOptions
         {
@@ -71,5 +73,14 @@ public sealed class DailyPlanConverter
             ["TRACKED_MARKETS"] = _trackedMarketsFormatter.Format(_options.TrackedMarkets),
             ["RESEARCH_BRIEF"] = researchBriefMarkdown,
         };
+    }
+
+    private void EnsureTrackedMarketsSatisfyShortlist(DailyBriefingRequest request)
+    {
+        if (_options.TrackedMarkets.Length < request.Rules.MarketWatch.ShortlistSize)
+        {
+            throw new InvalidOperationException(
+                $"Configured tracked markets ({_options.TrackedMarkets.Length}) must be at least the shortlist size ({request.Rules.MarketWatch.ShortlistSize}).");
+        }
     }
 }

@@ -1,6 +1,7 @@
 using Trading.Abstractions;
 using Trading.AI.Configuration;
 using Trading.Strategy.DayPlanning;
+using Trading.Strategy.Inputs;
 using Trading.Strategy.Shared;
 
 namespace Trading.AI.DailyBriefing;
@@ -14,7 +15,8 @@ public sealed class DailyPlanMapper
         DateTimeOffset plannedAtUtc)
     {
         var rankedMarkets = document.RankedMarkets.Select(x => MapMarket(x, trackedMarkets)).ToArray();
-        var watchList = document.WatchList.Select(x => MapMarket(x, trackedMarkets)).ToArray();
+        var watchList = rankedMarkets;
+        var calendarEvents = document.CalendarEvents.Select(MapCalendarEvent).ToArray();
 
         return new TradingDayPlan(
             request.TradingDay.TradingDate,
@@ -23,17 +25,28 @@ public sealed class DailyPlanMapper
             document.MarketRegime,
             rankedMarkets,
             watchList,
-            [],
+            calendarEvents,
             plannedAtUtc);
     }
 
     public void ValidateTrackedMarkets(DailyPlanDocument document, IReadOnlyDictionary<string, TrackedMarketOptions> trackedMarkets)
     {
-        foreach (var market in document.RankedMarkets.Concat(document.WatchList))
+        foreach (var market in document.RankedMarkets)
         {
             if (!trackedMarkets.ContainsKey(market.InstrumentId))
             {
                 throw new InvalidOperationException($"Plan referenced untracked market '{market.InstrumentId}'.");
+            }
+        }
+
+        foreach (var calendarEvent in document.CalendarEvents)
+        {
+            foreach (var instrumentId in calendarEvent.AffectedInstrumentIds)
+            {
+                if (!trackedMarkets.ContainsKey(instrumentId))
+                {
+                    throw new InvalidOperationException($"Calendar event '{calendarEvent.Id}' referenced untracked market '{instrumentId}'.");
+                }
             }
         }
     }
@@ -61,4 +74,21 @@ public sealed class DailyPlanMapper
             document.Invalidation,
             document.ExpectedCatalysts,
             document.AvoidTradingUntilUtc);
+
+    private static EconomicEvent MapCalendarEvent(PlannedCalendarEventDocument document)
+        => new(
+            document.Id,
+            document.Title,
+            document.ScheduledAtUtc,
+            MapImpact(document.Impact),
+            document.AffectedInstrumentIds.Select(x => new InstrumentId(x)).ToArray());
+
+    private static EconomicEventImpact MapImpact(string impact)
+        => impact switch
+        {
+            "Low" => EconomicEventImpact.Low,
+            "Medium" => EconomicEventImpact.Medium,
+            "High" => EconomicEventImpact.High,
+            _ => throw new InvalidOperationException($"Unknown calendar event impact '{impact}'."),
+        };
 }

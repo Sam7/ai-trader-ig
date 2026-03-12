@@ -18,6 +18,7 @@ public sealed class PromptContractTests
         prompt.Should().Contain("causal reasoning");
         prompt.Should().Contain("keep the written brief citation-free");
         prompt.Should().NotContain("High-Signal Source Notes");
+        prompt.Should().NotContain("Source note:");
     }
 
     [Fact]
@@ -27,9 +28,13 @@ public sealed class PromptContractTests
 
         var prompt = registry.GetPromptText(PromptRegistry.DailyPlanJson);
 
-        prompt.Should().ContainEquivalentOf("prefer the section titled `## 12.5 Assets To Watch Today`");
-        prompt.Should().ContainEquivalentOf("watchList` must contain the same");
-        prompt.Should().ContainEquivalentOf("calendarEvents` must be an empty array");
+        prompt.Should().ContainEquivalentOf("prefer the section titled `## 11.5 Assets To Watch Today`");
+        prompt.Should().ContainEquivalentOf("instrumentName");
+        prompt.Should().ContainEquivalentOf("catalysts");
+        prompt.Should().ContainEquivalentOf("opportunities");
+        prompt.Should().ContainEquivalentOf("risks");
+        prompt.Should().ContainEquivalentOf("calendarEvents` must include every `EVT-##` row");
+        prompt.Should().ContainEquivalentOf("impact` must be exactly one of: `Low`, `Medium`, `High`");
         prompt.Should().ContainEquivalentOf("marketRegime` must be exactly one of");
         prompt.Should().NotContain("entryZoneLowerBound");
     }

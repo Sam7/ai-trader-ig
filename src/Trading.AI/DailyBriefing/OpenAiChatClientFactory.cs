@@ -1,6 +1,7 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using System.ClientModel;
+using System.ClientModel.Primitives;
 using OpenAI;
 using OpenAI.Responses;
 using Trading.AI.Configuration;
@@ -26,6 +27,7 @@ public sealed class OpenAiChatClientFactory : IChatClientFactory
         var clientOptions = new OpenAIClientOptions
         {
             NetworkTimeout = _options.RequestTimeout,
+            RetryPolicy = new ClientRetryPolicy(0),
         };
 
         return new OpenAIResponseClient(modelId, new ApiKeyCredential(_options.ApiKey), clientOptions).AsIChatClient();

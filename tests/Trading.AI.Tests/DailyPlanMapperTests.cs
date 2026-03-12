@@ -21,13 +21,20 @@ public sealed class DailyPlanMapperTests
             MarketRegime.Mixed,
             [
                 CreateMarket("CC.D.WTI.UMA.IP", 1),
-            ],
-            [
-                CreateMarket("CC.D.WTI.UMA.IP", 1),
                 CreateMarket("CC.D.LCO.UMA.IP", 2),
                 CreateMarket("CS.D.GC.UMA.IP", 3),
             ],
-            []);
+            [],
+            [],
+            [],
+            [
+                new PlannedCalendarEventDocument(
+                    "EVT-01",
+                    "U.S. Weekly Petroleum Status Report",
+                    DateTimeOffset.Parse("2026-03-12T14:30:00Z"),
+                    "High",
+                    ["CC.D.WTI.UMA.IP", "CC.D.LCO.UMA.IP"])
+            ]);
 
         var trackedMarkets = new Dictionary<string, TrackedMarketOptions>(StringComparer.Ordinal)
         {
@@ -42,11 +49,16 @@ public sealed class DailyPlanMapperTests
 
         plan.PlannedAtUtc.Should().Be(plannedAtUtc);
         plan.MarketRegime.Should().Be(MarketRegime.Mixed);
+        plan.WatchList.Should().HaveCount(3);
+        plan.CalendarEvents.Should().ContainSingle();
+        plan.CalendarEvents[0].Impact.Should().Be(EconomicEventImpact.High);
+        plan.CalendarEvents[0].AffectedInstruments.Should().HaveCount(2);
     }
 
     private static PlannedMarketDocument CreateMarket(string instrumentId, int rank)
         => new(
             instrumentId,
+            $"Name {rank}",
             rank,
             $"Rationale {rank}",
             new PlannedTradeScenarioDocument(

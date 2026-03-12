@@ -30,4 +30,10 @@ public class StrategyRulesTests
 
         action.Should().Throw<ArgumentOutOfRangeException>();
     }
+
+    [Fact]
+    public void Default_should_use_three_markets_for_daily_briefing()
+    {
+        StrategyRules.Default.MarketWatch.ShortlistSize.Should().Be(3);
+    }
 }

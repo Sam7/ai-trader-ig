@@ -3,7 +3,6 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
 using OpenAI.Responses;
-using System.ClientModel;
 using Trading.AI.Configuration;
 using Trading.AI.Observability;
 using Trading.AI.Prompts;
@@ -84,12 +83,12 @@ public sealed class PromptExecutor
             try
             {
                 ChatResponse response;
-                T? structured;
+                T structured;
 
                 if (context.ResponseFormat is not null)
                 {
                     response = await chatClient.GetResponseAsync(requestText, options, cancellationToken);
-                    structured = JsonSerializer.Deserialize<T>(response.Text, StructuredJsonOptions);
+                    structured = DeserializeStructuredResponse<T>(response, context.Prompt.Name);
                 }
                 else
                 {
@@ -99,19 +98,16 @@ public sealed class PromptExecutor
                         useJsonSchemaResponseFormat: true,
                         cancellationToken: cancellationToken);
                     response = typedResponse;
-                    if (!typedResponse.TryGetResult(out structured))
+                    if (!typedResponse.TryGetResult(out T? typedStructured) || typedStructured is null)
                     {
-                        throw new InvalidOperationException($"Prompt '{context.Prompt.Name}' did not return valid structured output.");
+                        throw new StructuredOutputException($"Prompt '{context.Prompt.Name}' did not return valid structured output.");
                     }
+
+                    structured = typedStructured;
                 }
 
-                if (structured is null)
-                {
-                    throw new InvalidOperationException($"Prompt '{context.Prompt.Name}' did not return valid structured output.");
-                }
-
-                await _observabilityWriter.WriteStructuredAsync(session, structured, cancellationToken);
-                await _observabilityWriter.CompleteAsync(session, context, requestText, requestOptions, response, response.Text, structured, stopwatch.Elapsed, cancellationToken);
+                await _observabilityWriter.WriteStructuredAsync(session, structured!, cancellationToken);
+                await _observabilityWriter.CompleteAsync(session, context, requestText, requestOptions, response, response.Text, structured!, stopwatch.Elapsed, cancellationToken);
                 return (new PromptExecutionResult(context.Prompt.Id, context.Prompt.Name, response.ModelId ?? context.Model.ModelId, requestText, response, response.Text), structured);
             }
             catch (Exception exception) when (attempt < 2 && ShouldRetryStructuredFailure(exception))
@@ -151,11 +147,23 @@ public sealed class PromptExecutor
     }
 
     private static bool ShouldRetryStructuredFailure(Exception exception)
-        => exception switch
+        => exception is StructuredOutputException;
+
+    private static T DeserializeStructuredResponse<T>(ChatResponse response, string promptName)
+    {
+        if (string.IsNullOrWhiteSpace(response.Text))
         {
-            ClientResultException => true,
-            JsonException => true,
-            InvalidOperationException => true,
-            _ => false,
-        };
+            throw new StructuredOutputException($"Prompt '{promptName}' returned an empty structured response.");
+        }
+
+        try
+        {
+            var structured = JsonSerializer.Deserialize<T>(response.Text, StructuredJsonOptions);
+            return structured ?? throw new StructuredOutputException($"Prompt '{promptName}' did not return valid structured output.");
+        }
+        catch (JsonException exception)
+        {
+            throw new StructuredOutputException($"Prompt '{promptName}' returned invalid JSON.", exception);
+        }
+    }
 }

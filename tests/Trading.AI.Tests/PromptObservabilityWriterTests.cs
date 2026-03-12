@@ -5,6 +5,7 @@ using Trading.AI.Configuration;
 using Trading.AI.DailyBriefing;
 using Trading.AI.Observability;
 using Trading.AI.Prompts;
+using Trading.Strategy.Inputs;
 
 public sealed class PromptObservabilityWriterTests
 {
@@ -43,6 +44,48 @@ public sealed class PromptObservabilityWriterTests
             failed.RootElement.GetProperty("error").GetString().Should().Contain("boom");
             failed.RootElement.GetProperty("markdownArtifactPath").GetString().Should().EndWith(".md");
             failed.RootElement.GetProperty("structuredArtifactPath").GetString().Should().EndWith("-extracted.json");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task WriteStructuredAsync_ShouldSerializeEnumsAsStrings()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var writer = new PromptObservabilityWriter(
+                Options.Create(new DailyBriefingOptions
+                {
+                    ObservabilityRootPath = tempDirectory.FullName,
+                }));
+
+            var context = new PromptExecutionContext(
+                PromptRegistry.DailyPlanJson,
+                new DailyBriefingModelOptions { ModelId = "gpt-test" },
+                new Dictionary<string, string> { ["TRADING_DATE"] = "2026-03-12" },
+                DateTimeOffset.Parse("2026-03-12T06:30:45Z"),
+                new DateOnly(2026, 3, 12));
+
+            var session = await writer.StartAsync(context, "request text", null, CancellationToken.None);
+            var document = new DailyPlanDocument(
+                "Macro",
+                "Summary",
+                MarketRegime.EventDriven,
+                [],
+                [],
+                [],
+                [],
+                []);
+
+            await writer.WriteStructuredAsync(session, document, CancellationToken.None);
+
+            var json = await File.ReadAllTextAsync($"{session.BasePath}-extracted.json");
+            json.Should().Contain("\"marketRegime\": \"EventDriven\"");
         }
         finally
         {

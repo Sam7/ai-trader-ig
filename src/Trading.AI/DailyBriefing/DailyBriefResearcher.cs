@@ -26,6 +26,8 @@ public sealed class DailyBriefResearcher
 
     public async Task<DailyBriefResearchResult> ResearchAsync(DailyBriefingRequest request, CancellationToken cancellationToken)
     {
+        EnsureTrackedMarketsSatisfyShortlist(request);
+
         var context = new PromptExecutionContext(
             PromptRegistry.DailyBriefResearch,
             _options.Research,
@@ -55,5 +57,14 @@ public sealed class DailyBriefResearcher
             ["WATCHLIST_SIZE"] = request.Rules.MarketWatch.ShortlistSize.ToString(),
             ["TRACKED_MARKETS"] = _trackedMarketsFormatter.Format(_options.TrackedMarkets),
         };
+    }
+
+    private void EnsureTrackedMarketsSatisfyShortlist(DailyBriefingRequest request)
+    {
+        if (_options.TrackedMarkets.Length < request.Rules.MarketWatch.ShortlistSize)
+        {
+            throw new InvalidOperationException(
+                $"Configured tracked markets ({_options.TrackedMarkets.Length}) must be at least the shortlist size ({request.Rules.MarketWatch.ShortlistSize}).");
+        }
     }
 }
