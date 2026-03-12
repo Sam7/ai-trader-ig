@@ -15,6 +15,7 @@ public static class TradingWorkerApplication
         var builder = WebApplication.CreateBuilder(args);
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
+        builder.Configuration.AddJsonFile("tracked-markets.json", optional: true, reloadOnChange: false);
         builder.Configuration.AddUserSecrets(typeof(TradingWorkerApplication).Assembly, optional: true);
 
         builder.Host.UseSerilog((context, services, loggerConfiguration) =>

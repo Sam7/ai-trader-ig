@@ -9,6 +9,7 @@ using Trading.IG.DependencyInjection;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
+builder.Configuration.AddJsonFile("tracked-markets.json", optional: true, reloadOnChange: false);
 builder.Configuration.AddUserSecrets<Program>(optional: true);
 
 builder.Services.AddIgTradingGateway(builder.Configuration);

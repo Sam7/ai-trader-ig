@@ -54,6 +54,7 @@ Set via environment variables, user secrets, or a local ignored config file:
 Recommended local file workflow:
 
 - copy `appsettings.example.json` to `appsettings.json` or `appsettings.local.json`
+- create `tracked-markets.json` at the repo root for `AI:DailyBriefing:TrackedMarkets` (see tracked-markets sample file)
 - keep real credentials only in the local ignored file
 - never commit live credentials
 
