@@ -35,6 +35,8 @@ public sealed class PromptObservationRecord
     public double? DurationMs { get; set; }
 
     public string? MarkdownArtifactPath { get; set; }
+
+    public string? StructuredArtifactPath { get; set; }
 }
 
 public sealed record CostBreakdown(

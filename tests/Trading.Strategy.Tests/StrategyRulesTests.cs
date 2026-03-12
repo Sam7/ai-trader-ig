@@ -23,7 +23,7 @@ public class StrategyRulesTests
     {
         var rules = StrategyRules.Default with
         {
-            MarketWatch = new MarketWatchRules(0, 0.2m, 1.5m, 0.25m, 0.25m)
+            MarketWatch = new MarketWatchRules(0, 1.5m, 0.25m, 0.25m)
         };
 
         var action = rules.Validate;

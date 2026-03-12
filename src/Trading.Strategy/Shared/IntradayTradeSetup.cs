@@ -2,7 +2,7 @@ using Trading.Abstractions;
 
 namespace Trading.Strategy.Shared;
 
-public sealed record TradeSetup(
+public sealed record IntradayTradeSetup(
     InstrumentId Instrument,
     TradeDirection Direction,
     decimal EntryPrice,

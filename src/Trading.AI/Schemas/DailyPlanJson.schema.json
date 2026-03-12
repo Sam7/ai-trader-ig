@@ -1,0 +1,146 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "macroSummary": { "type": "string" },
+    "marketRegimeSummary": { "type": "string" },
+    "marketRegime": {
+      "type": "string",
+      "enum": [ "Unknown", "RiskOn", "RiskOff", "Mixed", "EventDriven", "RangeBound", "TrendDayCandidate" ]
+    },
+    "rankedMarkets": {
+      "type": "array",
+      "minItems": {{WATCHLIST_SIZE}},
+      "maxItems": {{WATCHLIST_SIZE}},
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "instrumentId": { "type": "string" },
+          "rank": { "type": "integer" },
+          "rationale": { "type": "string" },
+          "longScenario": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "thesis": { "type": "string" },
+              "confirmation": { "type": "string" },
+              "invalidation": { "type": "string" },
+              "expectedCatalysts": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "avoidTradingUntilUtc": {
+                "type": [ "string", "null" ],
+                "format": "date-time"
+              }
+            },
+            "required": [ "thesis", "confirmation", "invalidation", "expectedCatalysts", "avoidTradingUntilUtc" ]
+          },
+          "shortScenario": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "thesis": { "type": "string" },
+              "confirmation": { "type": "string" },
+              "invalidation": { "type": "string" },
+              "expectedCatalysts": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "avoidTradingUntilUtc": {
+                "type": [ "string", "null" ],
+                "format": "date-time"
+              }
+            },
+            "required": [ "thesis", "confirmation", "invalidation", "expectedCatalysts", "avoidTradingUntilUtc" ]
+          }
+        },
+        "required": [
+          "instrumentId",
+          "rank",
+          "rationale",
+          "longScenario",
+          "shortScenario"
+        ]
+      }
+    },
+    "watchList": {
+      "type": "array",
+      "minItems": {{WATCHLIST_SIZE}},
+      "maxItems": {{WATCHLIST_SIZE}},
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "instrumentId": { "type": "string" },
+          "rank": { "type": "integer" },
+          "rationale": { "type": "string" },
+          "longScenario": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "thesis": { "type": "string" },
+              "confirmation": { "type": "string" },
+              "invalidation": { "type": "string" },
+              "expectedCatalysts": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "avoidTradingUntilUtc": {
+                "type": [ "string", "null" ],
+                "format": "date-time"
+              }
+            },
+            "required": [ "thesis", "confirmation", "invalidation", "expectedCatalysts", "avoidTradingUntilUtc" ]
+          },
+          "shortScenario": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "thesis": { "type": "string" },
+              "confirmation": { "type": "string" },
+              "invalidation": { "type": "string" },
+              "expectedCatalysts": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "avoidTradingUntilUtc": {
+                "type": [ "string", "null" ],
+                "format": "date-time"
+              }
+            },
+            "required": [ "thesis", "confirmation", "invalidation", "expectedCatalysts", "avoidTradingUntilUtc" ]
+          }
+        },
+        "required": [
+          "instrumentId",
+          "rank",
+          "rationale",
+          "longScenario",
+          "shortScenario"
+        ]
+      }
+    },
+    "calendarEvents": {
+      "type": "array",
+      "maxItems": 0,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "scheduledAtUtc": { "type": "string", "format": "date-time" },
+          "impact": { "type": "string" },
+          "affectedInstrumentIds": {
+            "type": "array",
+            "items": { "type": "string" }
+          }
+        },
+        "required": [ "id", "title", "scheduledAtUtc", "impact", "affectedInstrumentIds" ]
+      }
+    }
+  },
+  "required": [ "macroSummary", "marketRegimeSummary", "marketRegime", "rankedMarkets", "watchList", "calendarEvents" ]
+}

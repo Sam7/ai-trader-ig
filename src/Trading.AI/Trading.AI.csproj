@@ -13,6 +13,7 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Prompts\*.md" />
+    <EmbeddedResource Include="Schemas\*.json" />
   </ItemGroup>
 
   <PropertyGroup>

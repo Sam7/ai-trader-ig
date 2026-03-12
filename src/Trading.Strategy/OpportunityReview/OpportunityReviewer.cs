@@ -94,7 +94,7 @@ public sealed class OpportunityReviewer
         TradingDayRecord record,
         PendingOpportunityReview pendingReview,
         RiskContext riskContext,
-        TradeSetup tradeSetup,
+        IntradayTradeSetup tradeSetup,
         DateTimeOffset observedAtUtc)
     {
         // These checks deliberately read like reasons to stand aside.
@@ -156,7 +156,7 @@ public sealed class OpportunityReviewer
     }
 
     private ApprovedTrade? TryCreateApprovedTrade(
-        TradeSetup tradeSetup,
+        IntradayTradeSetup tradeSetup,
         RiskContext riskContext,
         StrategyRules rules,
         TradeApproval approval)

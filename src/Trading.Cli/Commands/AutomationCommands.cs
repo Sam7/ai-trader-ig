@@ -5,6 +5,9 @@ using Spectre.Console.Cli;
 using Trading.AI.DailyBriefing;
 using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
+using Trading.Strategy.DayPlanning;
+using Trading.Strategy.Inputs;
+using Trading.Strategy.Rules;
 using Trading.Strategy.Shared;
 
 [Description("Start the background automation worker in the foreground.")]
@@ -76,7 +79,41 @@ public sealed class AutomationBriefPlanCommand : AsyncCommand<AutomationBriefSet
     }
 }
 
-public sealed class AutomationBriefSettings : CommandSettings
+[Description("Convert an existing research markdown brief into a trading-day plan.")]
+public sealed class AutomationBriefConvertCommand : AsyncCommand<AutomationBriefConvertSettings>
+{
+    private readonly DailyPlanConverter _converter;
+    private readonly TradingCliRenderer _renderer;
+    private readonly AutomationOptions _options;
+    private readonly StrategyRules _rules;
+    private readonly ITradingClock _tradingClock;
+
+    public AutomationBriefConvertCommand(
+        DailyPlanConverter converter,
+        TradingCliRenderer renderer,
+        IOptions<AutomationOptions> options,
+        StrategyRules rules,
+        ITradingClock tradingClock)
+    {
+        _converter = converter;
+        _renderer = renderer;
+        _options = options.Value;
+        _rules = rules;
+        _tradingClock = tradingClock;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, AutomationBriefConvertSettings settings, CancellationToken cancellationToken)
+    {
+        var tradingDate = AutomationBriefSettings.ResolveTradingDate(settings.Date, _options.Timezone);
+        var markdown = await File.ReadAllTextAsync(settings.Input, cancellationToken);
+        var request = new DailyBriefingRequest(new TradingDayRequest(tradingDate), _rules, _tradingClock.UtcNow);
+        var plan = await _converter.ConvertAsync(request, markdown, cancellationToken);
+        _renderer.WriteTradingDayPlan(plan);
+        return 0;
+    }
+}
+
+public class AutomationBriefSettings : CommandSettings
 {
     [CommandOption("--date <YYYY-MM-DD>")]
     public string? Date { get; init; }
@@ -103,5 +140,29 @@ public sealed class AutomationBriefSettings : CommandSettings
         var timezone = TimeZoneInfo.FindSystemTimeZoneById(timezoneId);
         var localNow = TimeZoneInfo.ConvertTime(DateTimeOffset.UtcNow, timezone);
         return DateOnly.FromDateTime(localNow.DateTime);
+    }
+}
+
+public sealed class AutomationBriefConvertSettings : AutomationBriefSettings
+{
+    [CommandOption("--input <PATH>")]
+    public string Input { get; init; } = string.Empty;
+
+    public override ValidationResult Validate()
+    {
+        var baseValidation = base.Validate();
+        if (!baseValidation.Successful)
+        {
+            return baseValidation;
+        }
+
+        if (string.IsNullOrWhiteSpace(Input))
+        {
+            return ValidationResult.Error("Missing required option --input.");
+        }
+
+        return File.Exists(Input)
+            ? ValidationResult.Success()
+            : ValidationResult.Error("Option --input must point to an existing markdown file.");
     }
 }

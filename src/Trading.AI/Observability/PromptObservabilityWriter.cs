@@ -44,6 +44,9 @@ public sealed class PromptObservabilityWriter
     public Task WriteMarkdownAsync(PromptObservationSession session, string markdown, CancellationToken cancellationToken)
         => File.WriteAllTextAsync($"{session.BasePath}.md", markdown, cancellationToken);
 
+    public Task WriteStructuredAsync(PromptObservationSession session, object structuredResponse, CancellationToken cancellationToken)
+        => File.WriteAllTextAsync($"{session.BasePath}-extracted.json", JsonSerializer.Serialize(structuredResponse, JsonOptions), cancellationToken);
+
     public async Task CompleteAsync(
         PromptObservationSession session,
         PromptExecutionContext context,
@@ -77,6 +80,7 @@ public sealed class PromptObservabilityWriter
             RawResponse = ConvertRawRepresentation(response.RawRepresentation),
             DurationMs = duration.TotalMilliseconds,
             MarkdownArtifactPath = TryGetMarkdownPath(session),
+            StructuredArtifactPath = TryGetStructuredPath(session),
         };
 
         await WriteJsonAsync(session.JsonPath, record, cancellationToken);
@@ -105,6 +109,7 @@ public sealed class PromptObservabilityWriter
             Error = exception.ToString(),
             DurationMs = duration.TotalMilliseconds,
             MarkdownArtifactPath = TryGetMarkdownPath(session),
+            StructuredArtifactPath = TryGetStructuredPath(session),
         };
 
         await WriteJsonAsync(session.JsonPath, record, cancellationToken);
@@ -185,6 +190,12 @@ public sealed class PromptObservabilityWriter
     private static string? TryGetMarkdownPath(PromptObservationSession session)
     {
         var path = $"{session.BasePath}.md";
+        return File.Exists(path) ? path : null;
+    }
+
+    private static string? TryGetStructuredPath(PromptObservationSession session)
+    {
+        var path = $"{session.BasePath}-extracted.json";
         return File.Exists(path) ? path : null;
     }
 }

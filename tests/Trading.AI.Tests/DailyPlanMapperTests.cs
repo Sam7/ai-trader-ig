@@ -2,6 +2,7 @@ using FluentAssertions;
 using Trading.AI.Configuration;
 using Trading.AI.DailyBriefing;
 using Trading.Strategy.DayPlanning;
+using Trading.Strategy.Inputs;
 using Trading.Strategy.Rules;
 
 public sealed class DailyPlanMapperTests
@@ -17,7 +18,7 @@ public sealed class DailyPlanMapperTests
         var document = new DailyPlanDocument(
             "Macro",
             "Mixed regime",
-            "Mixed",
+            MarketRegime.Mixed,
             [
                 CreateMarket("CC.D.WTI.UMA.IP", 1),
             ],
@@ -40,6 +41,7 @@ public sealed class DailyPlanMapperTests
         var plan = mapper.Map(document, request, trackedMarkets, plannedAtUtc);
 
         plan.PlannedAtUtc.Should().Be(plannedAtUtc);
+        plan.MarketRegime.Should().Be(MarketRegime.Mixed);
     }
 
     private static PlannedMarketDocument CreateMarket(string instrumentId, int rank)
@@ -47,8 +49,6 @@ public sealed class DailyPlanMapperTests
             instrumentId,
             rank,
             $"Rationale {rank}",
-            10m + rank,
-            11m + rank,
             new PlannedTradeScenarioDocument(
                 "Long thesis",
                 "Long confirmation",

@@ -46,12 +46,12 @@ public class TradingDayWorkflowSpecs
     }
 
     [Fact]
-    public async Task AssessMarketAsync_should_raise_review_when_price_enters_the_entry_zone()
+    public async Task AssessMarketAsync_should_raise_review_when_volatility_expands_on_a_watched_market()
     {
         var harness = WorkflowHarness.Create();
         await harness.Workflow.PlanTradingDayAsync(new TradingDayRequest(new DateOnly(2026, 03, 11)));
 
-        var attention = await harness.Workflow.AssessMarketAsync(harness.CreateEntryZoneEvent("event-2"));
+        var attention = await harness.Workflow.AssessMarketAsync(harness.CreateVolatilityEvent("event-2"));
 
         attention.Should().BeOfType<ReviewMarketUpdate>();
     }
@@ -62,7 +62,7 @@ public class TradingDayWorkflowSpecs
         var harness = WorkflowHarness.Create(planningResult: new StandAsideSetup(
             new StandAsideDecision(StandAsideReason.WeakEdge, "No clean setup.", DateTimeOffset.UtcNow)));
         await harness.Workflow.PlanTradingDayAsync(new TradingDayRequest(new DateOnly(2026, 03, 11)));
-        var attention = (ReviewMarketUpdate)await harness.Workflow.AssessMarketAsync(harness.CreateEntryZoneEvent("event-3"));
+        var attention = (ReviewMarketUpdate)await harness.Workflow.AssessMarketAsync(harness.CreateVolatilityEvent("event-3"));
 
         var review = await harness.Workflow.ReviewOpportunityAsync(attention);
 
@@ -74,7 +74,7 @@ public class TradingDayWorkflowSpecs
     {
         var harness = WorkflowHarness.Create();
         await harness.Workflow.PlanTradingDayAsync(new TradingDayRequest(new DateOnly(2026, 03, 11)));
-        var attention = (ReviewMarketUpdate)await harness.Workflow.AssessMarketAsync(harness.CreateEntryZoneEvent("event-4"));
+        var attention = (ReviewMarketUpdate)await harness.Workflow.AssessMarketAsync(harness.CreateVolatilityEvent("event-4"));
 
         var review = await harness.Workflow.ReviewOpportunityAsync(attention);
 
@@ -100,7 +100,7 @@ public class TradingDayWorkflowSpecs
     {
         var harness = WorkflowHarness.Create();
         await harness.Workflow.PlanTradingDayAsync(new TradingDayRequest(new DateOnly(2026, 03, 11)));
-        var attention = (ReviewMarketUpdate)await harness.Workflow.AssessMarketAsync(harness.CreateEntryZoneEvent("event-6"));
+        var attention = (ReviewMarketUpdate)await harness.Workflow.AssessMarketAsync(harness.CreateVolatilityEvent("event-6"));
         var review = (ApprovedOpportunity)await harness.Workflow.ReviewOpportunityAsync(attention);
 
         var status = await harness.Workflow.ApplyExecutionReportAsync(new ExecutionReport(
@@ -120,7 +120,7 @@ public class TradingDayWorkflowSpecs
     {
         var harness = WorkflowHarness.Create();
         await harness.Workflow.PlanTradingDayAsync(new TradingDayRequest(new DateOnly(2026, 03, 11)));
-        var attention = (ReviewMarketUpdate)await harness.Workflow.AssessMarketAsync(harness.CreateEntryZoneEvent("event-7"));
+        var attention = (ReviewMarketUpdate)await harness.Workflow.AssessMarketAsync(harness.CreateVolatilityEvent("event-7"));
         var review = (ApprovedOpportunity)await harness.Workflow.ReviewOpportunityAsync(attention);
         await harness.Workflow.ApplyExecutionReportAsync(new ExecutionReport(
             review.ApprovedTrade.Instrument,
@@ -212,23 +212,23 @@ public class TradingDayWorkflowSpecs
                 workflow);
         }
 
-        public MarketEvent CreateEntryZoneEvent(string eventId)
+        public MarketEvent CreateVolatilityEvent(string eventId)
             => new(
                 eventId,
                 new InstrumentId("CS.D.EURUSD.CFD.IP"),
-                MarketEventKind.PriceTick,
-                new MarketSnapshot(new InstrumentId("CS.D.EURUSD.CFD.IP"), 1.1000m, 1.0999m, 1.1001m, 0.002m, 1.2m, Clock.UtcNow),
+                MarketEventKind.VolatilityChanged,
+                new MarketSnapshot(new InstrumentId("CS.D.EURUSD.CFD.IP"), 1.1000m, 1.0999m, 1.1001m, 0.002m, 1.6m, Clock.UtcNow),
                 Clock.UtcNow);
 
         public MarketEvent CreateWideSpreadEvent(string eventId)
             => new(
                 eventId,
                 new InstrumentId("CS.D.EURUSD.CFD.IP"),
-                MarketEventKind.PriceTick,
-                new MarketSnapshot(new InstrumentId("CS.D.EURUSD.CFD.IP"), 1.1000m, 0.7900m, 1.4100m, 0.002m, 1.2m, Clock.UtcNow),
+                MarketEventKind.VolatilityChanged,
+                new MarketSnapshot(new InstrumentId("CS.D.EURUSD.CFD.IP"), 1.1000m, 0.7900m, 1.4100m, 0.002m, 1.6m, Clock.UtcNow),
                 Clock.UtcNow);
 
-        private static TradeSetup CreateTradeSetup(DateTimeOffset nowUtc)
+        private static IntradayTradeSetup CreateTradeSetup(DateTimeOffset nowUtc)
             => new(
                 new InstrumentId("CS.D.EURUSD.CFD.IP"),
                 TradeDirection.Buy,
@@ -252,15 +252,15 @@ public class TradingDayWorkflowSpecs
                 "Mixed but selective.",
                 MarketRegime.Mixed,
                 [
-                    CreateMarketWatch("CS.D.EURUSD.CFD.IP", 1, 1.0990m, 1.1010m),
-                    CreateMarketWatch("CC.D.GOLD.UMA.IP", 2, 2900m, 2910m),
-                    CreateMarketWatch("CS.D.USDJPY.CFD.IP", 3, 147m, 148m),
-                    CreateMarketWatch("IX.D.SPTRD.DAILY.IP", 4, 5000m, 5010m),
+                    CreateMarketWatch("CS.D.EURUSD.CFD.IP", 1),
+                    CreateMarketWatch("CC.D.GOLD.UMA.IP", 2),
+                    CreateMarketWatch("CS.D.USDJPY.CFD.IP", 3),
+                    CreateMarketWatch("IX.D.SPTRD.DAILY.IP", 4),
                 ],
                 [
-                    CreateMarketWatch("CS.D.EURUSD.CFD.IP", 1, 1.0990m, 1.1010m),
-                    CreateMarketWatch("CC.D.GOLD.UMA.IP", 2, 2900m, 2910m),
-                    CreateMarketWatch("CS.D.USDJPY.CFD.IP", 3, 147m, 148m),
+                    CreateMarketWatch("CS.D.EURUSD.CFD.IP", 1),
+                    CreateMarketWatch("CC.D.GOLD.UMA.IP", 2),
+                    CreateMarketWatch("CS.D.USDJPY.CFD.IP", 3),
                 ],
                 [],
                 nowUtc);
@@ -271,13 +271,11 @@ public class TradingDayWorkflowSpecs
         public Task<TradingDayPlan> ComposeAsync(DailyBriefingRequest request, CancellationToken cancellationToken = default)
             => Task.FromResult(Plan);
 
-        private static MarketWatch CreateMarketWatch(string instrument, int rank, decimal lower, decimal upper)
+        private static MarketWatch CreateMarketWatch(string instrument, int rank)
             => new(
                 new InstrumentId(instrument),
                 rank,
                 $"Ranked #{rank}",
-                lower,
-                upper,
                 new TradeScenario(TradeDirection.Buy, "Long thesis", "Breakout holds", "Breaks support", ["macro"], null),
                 new TradeScenario(TradeDirection.Sell, "Short thesis", "Breakdown holds", "Reclaims resistance", ["macro"], null));
     }
@@ -304,7 +302,7 @@ public class TradingDayWorkflowSpecs
             _approval = approval;
         }
 
-        public Task<TradeApproval?> ApproveAsync(PendingOpportunityReview review, TradeSetup tradeSetup, CancellationToken cancellationToken = default)
+        public Task<TradeApproval?> ApproveAsync(PendingOpportunityReview review, IntradayTradeSetup tradeSetup, CancellationToken cancellationToken = default)
             => Task.FromResult(_approval);
     }
 

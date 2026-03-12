@@ -42,8 +42,6 @@ public sealed class DailyBriefingPlanServiceTests
                 new InstrumentId("CC.D.WTI.UMA.IP"),
                 1,
                 "Momentum remains constructive.",
-                70m,
-                71m,
                 new TradeScenario(TradeDirection.Buy, "Long thesis", "Breakout confirmation", "Range failure", [], null),
                 new TradeScenario(TradeDirection.Sell, "Short thesis", "Breakdown confirmation", "Trend recovery", [], null));
 

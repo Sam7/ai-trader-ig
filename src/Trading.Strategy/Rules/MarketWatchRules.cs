@@ -2,7 +2,6 @@ namespace Trading.Strategy.Rules;
 
 public sealed record MarketWatchRules(
     int ShortlistSize,
-    decimal EntryZoneDistanceThreshold,
     decimal VolatilityExpansionThreshold,
     decimal NearTargetThreshold,
     decimal NearStopThreshold)
@@ -12,11 +11,6 @@ public sealed record MarketWatchRules(
         if (ShortlistSize <= 0)
         {
             throw new ArgumentOutOfRangeException(nameof(ShortlistSize), "ShortlistSize must be greater than zero.");
-        }
-
-        if (EntryZoneDistanceThreshold < 0m)
-        {
-            throw new ArgumentOutOfRangeException(nameof(EntryZoneDistanceThreshold), "EntryZoneDistanceThreshold cannot be negative.");
         }
 
         if (VolatilityExpansionThreshold <= 0m)

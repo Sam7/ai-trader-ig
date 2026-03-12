@@ -6,6 +6,6 @@ namespace Trading.Automation.Execution;
 
 public sealed class NoOpTradeApprover : ITradeApprover
 {
-    public Task<TradeApproval?> ApproveAsync(PendingOpportunityReview review, TradeSetup tradeSetup, CancellationToken cancellationToken = default)
+    public Task<TradeApproval?> ApproveAsync(PendingOpportunityReview review, IntradayTradeSetup tradeSetup, CancellationToken cancellationToken = default)
         => Task.FromResult<TradeApproval?>(null);
 }

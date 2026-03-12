@@ -101,12 +101,6 @@ public sealed class MarketAttentionService
             return null;
         }
 
-        if (snapshot.LastPrice >= marketWatch.EntryZoneLowerBound - _rules.MarketWatch.EntryZoneDistanceThreshold
-            && snapshot.LastPrice <= marketWatch.EntryZoneUpperBound + _rules.MarketWatch.EntryZoneDistanceThreshold)
-        {
-            return MarketSignal.EntryZoneTouched;
-        }
-
         if (activeTrade is not null
             && (Math.Abs(snapshot.LastPrice - activeTrade.StopPrice) <= _rules.MarketWatch.NearStopThreshold
                 || Math.Abs(snapshot.LastPrice - activeTrade.TargetPrice) <= _rules.MarketWatch.NearTargetThreshold))
@@ -114,10 +108,9 @@ public sealed class MarketAttentionService
             return MarketSignal.OpenTradeAnomaly;
         }
 
-        if (snapshot.LastPrice <= marketWatch.EntryZoneLowerBound - snapshot.Atr
-            || snapshot.LastPrice >= marketWatch.EntryZoneUpperBound + snapshot.Atr)
+        if (snapshot.VolatilityRatio >= _rules.MarketWatch.VolatilityExpansionThreshold)
         {
-            return MarketSignal.ThesisInvalidated;
+            return MarketSignal.VolatilityExpanded;
         }
 
         return null;

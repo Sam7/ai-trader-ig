@@ -11,6 +11,7 @@ public static class CliServiceCollectionExtensions
         services.AddTransient<AutomationRunCommand>();
         services.AddTransient<AutomationBriefResearchCommand>();
         services.AddTransient<AutomationBriefPlanCommand>();
+        services.AddTransient<AutomationBriefConvertCommand>();
         services.AddTransient<BuyTradeCommand>();
         services.AddTransient<SellTradeCommand>();
         services.AddTransient<CreateWorkingOrderCommand>();

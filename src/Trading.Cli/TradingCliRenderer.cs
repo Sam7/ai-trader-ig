@@ -268,13 +268,12 @@ public sealed class TradingCliRenderer
             ("Planned At", CliParsing.FormatDate(plan.PlannedAtUtc)),
             ("Watch List", plan.WatchList.Count.ToString()));
 
-        var table = CreateTable("Rank", "Instrument", "Entry Zone", "Rationale");
+        var table = CreateTable("Rank", "Instrument", "Rationale");
         foreach (var market in plan.WatchList)
         {
             table.AddRow(
                 market.Rank.ToString(),
                 market.Instrument.Value,
-                $"{CliParsing.FormatDecimal(market.EntryZoneLowerBound)} - {CliParsing.FormatDecimal(market.EntryZoneUpperBound)}",
                 market.Rationale);
         }
 

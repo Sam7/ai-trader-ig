@@ -34,15 +34,24 @@ public sealed class DailyPlanConverter
         CancellationToken cancellationToken)
     {
         var trackedMarkets = _options.TrackedMarkets.ToDictionary(x => x.InstrumentId, StringComparer.Ordinal);
+        var planModel = new DailyBriefingModelOptions
+        {
+            ModelId = _options.PlanJson.ModelId,
+            Temperature = null,
+            MaxOutputTokens = _options.PlanJson.MaxOutputTokens,
+            EnableWebSearch = _options.PlanJson.EnableWebSearch,
+            Pricing = _options.PlanJson.Pricing,
+        };
         var context = new PromptExecutionContext(
             PromptRegistry.DailyPlanJson,
-            _options.PlanJson,
+            planModel,
             BuildVariables(request, researchBriefMarkdown),
             DateTimeOffset.UtcNow,
-            request.TradingDay.TradingDate);
+            request.TradingDay.TradingDate,
+            DailyPlanJsonResponseFormat.Create(request.Rules.MarketWatch.ShortlistSize));
 
         var (execution, document) = await _promptExecutor.ExecuteStructuredAsync<DailyPlanDocument>(
-            _chatClientFactory.CreateClient(_options.PlanJson.ModelId),
+            _chatClientFactory.CreateClient(planModel.ModelId),
             context,
             cancellationToken);
 

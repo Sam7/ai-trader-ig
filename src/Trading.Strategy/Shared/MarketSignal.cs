@@ -2,10 +2,9 @@ namespace Trading.Strategy.Shared;
 
 public enum MarketSignal
 {
-    EntryZoneTouched = 0,
-    VolatilityExpanded = 1,
-    FreshHeadline = 2,
-    ScheduledEventReleased = 3,
-    ThesisInvalidated = 4,
-    OpenTradeAnomaly = 5,
+    VolatilityExpanded = 0,
+    FreshHeadline = 1,
+    ScheduledEventReleased = 2,
+    ThesisInvalidated = 3,
+    OpenTradeAnomaly = 4,
 }

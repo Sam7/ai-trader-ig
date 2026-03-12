@@ -16,7 +16,7 @@ public sealed record StandAsideOpportunity(
 
 public sealed record ApprovedOpportunity(
     InstrumentId Instrument,
-    TradeSetup TradeSetup,
+    IntradayTradeSetup TradeSetup,
     TradeApproval Approval,
     ApprovedTrade ApprovedTrade,
     DateTimeOffset ReviewedAtUtc)

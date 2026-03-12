@@ -1,7 +1,6 @@
 using Trading.Abstractions;
 using Trading.AI.Configuration;
 using Trading.Strategy.DayPlanning;
-using Trading.Strategy.Inputs;
 using Trading.Strategy.Shared;
 
 namespace Trading.AI.DailyBriefing;
@@ -16,13 +15,12 @@ public sealed class DailyPlanMapper
     {
         var rankedMarkets = document.RankedMarkets.Select(x => MapMarket(x, trackedMarkets)).ToArray();
         var watchList = document.WatchList.Select(x => MapMarket(x, trackedMarkets)).ToArray();
-        var marketRegime = Enum.Parse<MarketRegime>(document.MarketRegime, ignoreCase: true);
 
         return new TradingDayPlan(
             request.TradingDay.TradingDate,
             document.MacroSummary,
             document.MarketRegimeSummary,
-            marketRegime,
+            document.MarketRegime,
             rankedMarkets,
             watchList,
             [],
@@ -51,8 +49,6 @@ public sealed class DailyPlanMapper
             new InstrumentId(trackedMarket.InstrumentId),
             document.Rank,
             document.Rationale,
-            document.EntryZoneLowerBound,
-            document.EntryZoneUpperBound,
             MapScenario(document.LongScenario, TradeDirection.Buy),
             MapScenario(document.ShortScenario, TradeDirection.Sell));
     }

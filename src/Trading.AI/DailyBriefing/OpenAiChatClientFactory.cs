@@ -1,5 +1,7 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
+using System.ClientModel;
+using OpenAI;
 using OpenAI.Responses;
 using Trading.AI.Configuration;
 
@@ -21,6 +23,11 @@ public sealed class OpenAiChatClientFactory : IChatClientFactory
             throw new InvalidOperationException("OpenAI API key is not configured.");
         }
 
-        return new OpenAIResponseClient(modelId, _options.ApiKey).AsIChatClient();
+        var clientOptions = new OpenAIClientOptions
+        {
+            NetworkTimeout = _options.RequestTimeout,
+        };
+
+        return new OpenAIResponseClient(modelId, new ApiKeyCredential(_options.ApiKey), clientOptions).AsIChatClient();
     }
 }

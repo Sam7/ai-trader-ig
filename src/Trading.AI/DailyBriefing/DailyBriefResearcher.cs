@@ -52,6 +52,7 @@ public sealed class DailyBriefResearcher
         {
             ["REPORT_DATE"] = request.TradingDay.TradingDate.ToString("yyyy-MM-dd"),
             ["REPORT_TIMEZONE"] = _options.DefaultTimezone,
+            ["WATCHLIST_SIZE"] = request.Rules.MarketWatch.ShortlistSize.ToString(),
             ["TRACKED_MARKETS"] = _trackedMarketsFormatter.Format(_options.TrackedMarkets),
         };
     }

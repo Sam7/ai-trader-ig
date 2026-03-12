@@ -35,12 +35,14 @@ public sealed class PromptObservabilityWriterTests
             pending.RootElement.GetProperty("status").GetString().Should().Be("Pending");
 
             await writer.WriteMarkdownAsync(session, "# brief", CancellationToken.None);
+            await writer.WriteStructuredAsync(session, new { marketRegime = "EventDriven" }, CancellationToken.None);
             await writer.FailAsync(session, context, "request text", null, new InvalidOperationException("boom"), TimeSpan.FromSeconds(2), CancellationToken.None);
 
             var failed = JsonDocument.Parse(await File.ReadAllTextAsync(session.JsonPath));
             failed.RootElement.GetProperty("status").GetString().Should().Be("Failed");
             failed.RootElement.GetProperty("error").GetString().Should().Contain("boom");
             failed.RootElement.GetProperty("markdownArtifactPath").GetString().Should().EndWith(".md");
+            failed.RootElement.GetProperty("structuredArtifactPath").GetString().Should().EndWith("-extracted.json");
         }
         finally
         {
