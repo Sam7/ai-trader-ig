@@ -46,6 +46,27 @@ public sealed class BrowseMarketsCommand : AsyncCommand<BrowseMarketsSettings>
     }
 }
 
+[Description("Show market metadata and dealing rules for an EPIC.")]
+public sealed class ShowMarketDetailsCommand : AsyncCommand<ShowMarketDetailsSettings>
+{
+    private readonly ITradingGateway _gateway;
+    private readonly TradingCliRenderer _renderer;
+
+    public ShowMarketDetailsCommand(ITradingGateway gateway, TradingCliRenderer renderer)
+    {
+        _gateway = gateway;
+        _renderer = renderer;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, ShowMarketDetailsSettings settings, CancellationToken cancellationToken)
+    {
+        await _gateway.AuthenticateAsync(cancellationToken);
+        var details = await _gateway.GetMarketDetailsAsync(new InstrumentId(settings.Instrument), cancellationToken);
+        _renderer.WriteMarketDetails(details);
+        return 0;
+    }
+}
+
 [Description("Show historical prices for a market.")]
 public sealed class ShowPricesCommand : AsyncCommand<ShowPricesSettings>
 {
@@ -152,6 +173,24 @@ public sealed class BrowseMarketsSettings : CommandSettings
 {
     [CommandOption("--node-id <ID>")]
     public string? NodeId { get; init; }
+}
+
+public sealed class ShowMarketDetailsSettings : CommandSettings
+{
+    [CommandOption("-i|--instrument <EPIC>")]
+    public string Instrument { get; init; } = string.Empty;
+
+    public override ValidationResult Validate()
+    {
+        if (string.IsNullOrWhiteSpace(Instrument))
+        {
+            return ValidationResult.Error("Missing required option --instrument.");
+        }
+
+        return CliParsing.Require(
+            !Instrument.Any(char.IsWhiteSpace),
+            "Option --instrument must be a single EPIC without whitespace.");
+    }
 }
 
 public sealed class ShowPricesSettings : CommandSettings

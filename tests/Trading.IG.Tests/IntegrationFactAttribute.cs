@@ -12,21 +12,10 @@ public sealed class IntegrationFactAttribute : FactAttribute
             return;
         }
 
-        var required = new[]
+        if (!IgDemoIntegrationConfiguration.TryValidateDemoConfiguration(out var skipReason))
         {
-            "IG__BaseUrl",
-            "IG__ApiKey",
-            "IG__Identifier",
-            "IG__Password",
-        };
-
-        foreach (var key in required)
-        {
-            if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable(key)))
-            {
-                Skip = $"Missing required environment variable: {key}";
-                return;
-            }
+            Skip = skipReason;
+            return;
         }
     }
 }

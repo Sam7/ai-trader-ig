@@ -33,6 +33,11 @@ public sealed class DailyBriefingPlanService
     public async Task<TradingDayPlan> RunAsync(DateOnly tradingDate, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Planning trading day for {TradingDate}.", tradingDate);
-        return await _workflow.PlanTradingDayAsync(new TradingDayRequest(tradingDate), cancellationToken);
+        var plan = await _workflow.PlanTradingDayAsync(new TradingDayRequest(tradingDate), cancellationToken);
+        _logger.LogInformation(
+            "Planned trading day for {TradingDate}. Watch list contains {WatchListCount} markets.",
+            tradingDate,
+            plan.WatchList.Count);
+        return plan;
     }
 }

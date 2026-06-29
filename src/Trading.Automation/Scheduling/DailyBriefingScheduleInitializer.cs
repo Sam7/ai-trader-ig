@@ -32,16 +32,29 @@ public sealed class DailyBriefingScheduleInitializer : IHostedService
             return;
         }
 
-        await _cronTickerManager.AddAsync(new CronTickerEntity
+        var result = await _cronTickerManager.AddAsync(new CronTickerEntity
         {
             Function = _options.JobName,
             Expression = _options.DailyBriefCron,
-        });
+        }, cancellationToken);
+
+        if (!result.IsSucceeded)
+        {
+            _logger.LogError(
+                result.Exception,
+                "Failed to register daily briefing schedule {Cron} for function {Function}.",
+                _options.DailyBriefCron,
+                _options.JobName);
+            throw new InvalidOperationException(
+                $"Failed to register daily briefing schedule '{_options.DailyBriefCron}' for function '{_options.JobName}'.",
+                result.Exception);
+        }
 
         _logger.LogInformation(
-            "Registered daily briefing schedule {Cron} in timezone {Timezone}.",
+            "Registered daily briefing schedule {Cron} in timezone {Timezone} with cron ticker {CronTickerId}.",
             _options.DailyBriefCron,
-            _options.Timezone);
+            _options.Timezone,
+            result.Result?.Id);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

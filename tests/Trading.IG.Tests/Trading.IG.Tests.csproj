@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\Trading.IG\Trading.IG.csproj" />
     <ProjectReference Include="..\..\src\Trading.Abstractions\Trading.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\Ig.Trading.Sdk\Ig.Trading.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\Trading.MarketData\Trading.MarketData.csproj" />
   </ItemGroup>
 
 </Project>

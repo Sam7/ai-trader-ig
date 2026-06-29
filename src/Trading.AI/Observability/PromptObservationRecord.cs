@@ -30,6 +30,8 @@ public sealed class PromptObservationRecord
 
     public object? RawResponse { get; set; }
 
+    public IReadOnlyList<PromptAttemptRecord>? Attempts { get; set; }
+
     public string? Error { get; set; }
 
     public double? DurationMs { get; set; }
@@ -49,3 +51,12 @@ public sealed record CostBreakdown(
     decimal OutputCostUsd,
     decimal CachedInputCostUsd,
     decimal TotalCostUsd);
+
+public sealed record PromptAttemptRecord(
+    int Attempt,
+    DateTimeOffset StartedAtUtc,
+    DateTimeOffset CompletedAtUtc,
+    string Status,
+    int? HttpStatus,
+    string? ErrorType,
+    string? ErrorMessage);

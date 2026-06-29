@@ -37,6 +37,10 @@ public interface ITradingGateway
         int maxResults = 20,
         CancellationToken cancellationToken = default);
 
+    Task<MarketDetails> GetMarketDetailsAsync(
+        InstrumentId instrument,
+        CancellationToken cancellationToken = default);
+
     Task<MarketNavigationPage> BrowseMarketsAsync(
         string? nodeId = null,
         CancellationToken cancellationToken = default);

@@ -130,6 +130,27 @@ internal static class IgTradingMapper
             IgTradingConversions.ParseMarketStatus(source.MarketStatus));
     }
 
+    public static MarketDetails MapMarketDetails(MarketDetailsResponse source)
+    {
+        return new MarketDetails(
+            new InstrumentId(source.Instrument.Epic),
+            source.Instrument.Name ?? source.Instrument.Epic,
+            IgTradingConversions.ParseMarketStatus(source.Snapshot.MarketStatus),
+            source.Instrument.Type,
+            source.Instrument.Expiry,
+            ResolveCurrencyCodeOrNull(source),
+            ResolveBid(source.Snapshot),
+            ResolveAsk(source.Snapshot),
+            source.Instrument.LotSize,
+            source.Instrument.Unit,
+            source.Instrument.ForceOpenAllowed,
+            source.Instrument.StopsLimitsAllowed,
+            source.Instrument.ControlledRiskAllowed,
+            source.Instrument.StreamingPricesAvailable,
+            MapMarketDealingRules(source.DealingRules),
+            ResolveSupportedOrderTypes(source));
+    }
+
     public static MarketNavigationPage MapMarketNavigation(string? nodeId, MarketNavigationResponse source)
     {
         return new MarketNavigationPage(
@@ -172,6 +193,49 @@ internal static class IgTradingMapper
 
     public static string? ResolveTransactionReference(TransactionItem transaction)
         => string.IsNullOrWhiteSpace(transaction.Reference) ? null : $"DIAAAAW{transaction.Reference}";
+
+    private static MarketDealingRulesSummary? MapMarketDealingRules(MarketDealingRules? source)
+    {
+        return source is null
+            ? null
+            : new MarketDealingRulesSummary(
+                MapMarketRuleDistance(source.MinDealSize),
+                MapMarketRuleDistance(source.MinStepDistance),
+                MapMarketRuleDistance(source.MinControlledRiskStopDistance),
+                MapMarketRuleDistance(source.MinNormalStopOrLimitDistance),
+                MapMarketRuleDistance(source.MaxStopOrLimitDistance),
+                source.MarketOrderPreference,
+                source.TrailingStopsPreference);
+    }
+
+    private static MarketRuleDistanceSummary? MapMarketRuleDistance(MarketRuleDistance? source)
+        => source is null ? null : new MarketRuleDistanceSummary(source.Value, source.Unit);
+
+    private static decimal? ResolveBid(MarketSnapshot snapshot)
+        => snapshot.Bid ?? snapshot.PriceLadder?.FirstOrDefault()?.Bid;
+
+    private static decimal? ResolveAsk(MarketSnapshot snapshot)
+        => snapshot.Offer ?? snapshot.PriceLadder?.FirstOrDefault()?.Ask;
+
+    private static string? ResolveCurrencyCodeOrNull(MarketDetailsResponse market)
+    {
+        var currency = market.Instrument.Currencies?.FirstOrDefault(x => x.IsDefault)
+                       ?? market.Instrument.Currencies?.FirstOrDefault();
+
+        return string.IsNullOrWhiteSpace(currency?.Code) ? null : currency.Code;
+    }
+
+    private static IReadOnlyList<string> ResolveSupportedOrderTypes(MarketDetailsResponse market)
+    {
+        var orderTypes = new List<string>();
+        if (!string.IsNullOrWhiteSpace(market.DealingRules?.MarketOrderPreference)
+            && !market.DealingRules.MarketOrderPreference.Equals("NOT_AVAILABLE", StringComparison.OrdinalIgnoreCase))
+        {
+            orderTypes.Add("MARKET");
+        }
+
+        return orderTypes;
+    }
 
     private static string? ResolveDealIdFromReference(string? reference)
         => string.IsNullOrWhiteSpace(reference) ? null : $"DIAAAAW{reference}";

@@ -141,6 +141,35 @@ public sealed class TradingCliRenderer
         WriteMarkets(page.Markets);
     }
 
+    public void WriteMarketDetails(MarketDetails details)
+    {
+        var rules = details.DealingRules;
+        WriteKeyValuePanel(
+            "Market Details",
+            ("Instrument", details.Instrument.Value),
+            ("Name", details.Name),
+            ("Status", details.Status.ToString()),
+            ("Type", details.Type ?? "n/a"),
+            ("Expiry", details.Expiry ?? "n/a"),
+            ("Currency", details.CurrencyCode ?? "n/a"),
+            ("Bid", CliParsing.FormatDecimal(details.Bid)),
+            ("Ask", CliParsing.FormatDecimal(details.Ask)),
+            ("Lot Size", CliParsing.FormatDecimal(details.LotSize)),
+            ("Unit", details.Unit ?? "n/a"),
+            ("Force Open Allowed", FormatBoolean(details.ForceOpenAllowed)),
+            ("Stops/Limits Allowed", FormatBoolean(details.StopsLimitsAllowed)),
+            ("Controlled Risk Allowed", FormatBoolean(details.ControlledRiskAllowed)),
+            ("Streaming Prices Available", FormatBoolean(details.StreamingPricesAvailable)),
+            ("Minimum Deal Size", FormatDistance(rules?.MinimumDealSize)),
+            ("Minimum Step Distance", FormatDistance(rules?.MinimumStepDistance)),
+            ("Minimum Controlled-Risk Stop", FormatDistance(rules?.MinimumControlledRiskStopDistance)),
+            ("Minimum Stop/Limit Distance", FormatDistance(rules?.MinimumStopOrLimitDistance)),
+            ("Maximum Stop/Limit Distance", FormatDistance(rules?.MaximumStopOrLimitDistance)),
+            ("Market Order Preference", rules?.MarketOrderPreference ?? "n/a"),
+            ("Trailing Stops Preference", rules?.TrailingStopsPreference ?? "n/a"),
+            ("Supported Order Types", details.SupportedOrderTypes.Count == 0 ? "n/a" : string.Join(", ", details.SupportedOrderTypes)));
+    }
+
     public void WritePrices(PriceSeries series)
     {
         if (series.Bars.Count == 0)
@@ -153,7 +182,9 @@ public sealed class TradingCliRenderer
             "Price Series",
             ("Instrument", series.Instrument.Value),
             ("Resolution", series.Resolution?.ToString() ?? "n/a"),
-            ("Bars", series.Bars.Count.ToString()));
+            ("Bars", series.Bars.Count.ToString()),
+            ("First", CliParsing.FormatDate(series.Bars[0].TimestampUtc)),
+            ("Latest", CliParsing.FormatDate(series.Bars[^1].TimestampUtc)));
 
         var table = CreateTable("Time", "Bid O", "Bid H", "Bid L", "Bid C", "Ask O", "Ask H", "Ask L", "Ask C", "Volume");
         foreach (var bar in series.Bars)
@@ -403,5 +434,19 @@ public sealed class TradingCliRenderer
         }
 
         return table;
+    }
+
+    private static string FormatBoolean(bool? value)
+        => value?.ToString() ?? "n/a";
+
+    private static string FormatDistance(MarketRuleDistanceSummary? value)
+    {
+        if (value is null)
+        {
+            return "n/a";
+        }
+
+        var unit = string.IsNullOrWhiteSpace(value.Unit) ? string.Empty : $" {value.Unit}";
+        return $"{CliParsing.FormatDecimal(value.Value)}{unit}";
     }
 }

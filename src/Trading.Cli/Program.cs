@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Spectre.Console;
+using Trading.Automation.Configuration;
 using Trading.Automation.DependencyInjection;
 using Trading.Charting.DependencyInjection;
 using Trading.IG;
@@ -9,7 +10,7 @@ using Trading.IG.DependencyInjection;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
-builder.Configuration.AddJsonFile("tracked-markets.json", optional: true, reloadOnChange: false);
+TrackedMarketsConfiguration.AddConfiguredTrackedMarketsFile(builder.Configuration);
 builder.Configuration.AddUserSecrets<Program>(optional: true);
 
 builder.Services.AddIgTradingGateway(builder.Configuration);

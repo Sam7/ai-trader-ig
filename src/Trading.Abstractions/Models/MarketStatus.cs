@@ -6,4 +6,5 @@ public enum MarketStatus
     Tradeable = 1,
     Closed = 2,
     Suspended = 3,
+    EditsOnly = 4,
 }

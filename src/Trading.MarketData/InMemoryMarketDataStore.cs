@@ -1,0 +1,169 @@
+using Trading.Abstractions;
+
+namespace Trading.MarketData;
+
+public sealed class InMemoryMarketDataStore : IMarketDataStore
+{
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly Dictionary<(string Instrument, PriceResolution Resolution, DateTimeOffset TimestampUtc), StoredPriceBar> _bars = [];
+    private readonly List<MarketDataCoverageRecord> _coverage = [];
+
+    public async Task UpsertAsync(
+        IReadOnlyList<StoredPriceBar> bars,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            foreach (var bar in bars)
+            {
+                var key = (bar.Instrument.Value, bar.Resolution, bar.Bar.TimestampUtc);
+                _bars[key] = _bars.TryGetValue(key, out var existing)
+                    ? bar with
+                    {
+                        FirstSeenUtc = existing.FirstSeenUtc,
+                    }
+                    : bar;
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<StoredPriceBar>> GetRangeAsync(
+        InstrumentId instrument,
+        PriceResolution resolution,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            return _bars.Values
+                .Where(bar => string.Equals(bar.Instrument.Value, instrument.Value, StringComparison.Ordinal)
+                    && bar.Resolution == resolution
+                    && bar.Bar.TimestampUtc >= fromUtc
+                    && bar.Bar.TimestampUtc < toUtc)
+                .OrderBy(bar => bar.Bar.TimestampUtc)
+                .ToArray();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<StoredPriceBar?> GetLatestFinalAsync(
+        InstrumentId instrument,
+        PriceResolution resolution,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            return _bars.Values
+                .Where(bar => string.Equals(bar.Instrument.Value, instrument.Value, StringComparison.Ordinal)
+                    && bar.Resolution == resolution
+                    && bar.IsFinal)
+                .OrderByDescending(bar => bar.Bar.TimestampUtc)
+                .FirstOrDefault();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<MarketDataGap>> FindMissingCompletedRangesAsync(
+        InstrumentId instrument,
+        PriceResolution resolution,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            var interval = PriceResolutionIntervals.ToTimeSpan(resolution);
+            var completedToUtc = PriceResolutionIntervals.AlignDown(toUtc, interval);
+            var present = _bars.Values
+                .Where(bar => string.Equals(bar.Instrument.Value, instrument.Value, StringComparison.Ordinal)
+                    && bar.Resolution == resolution
+                    && bar.IsFinal)
+                .Select(bar => bar.Bar.TimestampUtc)
+                .ToHashSet();
+            var covered = _coverage
+                .Where(record => string.Equals(record.Instrument.Value, instrument.Value, StringComparison.Ordinal)
+                    && record.Resolution == resolution
+                    && record.Status == MarketDataCoverageStatus.NoBars)
+                .ToArray();
+
+            return FindMissingRanges(fromUtc, completedToUtc, interval, present, covered);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task RecordCoverageAsync(
+        MarketDataCoverageRecord coverage,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            _coverage.RemoveAll(record =>
+                string.Equals(record.Instrument.Value, coverage.Instrument.Value, StringComparison.Ordinal)
+                && record.Resolution == coverage.Resolution
+                && record.FromUtc == coverage.FromUtc
+                && record.ToUtc == coverage.ToUtc);
+            _coverage.Add(coverage);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    private static IReadOnlyList<MarketDataGap> FindMissingRanges(
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        TimeSpan interval,
+        HashSet<DateTimeOffset> present,
+        IReadOnlyList<MarketDataCoverageRecord> covered)
+    {
+        var gaps = new List<MarketDataGap>();
+        DateTimeOffset? gapStart = null;
+        var cursor = fromUtc;
+
+        while (cursor < toUtc)
+        {
+            var missing = !present.Contains(cursor) && !IsCovered(cursor, covered);
+            if (missing)
+            {
+                gapStart ??= cursor;
+            }
+            else if (gapStart is not null)
+            {
+                gaps.Add(new MarketDataGap(gapStart.Value, cursor));
+                gapStart = null;
+            }
+
+            cursor = cursor.Add(interval);
+        }
+
+        if (gapStart is not null)
+        {
+            gaps.Add(new MarketDataGap(gapStart.Value, toUtc));
+        }
+
+        return gaps;
+    }
+
+    private static bool IsCovered(DateTimeOffset bucketStartUtc, IReadOnlyList<MarketDataCoverageRecord> covered)
+        => covered.Any(record => bucketStartUtc >= record.FromUtc && bucketStartUtc < record.ToUtc);
+}

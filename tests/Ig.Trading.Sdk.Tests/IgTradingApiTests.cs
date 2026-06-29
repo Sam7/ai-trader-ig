@@ -4,11 +4,13 @@ using Ig.Trading.Sdk.Configuration;
 using Ig.Trading.Sdk.Contracts;
 using Ig.Trading.Sdk.Errors;
 using Ig.Trading.Sdk.Models;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Refit;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Text.Json;
 
 namespace Ig.Trading.Sdk.Tests;
 
@@ -44,8 +46,8 @@ public class IgTradingApiTests
     {
         var sessionApi = new FakeSessionApi
         {
-            CreateSessionResponse = new SessionResponse("ACC1", null, null, 10),
-            GetSessionResponse = new SessionResponse("ACC2", null, null, 11),
+            CreateSessionResponse = new SessionResponse("ACC1", "https://demo-apd.marketdatasystems.com", null, 10),
+            GetSessionResponse = new SessionResponse("ACC2", "https://demo-apd.marketdatasystems.com", null, 11),
         };
         var api = CreateApi(
             sessionApi,
@@ -64,6 +66,37 @@ public class IgTradingApiTests
         sessionApi.GetSessionRequests.Should().Be(1);
         session.CurrentAccountId.Should().Be("ACC2");
         session.TimezoneOffsetHours.Should().Be(11);
+        session.LightstreamerEndpoint.Should().Be("https://demo-apd.marketdatasystems.com");
+    }
+
+    [Fact]
+    public async Task AuthenticateAsync_ShouldRetainLightstreamerEndpointFromSessionResponse()
+    {
+        var sessionApi = new FakeSessionApi
+        {
+            CreateSessionResponse = new SessionResponse("ACC1", "https://demo-apd.marketdatasystems.com", null, 11),
+        };
+        var api = CreateApi(sessionApi);
+
+        var session = await api.AuthenticateAsync();
+
+        session.LightstreamerEndpoint.Should().Be("https://demo-apd.marketdatasystems.com");
+    }
+
+    [Fact]
+    public async Task AuthenticateAsync_ShouldLogOnlyRedactedAccountId()
+    {
+        var sessionApi = new FakeSessionApi
+        {
+            CreateSessionResponse = new SessionResponse("DEMO12345", null, null, 11),
+        };
+        var logger = new CapturingLogger<IgTradingApi>();
+        var api = CreateApi(sessionApi, logger: logger);
+
+        await api.AuthenticateAsync();
+
+        logger.Messages.Should().Contain(message => message.Contains("*****2345", StringComparison.Ordinal));
+        logger.Messages.Should().NotContain(message => message.Contains("DEMO12345", StringComparison.Ordinal));
     }
 
     [Fact]
@@ -172,10 +205,59 @@ public class IgTradingApiTests
             .WithMessage("*timezone offset*");
     }
 
+    [Fact]
+    public void MarketDetailsResponse_ShouldDeserializeAvailableMetadataAndDealingRules()
+    {
+        const string json = """
+            {
+              "instrument": {
+                "epic": "CS.D.BITCOIN.CFD.IP",
+                "name": "Bitcoin",
+                "type": "CURRENCIES",
+                "expiry": "DFB",
+                "currencies": [{ "code": "USD", "isDefault": true }],
+                "lotSize": "1",
+                "unit": "CONTRACTS",
+                "forceOpenAllowed": true,
+                "stopsLimitsAllowed": true,
+                "controlledRiskAllowed": false,
+                "streamingPricesAvailable": true
+              },
+              "snapshot": {
+                "marketStatus": "TRADEABLE",
+                "priceLadder": [
+                  { "bid": "61000", "ask": "61005" }
+                ]
+              },
+              "dealingRules": {
+                "minDealSize": { "value": 0.01, "unit": "CONTRACTS" },
+                "minStepDistance": { "value": 1, "unit": "POINTS" },
+                "minNormalStopOrLimitDistance": { "value": 10, "unit": "POINTS" },
+                "marketOrderPreference": "AVAILABLE_DEFAULT_ON",
+                "trailingStopsPreference": "NOT_AVAILABLE"
+              }
+            }
+            """;
+
+        var response = JsonSerializer.Deserialize<MarketDetailsResponse>(json);
+
+        response.Should().NotBeNull();
+        response!.Instrument.Epic.Should().Be("CS.D.BITCOIN.CFD.IP");
+        response.Instrument.LotSize.Should().Be(1m);
+        response.Instrument.StreamingPricesAvailable.Should().BeTrue();
+        response.Snapshot.PriceLadder.Should().ContainSingle()
+            .Which.Should().Be(new MarketPriceLadderLevel(61000m, 61005m));
+        response.DealingRules.Should().NotBeNull();
+        response.DealingRules!.MinDealSize.Should().Be(new MarketRuleDistance(0.01m, "CONTRACTS"));
+        response.DealingRules.MinStepDistance.Should().Be(new MarketRuleDistance(1m, "POINTS"));
+        response.DealingRules.MarketOrderPreference.Should().Be("AVAILABLE_DEFAULT_ON");
+    }
+
     private static IgTradingApi CreateApi(
         FakeSessionApi sessionApi,
         IgClientOptions? options = null,
-        FakeMarketsApi? marketsApi = null)
+        FakeMarketsApi? marketsApi = null,
+        ILogger<IgTradingApi>? logger = null)
     {
         return new IgTradingApi(
             sessionApi,
@@ -187,7 +269,7 @@ public class IgTradingApiTests
             new InMemoryIgSessionStore(),
             new RsaIgPasswordEncryptor(),
             Options.Create(options ?? CreateOptions()),
-            NullLogger<IgTradingApi>.Instance);
+            logger ?? NullLogger<IgTradingApi>.Instance);
     }
 
     private static IgClientOptions CreateOptions()
@@ -302,6 +384,27 @@ public class IgTradingApiTests
         {
             Calls.Add($"range:{epic}:{resolution}:{from}:{to}");
             return Task.FromResult(RangeResponse);
+        }
+    }
+
+    private sealed class CapturingLogger<T> : ILogger<T>
+    {
+        public List<string> Messages { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull
+            => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            Messages.Add(formatter(state, exception));
         }
     }
 

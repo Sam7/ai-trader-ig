@@ -355,6 +355,23 @@ public sealed class IgTradingGateway : ITradingGateway
         });
     }
 
+    public async Task<MarketDetails> GetMarketDetailsAsync(
+        InstrumentId instrument,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(instrument.Value))
+        {
+            throw new ArgumentException("Instrument is required.", nameof(instrument));
+        }
+
+        return await ExecuteTranslatedAsync(
+            async () =>
+        {
+            var response = await _igTradingApi.GetMarketByEpicAsync(instrument.Value, cancellationToken);
+            return IgTradingMapper.MapMarketDetails(response);
+        });
+    }
+
     public async Task<MarketNavigationPage> BrowseMarketsAsync(
         string? nodeId = null,
         CancellationToken cancellationToken = default)

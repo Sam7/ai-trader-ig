@@ -4,6 +4,7 @@ using Spectre.Console;
 using Spectre.Console.Testing;
 using Trading.Abstractions;
 using Trading.Charting;
+using Trading.MarketData;
 
 public sealed class TradingCliApplicationTests
 {
@@ -61,6 +62,189 @@ public sealed class TradingCliApplicationTests
 
         exitCode.Should().Be(1);
         console.Output.Should().Contain("Option --resolution is required");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketDataCollectCommand_ShouldRunCollectorForRequestedMarkets()
+    {
+        var console = CreateConsole();
+        var collector = new FakeMarketDataCollector();
+        var application = CreateApplication(new FakeTradingGateway(), new FakePriceChartRenderer(), console, marketDataCollector: collector);
+
+        var exitCode = await application.RunAsync([
+            "marketdata",
+            "collect",
+            "--instruments",
+            "CS.D.BITCOIN.CFD.IP,CS.D.CFAGOLD.CFA.IP",
+            "--duration",
+            "00:00:00",
+        ]);
+
+        exitCode.Should().Be(0);
+        collector.Requests.Should().ContainSingle();
+        collector.Requests[0].Instruments.Select(instrument => instrument.Value)
+            .Should().Equal("CS.D.BITCOIN.CFD.IP", "CS.D.CFAGOLD.CFA.IP");
+        collector.Requests[0].Duration.Should().Be(TimeSpan.Zero);
+        console.Output.Should().Contain("Market-data collector completed");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketDataCollectMissingInstruments_ShouldReturnUsageExitCode()
+    {
+        var console = CreateConsole();
+        var application = CreateApplication(new FakeTradingGateway(), console);
+
+        var exitCode = await application.RunAsync(["marketdata", "collect", "--duration", "00:00:00"]);
+
+        exitCode.Should().Be(1);
+        console.Output.Should().Contain("Missing required option --instruments.");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketDataCollectEmptyInstrumentList_ShouldReturnUsageExitCode()
+    {
+        var console = CreateConsole();
+        var application = CreateApplication(new FakeTradingGateway(), console);
+
+        var exitCode = await application.RunAsync(["marketdata", "collect", "--instruments", ",", "--duration", "00:00:00"]);
+
+        exitCode.Should().Be(1);
+        console.Output.Should().Contain("Option --instruments must include at least one EPIC.");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketDetailsCommand_ShouldFetchAndRenderDetails()
+    {
+        var console = CreateConsole();
+        var gateway = new FakeTradingGateway
+        {
+            MarketDetailsResult = new MarketDetails(
+                new InstrumentId("CS.D.BITCOIN.CFD.IP"),
+                "Bitcoin",
+                MarketStatus.Tradeable,
+                "CURRENCIES",
+                "DFB",
+                "USD",
+                61000m,
+                61005m,
+                1m,
+                "CONTRACTS",
+                true,
+                true,
+                false,
+                true,
+                new MarketDealingRulesSummary(
+                    new MarketRuleDistanceSummary(0.01m, "CONTRACTS"),
+                    new MarketRuleDistanceSummary(1m, "POINTS"),
+                    null,
+                    new MarketRuleDistanceSummary(10m, "POINTS"),
+                    null,
+                    "AVAILABLE_DEFAULT_ON",
+                    "NOT_AVAILABLE"),
+                ["MARKET"]),
+        };
+
+        var application = CreateApplication(gateway, console);
+
+        var exitCode = await application.RunAsync(["markets", "details", "--instrument", "CS.D.BITCOIN.CFD.IP"]);
+
+        exitCode.Should().Be(0);
+        gateway.AuthenticateCalls.Should().Be(1);
+        gateway.GetMarketDetailsRequests.Should().ContainSingle();
+        gateway.GetMarketDetailsRequests[0].Value.Should().Be("CS.D.BITCOIN.CFD.IP");
+        console.Output.Should().Contain("Market Details");
+        console.Output.Should().Contain("Bitcoin");
+        console.Output.Should().Contain("Tradeable");
+        console.Output.Should().Contain("Minimum Stop/Limit Distance");
+        console.Output.Should().Contain("10 POINTS");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketDetailsCommandMissingInstrument_ShouldReturnUsageExitCode()
+    {
+        var console = CreateConsole();
+        var application = CreateApplication(new FakeTradingGateway(), console);
+
+        var exitCode = await application.RunAsync(["markets", "details"]);
+
+        exitCode.Should().Be(1);
+        console.Output.Should().Contain("Missing required option --instrument.");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketDetailsCommandMalformedInstrument_ShouldReturnUsageExitCode()
+    {
+        var console = CreateConsole();
+        var application = CreateApplication(new FakeTradingGateway(), console);
+
+        var exitCode = await application.RunAsync(["markets", "details", "--instrument", "bad epic"]);
+
+        exitCode.Should().Be(1);
+        console.Output.Should().Contain("Option --instrument must be a single EPIC without whitespace.");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketDetailsBrokerError_ShouldReturnTradingExitCode()
+    {
+        var console = CreateConsole();
+        var gateway = new FakeTradingGateway
+        {
+            MarketDetailsException = new TradingGatewayException(TradingErrorCode.InvalidInstrument, "Market not found")
+        };
+
+        var application = CreateApplication(gateway, console);
+
+        var exitCode = await application.RunAsync(["markets", "details", "--instrument", "BAD.EPIC"]);
+
+        exitCode.Should().Be(2);
+        console.Output.Should().Contain("Trading error");
+        console.Output.Should().Contain("Market not found");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketPricesCommand_ShouldRenderFirstAndLatestTimestamps()
+    {
+        var console = CreateConsole();
+        var gateway = new FakeTradingGateway
+        {
+            PricesResult = new PriceSeries(
+                new InstrumentId("CS.D.BITCOIN.CFD.IP"),
+                PriceResolution.TenMinutes,
+                [
+                    new PriceBar(
+                        DateTimeOffset.Parse("2026-06-27T12:40:00Z"),
+                        10m,
+                        12m,
+                        9m,
+                        11m,
+                        10.5m,
+                        12.5m,
+                        9.5m,
+                        11.5m,
+                        100),
+                    new PriceBar(
+                        DateTimeOffset.Parse("2026-06-27T12:50:00Z"),
+                        11m,
+                        13m,
+                        10m,
+                        12m,
+                        11.5m,
+                        13.5m,
+                        10.5m,
+                        12.5m,
+                        120),
+                ])
+        };
+
+        var application = CreateApplication(gateway, console);
+
+        var exitCode = await application.RunAsync(["markets", "prices", "--instrument", "CS.D.BITCOIN.CFD.IP", "--resolution", "10minute", "--max", "2"]);
+
+        exitCode.Should().Be(0);
+        console.Output.Should().Contain("First");
+        console.Output.Should().Contain("2026-06-27T12:40:00.0000000+00:00");
+        console.Output.Should().Contain("Latest");
+        console.Output.Should().Contain("2026-06-27T12:50:00.0000000+00:00");
     }
 
     [Fact]
@@ -311,13 +495,15 @@ public sealed class TradingCliApplicationTests
         FakeTradingGateway gateway,
         FakePriceChartRenderer chartRenderer,
         TestConsole console,
-        FakeAutomationRuntime? automationRuntime = null)
+        FakeAutomationRuntime? automationRuntime = null,
+        FakeMarketDataCollector? marketDataCollector = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<ITradingGateway>(gateway);
         services.AddSingleton<IPriceChartRenderer>(chartRenderer);
         services.AddSingleton<IAnsiConsole>(console);
         services.AddSingleton<IAutomationRuntime>(automationRuntime ?? new FakeAutomationRuntime());
+        services.AddSingleton<IMarketDataCollector>(marketDataCollector ?? new FakeMarketDataCollector());
         services.AddTradingCli();
 
         return new TradingCliApplication(services, console);
@@ -343,6 +529,8 @@ public sealed class TradingCliApplicationTests
 
         public List<GetPricesRequest> GetPricesRequests { get; } = [];
 
+        public List<InstrumentId> GetMarketDetailsRequests { get; } = [];
+
         public PlaceOrderResult PlaceMarketOrderResult { get; init; } = new(
             "ref-default",
             "deal-default",
@@ -351,6 +539,26 @@ public sealed class TradingCliApplicationTests
             DateTimeOffset.Parse("2026-03-10T00:00:00Z"));
 
         public IReadOnlyList<OrderSummary> OrdersResult { get; init; } = [];
+
+        public Exception? MarketDetailsException { get; init; }
+
+        public MarketDetails MarketDetailsResult { get; init; } = new(
+            new InstrumentId("CC.D.VIX.UMA.IP"),
+            "Volatility Index",
+            MarketStatus.Tradeable,
+            "INDICES",
+            "-",
+            "USD",
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            []);
 
         public PriceSeries PricesResult { get; init; } = new(
             new InstrumentId("CC.D.VIX.UMA.IP"),
@@ -397,6 +605,17 @@ public sealed class TradingCliApplicationTests
 
         public Task<IReadOnlyList<MarketSearchResult>> SearchMarketsAsync(string searchTerm, int maxResults = 20, CancellationToken cancellationToken = default)
             => Task.FromResult<IReadOnlyList<MarketSearchResult>>([]);
+
+        public Task<MarketDetails> GetMarketDetailsAsync(InstrumentId instrument, CancellationToken cancellationToken = default)
+        {
+            if (MarketDetailsException is not null)
+            {
+                throw MarketDetailsException;
+            }
+
+            GetMarketDetailsRequests.Add(instrument);
+            return Task.FromResult(MarketDetailsResult);
+        }
 
         public Task<MarketNavigationPage> BrowseMarketsAsync(string? nodeId = null, CancellationToken cancellationToken = default)
             => Task.FromResult(new MarketNavigationPage(nodeId, "Root", [], []));
@@ -481,4 +700,22 @@ public sealed class TradingCliApplicationTests
     {
         public Task RunAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
     }
+
+    private sealed class FakeMarketDataCollector : IMarketDataCollector
+    {
+        public List<CollectRequest> Requests { get; } = [];
+
+        public Task RunAsync(
+            IReadOnlyList<InstrumentId> instruments,
+            TimeSpan duration,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(new CollectRequest(instruments, duration));
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed record CollectRequest(
+        IReadOnlyList<InstrumentId> Instruments,
+        TimeSpan Duration);
 }

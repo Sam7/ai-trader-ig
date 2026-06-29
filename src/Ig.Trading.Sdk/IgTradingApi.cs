@@ -73,7 +73,8 @@ internal sealed class IgTradingApi : IIgTradingApi
             securityToken,
             currentAccountId,
             DateTimeOffset.UtcNow,
-            response.Content?.TimezoneOffsetHours);
+            response.Content?.TimezoneOffsetHours,
+            response.Content?.LightstreamerEndpoint);
         _sessionStore.Set(session);
 
         if (!string.IsNullOrWhiteSpace(_options.AccountId))
@@ -89,11 +90,12 @@ internal sealed class IgTradingApi : IIgTradingApi
             {
                 CurrentAccountId = refreshedSession.Content?.CurrentAccountId ?? _options.AccountId,
                 TimezoneOffsetHours = refreshedSession.Content?.TimezoneOffsetHours,
+                LightstreamerEndpoint = refreshedSession.Content?.LightstreamerEndpoint ?? session.LightstreamerEndpoint,
             };
             _sessionStore.Set(session);
         }
 
-        _logger.LogInformation("IG session authenticated for account {AccountId}.", session.CurrentAccountId);
+        _logger.LogInformation("IG session authenticated for account {AccountId}.", RedactAccountId(session.CurrentAccountId));
         return session;
     }
 
@@ -226,6 +228,18 @@ internal sealed class IgTradingApi : IIgTradingApi
         }
 
         return values.FirstOrDefault();
+    }
+
+    private static string RedactAccountId(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return "n/a";
+        }
+
+        return value.Length <= 4
+            ? "****"
+            : $"{new string('*', value.Length - 4)}{value[^4..]}";
     }
 
     private static async Task<T> ExecuteAsync<T>(Func<Task<T>> action)

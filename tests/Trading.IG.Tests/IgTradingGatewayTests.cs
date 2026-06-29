@@ -312,6 +312,68 @@ public class IgTradingGatewayTests
     }
 
     [Fact]
+    public async Task GetMarketDetailsAsync_ShouldMapMarketMetadataAndDealingRules()
+    {
+        var api = new FakeIgTradingApi
+        {
+            Market = epic => Task.FromResult(new MarketDetailsResponse(
+                new MarketInstrument(
+                    epic,
+                    "Bitcoin",
+                    "CURRENCIES",
+                    "DFB",
+                    [new MarketCurrency("USD", true)],
+                    LotSize: 1m,
+                    Unit: "CONTRACTS",
+                    ForceOpenAllowed: true,
+                    StopsLimitsAllowed: true,
+                    ControlledRiskAllowed: false,
+                    StreamingPricesAvailable: true),
+                new MarketSnapshot("TRADEABLE", 61000m, 61005m),
+                new MarketDealingRules(
+                    new MarketRuleDistance(10m, "POINTS"),
+                    MinDealSize: new MarketRuleDistance(0.01m, "CONTRACTS"),
+                    MinStepDistance: new MarketRuleDistance(1m, "POINTS"),
+                    MarketOrderPreference: "AVAILABLE_DEFAULT_ON",
+                    TrailingStopsPreference: "NOT_AVAILABLE"))),
+        };
+
+        var gateway = CreateGateway(api);
+
+        var details = await gateway.GetMarketDetailsAsync(new InstrumentId("CS.D.BITCOIN.CFD.IP"));
+
+        details.Instrument.Value.Should().Be("CS.D.BITCOIN.CFD.IP");
+        details.Name.Should().Be("Bitcoin");
+        details.Status.Should().Be(MarketStatus.Tradeable);
+        details.CurrencyCode.Should().Be("USD");
+        details.Bid.Should().Be(61000m);
+        details.Ask.Should().Be(61005m);
+        details.LotSize.Should().Be(1m);
+        details.DealingRules.Should().NotBeNull();
+        details.DealingRules!.MinimumDealSize.Should().Be(new MarketRuleDistanceSummary(0.01m, "CONTRACTS"));
+        details.DealingRules.MinimumStopOrLimitDistance.Should().Be(new MarketRuleDistanceSummary(10m, "POINTS"));
+        details.SupportedOrderTypes.Should().ContainSingle().Which.Should().Be("MARKET");
+    }
+
+    [Fact]
+    public async Task GetMarketDetailsAsync_WhenMarketIsEditsOnly_ShouldPreserveBrokerStatus()
+    {
+        var api = new FakeIgTradingApi
+        {
+            Market = epic => Task.FromResult(new MarketDetailsResponse(
+                new MarketInstrument(epic, "Weekend Contract", "INDICES", "DFB", [new MarketCurrency("USD", true)]),
+                new MarketSnapshot("EDITS_ONLY", 100m, 101m),
+                null)),
+        };
+
+        var gateway = CreateGateway(api);
+
+        var details = await gateway.GetMarketDetailsAsync(new InstrumentId("IX.D.WEEKEND.IP"));
+
+        details.Status.Should().Be(MarketStatus.EditsOnly);
+    }
+
+    [Fact]
     public async Task BrowseMarketsAsync_ShouldMapNodesAndMarkets()
     {
         var api = new FakeIgTradingApi

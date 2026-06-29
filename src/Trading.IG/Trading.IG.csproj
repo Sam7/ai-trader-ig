@@ -3,9 +3,11 @@
   <ItemGroup>
     <ProjectReference Include="..\Trading.Abstractions\Trading.Abstractions.csproj" />
     <ProjectReference Include="..\Ig.Trading.Sdk\Ig.Trading.Sdk.csproj" />
+    <ProjectReference Include="..\Trading.MarketData\Trading.MarketData.csproj" />
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="Lightstreamer.DotNetStandard.Client" Version="6.2.1" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.3" />
     <PackageReference Include="Microsoft.Extensions.Options.ConfigurationExtensions" Version="10.0.3" />

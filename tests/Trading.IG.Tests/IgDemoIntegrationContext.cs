@@ -48,27 +48,20 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
 
     public static Task<IgDemoIntegrationContext> CreateAsync(bool? useEncryptedPasswordOverride = null)
     {
-        var builder = new ConfigurationBuilder()
-            .AddEnvironmentVariables();
-
-        if (useEncryptedPasswordOverride is not null)
+        var configuration = IgDemoIntegrationConfiguration.Build(useEncryptedPasswordOverride);
+        if (!string.Equals(configuration["IG:BaseUrl"], IgDemoIntegrationConfiguration.DemoBaseUrl, StringComparison.OrdinalIgnoreCase))
         {
-            builder.AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["IG:UseEncryptedPassword"] = useEncryptedPasswordOverride.Value.ToString().ToLowerInvariant(),
-            });
+            throw new InvalidOperationException("Refusing to run IG integration tests because IG:BaseUrl is not the IG demo endpoint.");
         }
 
-        var configuration = builder.Build();
-
-        var epic = configuration["IG__TestEpic"] ?? "CC.D.VIX.UMA.IP";
-        var size = decimal.TryParse(configuration["IG__TestSize"], out var configuredSize)
+        var epic = IgDemoIntegrationConfiguration.GetValue(configuration, "IG:TestEpic", "IG__TestEpic") ?? "CC.D.VIX.UMA.IP";
+        var size = decimal.TryParse(IgDemoIntegrationConfiguration.GetValue(configuration, "IG:TestSize", "IG__TestSize"), out var configuredSize)
             ? configuredSize
             : 1m;
-        var workingOrderLevel = decimal.TryParse(configuration["IG__WorkingOrderTestLevel"], out var configuredLevel)
+        var workingOrderLevel = decimal.TryParse(IgDemoIntegrationConfiguration.GetValue(configuration, "IG:WorkingOrderTestLevel", "IG__WorkingOrderTestLevel"), out var configuredLevel)
             ? configuredLevel
             : 10m;
-        var marketSearchTerm = configuration["IG__MarketSearchTerm"] ?? "VIX";
+        var marketSearchTerm = IgDemoIntegrationConfiguration.GetValue(configuration, "IG:MarketSearchTerm", "IG__MarketSearchTerm") ?? "VIX";
 
         var services = new ServiceCollection();
         services.AddLogging();
@@ -130,7 +123,7 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
                 return;
             }
 
-            await Task.Delay(TimeSpan.FromSeconds(1));
+            await Task.Delay(TimeSpan.FromSeconds(5));
         }
 
         throw new TimeoutException($"Position '{dealId}' did not reach expected state shouldExist={shouldExist} within {timeout}.");
@@ -180,6 +173,31 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
         }
 
         throw new TimeoutException($"Position '{dealId}' did not reflect expected stop/limit levels within {timeout}.");
+    }
+
+    public async Task<OrderSummary> WaitForOrderActivityAsync(
+        Func<OrderQuery> queryFactory,
+        Func<OrderSummary, bool> predicate,
+        TimeSpan timeout)
+    {
+        var startedAt = Stopwatch.StartNew();
+        IReadOnlyList<OrderSummary> lastOrders = [];
+
+        while (startedAt.Elapsed < timeout)
+        {
+            var query = queryFactory();
+            var orders = await Gateway.GetOrdersAsync(query);
+            var match = orders.FirstOrDefault(predicate);
+            if (match is not null)
+            {
+                return match;
+            }
+
+            lastOrders = orders;
+            await Task.Delay(TimeSpan.FromSeconds(1));
+        }
+
+        throw new TimeoutException($"No matching order activity was returned within {timeout}. Last order count: {lastOrders.Count}.");
     }
 
     public async Task<(decimal StopLevel, decimal LimitLevel)> CreateValidProtectionLevelsAsync(string dealId)

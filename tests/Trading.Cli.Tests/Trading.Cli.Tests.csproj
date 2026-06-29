@@ -24,6 +24,7 @@
     <ProjectReference Include="..\..\src\Trading.Cli\Trading.Cli.csproj" />
     <ProjectReference Include="..\..\src\Trading.Abstractions\Trading.Abstractions.csproj" />
     <ProjectReference Include="..\..\src\Trading.Charting\Trading.Charting.csproj" />
+    <ProjectReference Include="..\..\src\Trading.MarketData\Trading.MarketData.csproj" />
   </ItemGroup>
 
 </Project>

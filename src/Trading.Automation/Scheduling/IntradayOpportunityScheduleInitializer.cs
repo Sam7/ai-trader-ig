@@ -32,16 +32,29 @@ public sealed class IntradayOpportunityScheduleInitializer : IHostedService
             return;
         }
 
-        await _cronTickerManager.AddAsync(new CronTickerEntity
+        var result = await _cronTickerManager.AddAsync(new CronTickerEntity
         {
             Function = IntradayOpportunityConstants.JobName,
             Expression = _options.IntradayOpportunities.Cron,
-        });
+        }, cancellationToken);
+
+        if (!result.IsSucceeded)
+        {
+            _logger.LogError(
+                result.Exception,
+                "Failed to register intraday opportunity schedule {Cron} for function {Function}.",
+                _options.IntradayOpportunities.Cron,
+                IntradayOpportunityConstants.JobName);
+            throw new InvalidOperationException(
+                $"Failed to register intraday opportunity schedule '{_options.IntradayOpportunities.Cron}' for function '{IntradayOpportunityConstants.JobName}'.",
+                result.Exception);
+        }
 
         _logger.LogInformation(
-            "Registered intraday opportunity schedule {Cron} in timezone {Timezone}.",
+            "Registered intraday opportunity schedule {Cron} in timezone {Timezone} with cron ticker {CronTickerId}.",
             _options.IntradayOpportunities.Cron,
-            _options.Timezone);
+            _options.Timezone,
+            result.Result?.Id);
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;

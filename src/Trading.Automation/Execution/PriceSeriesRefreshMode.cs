@@ -4,4 +4,5 @@ public enum PriceSeriesRefreshMode
 {
     Bootstrap = 0,
     Incremental = 1,
+    LocalCache = 2,
 }

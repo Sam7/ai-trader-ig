@@ -178,6 +178,7 @@ internal static class IgTradingConversions
             "TRADEABLE" => MarketStatus.Tradeable,
             "CLOSED" => MarketStatus.Closed,
             "SUSPENDED" => MarketStatus.Suspended,
+            "EDITS_ONLY" => MarketStatus.EditsOnly,
             _ => MarketStatus.Unknown,
         };
 

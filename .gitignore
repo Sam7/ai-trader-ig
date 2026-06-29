@@ -213,3 +213,5 @@ FakesAssemblies/
 appsettings.json
 appsettings.local.json
 appsettings.*.local.json
+appsettings.verification.json
+tracked-markets.verification.json

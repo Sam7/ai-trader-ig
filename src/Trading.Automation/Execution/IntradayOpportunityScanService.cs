@@ -125,6 +125,12 @@ public sealed class IntradayOpportunityScanService
 
         var execution = await _intradayOpportunityReviewer.ReviewAsync(prepared.Input, attachments, cancellationToken);
         var workflowResult = await _workflow.ReviewIntradayOpportunitiesAsync(execution.Batch, cancellationToken);
+        _logger.LogInformation(
+            "Validated intraday opportunity batch for {TradingDate}. Assessments: {AssessmentCount}. Candidates: {CandidateCount}. Outcome: {Outcome}",
+            workflowResult.TradingDate,
+            workflowResult.MarketAssessments.Count,
+            workflowResult.CandidateOpportunities.Count,
+            workflowResult.Outcome);
 
         var artifactReferences = execution.AttachmentArtifactPaths
             .Select(ToArtifactReference)

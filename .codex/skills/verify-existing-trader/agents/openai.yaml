@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify Existing Trader"
+  short_description: "Verify the existing AI Trader IG pipeline with durable evidence."
+  default_prompt: "Use this skill to verify the existing AI Trader IG implementation end to end in the demo environment."

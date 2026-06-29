@@ -123,12 +123,15 @@ public class IgDemoIntegrationTests
         positionByDealId.Should().NotBeNull();
         positionByDealId!.Position.DealId.Should().Be(context.PositionDealId);
 
-        var orders = await context.Gateway.GetOrdersAsync(new OrderQuery(
-            DateTimeOffset.UtcNow.AddHours(-24),
-            DateTimeOffset.UtcNow,
-            100));
+        var openedActivity = await context.WaitForOrderActivityAsync(
+            () => new OrderQuery(
+                DateTimeOffset.UtcNow.AddHours(-24),
+                DateTimeOffset.UtcNow.AddMinutes(5),
+                100),
+            order => string.Equals(order.DealReference, marketOrder.DealReference, StringComparison.OrdinalIgnoreCase),
+            TimeSpan.FromSeconds(90));
 
-        orders.Should().NotBeEmpty();
+        openedActivity.Status.Should().BeOneOf(OrderStatus.Open, OrderStatus.Accepted);
 
         var transactions = await context.IgTradingApi.GetTransactionsAsync();
         transactions.Should().NotBeNull();

@@ -3,6 +3,8 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Options;
 using System.ClientModel;
+using System.ClientModel.Primitives;
+using System.Text.Json;
 using Trading.AI.Configuration;
 using Trading.AI.DailyBriefing;
 using Trading.AI.Observability;
@@ -109,14 +111,14 @@ public sealed class PromptExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteStructuredAsync_ShouldNotRetry_WhenTransportFails()
+    public async Task ExecuteStructuredAsync_ShouldRetryTransientTransportFailureUntilMaximumAttempts()
     {
         var tempDirectory = Directory.CreateTempSubdirectory();
 
         try
         {
             var chatClient = new TestChatClient(_ => throw new HttpRequestException("dns failed"));
-            var executor = CreateExecutor(tempDirectory.FullName, chatClient);
+            var executor = CreateExecutor(tempDirectory.FullName, chatClient, (_, _) => Task.CompletedTask);
 
             var action = () => executor.ExecuteStructuredAsync<DailyPlanJsonInput, DailyPlanDocument>(
                 PromptRegistry.DailyPlanJson,
@@ -126,7 +128,7 @@ public sealed class PromptExecutorTests
                 CancellationToken.None);
 
             await action.Should().ThrowAsync<HttpRequestException>();
-            chatClient.CallCount.Should().Be(1);
+            chatClient.CallCount.Should().Be(3);
         }
         finally
         {
@@ -135,14 +137,47 @@ public sealed class PromptExecutorTests
     }
 
     [Fact]
-    public async Task ExecuteStructuredAsync_ShouldNotRetry_WhenProviderThrowsClientResultException()
+    public async Task ExecuteStructuredAsync_ShouldRetryTransientClientResultException()
     {
         var tempDirectory = Directory.CreateTempSubdirectory();
 
         try
         {
-            var chatClient = new TestChatClient(_ => throw new ClientResultException("boom", null, null));
-            var executor = CreateExecutor(tempDirectory.FullName, chatClient);
+            var chatClient = new TestChatClient(
+                _ => throw CreateClientResultException(520),
+                _ => Task.FromResult(CreateValidDailyPlanResponse()));
+            var executor = CreateExecutor(tempDirectory.FullName, chatClient, (_, _) => Task.CompletedTask);
+
+            var result = await executor.ExecuteStructuredAsync<DailyPlanJsonInput, DailyPlanDocument>(
+                PromptRegistry.DailyPlanJson,
+                new PromptModelOptions { ModelId = "gpt-test" },
+                CreateStructuredInput(),
+                DailyPlanJsonResponseFormat.Create(3),
+                CancellationToken.None);
+
+            chatClient.CallCount.Should().Be(2);
+            result.StructuredValue.MarketRegime.Should().Be(MarketRegime.Mixed);
+
+            var record = ReadLatestObservation(tempDirectory.FullName);
+            record.RootElement.GetProperty("attempts").GetArrayLength().Should().Be(2);
+            record.RootElement.GetProperty("attempts")[0].GetProperty("httpStatus").GetInt32().Should().Be(520);
+            record.RootElement.GetProperty("attempts")[1].GetProperty("status").GetString().Should().Be("Completed");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteStructuredAsync_ShouldFailAfterMaximumTransientAttempts()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var chatClient = new TestChatClient(_ => throw CreateClientResultException(520));
+            var executor = CreateExecutor(tempDirectory.FullName, chatClient, (_, _) => Task.CompletedTask);
 
             var action = () => executor.ExecuteStructuredAsync<DailyPlanJsonInput, DailyPlanDocument>(
                 PromptRegistry.DailyPlanJson,
@@ -152,6 +187,71 @@ public sealed class PromptExecutorTests
                 CancellationToken.None);
 
             await action.Should().ThrowAsync<ClientResultException>();
+            chatClient.CallCount.Should().Be(3);
+
+            var record = ReadLatestObservation(tempDirectory.FullName);
+            record.RootElement.GetProperty("attempts").GetArrayLength().Should().Be(3);
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteStructuredAsync_ShouldNotRetryPermanentClientResultException()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var chatClient = new TestChatClient(_ => throw CreateClientResultException(400));
+            var executor = CreateExecutor(tempDirectory.FullName, chatClient, (_, _) => Task.CompletedTask);
+
+            var action = () => executor.ExecuteStructuredAsync<DailyPlanJsonInput, DailyPlanDocument>(
+                PromptRegistry.DailyPlanJson,
+                new PromptModelOptions { ModelId = "gpt-test" },
+                CreateStructuredInput(),
+                DailyPlanJsonResponseFormat.Create(3),
+                CancellationToken.None);
+
+            await action.Should().ThrowAsync<ClientResultException>();
+            chatClient.CallCount.Should().Be(1);
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteStructuredAsync_ShouldStopRetryingWhenCancellationIsRequested()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            using var cancellationSource = new CancellationTokenSource();
+            var chatClient = new TestChatClient(
+                _ => throw CreateClientResultException(520),
+                _ => Task.FromResult(CreateValidDailyPlanResponse()));
+            var executor = CreateExecutor(
+                tempDirectory.FullName,
+                chatClient,
+                (_, token) =>
+                {
+                    cancellationSource.Cancel();
+                    return Task.Delay(TimeSpan.FromMinutes(1), token);
+                });
+
+            var action = () => executor.ExecuteStructuredAsync<DailyPlanJsonInput, DailyPlanDocument>(
+                PromptRegistry.DailyPlanJson,
+                new PromptModelOptions { ModelId = "gpt-test" },
+                CreateStructuredInput(),
+                DailyPlanJsonResponseFormat.Create(3),
+                cancellationSource.Token);
+
+            await action.Should().ThrowAsync<OperationCanceledException>();
             chatClient.CallCount.Should().Be(1);
         }
         finally
@@ -248,7 +348,10 @@ public sealed class PromptExecutorTests
         text.Should().Contain("One watched market");
     }
 
-    private static PromptExecutor CreateExecutor(string observabilityRootPath, IChatClient chatClient)
+    private static PromptExecutor CreateExecutor(
+        string observabilityRootPath,
+        IChatClient chatClient,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
         var options = Options.Create(new PromptObservabilityOptions
         {
@@ -260,7 +363,8 @@ public sealed class PromptExecutorTests
             new PromptTemplateRenderer(),
             new PromptObservabilityWriter(options),
             new StubChatClientFactory(chatClient),
-            new PromptInputConverter());
+            new PromptInputConverter(),
+            delayAsync);
     }
 
     private static DailyPlanJsonInput CreateStructuredInput()
@@ -279,6 +383,54 @@ public sealed class PromptExecutorTests
             ModelId = "gpt-test",
             CreatedAt = DateTimeOffset.Parse("2026-03-12T06:31:00Z"),
         };
+
+    private static ChatResponse CreateValidDailyPlanResponse()
+        => CreateResponse("""
+            {
+              "macroSummary": "Macro",
+              "marketRegimeSummary": "Summary",
+              "marketRegime": "Mixed",
+              "rankedMarkets": [
+                {
+                  "instrumentId": "CC.D.WTI.UMA.IP",
+                  "instrumentName": "WTI Crude Oil",
+                  "rank": 1,
+                  "rationale": "Strongest",
+                  "longScenario": {
+                    "thesis": "Long",
+                    "confirmation": "Confirm",
+                    "invalidation": "Invalidate",
+                    "expectedCatalysts": [],
+                    "avoidTradingUntilUtc": null
+                  },
+                  "shortScenario": {
+                    "thesis": "Short",
+                    "confirmation": "Confirm",
+                    "invalidation": "Invalidate",
+                    "expectedCatalysts": [],
+                    "avoidTradingUntilUtc": null
+                  }
+                }
+              ],
+              "catalysts": [],
+              "opportunities": [],
+              "risks": [],
+              "calendarEvents": []
+            }
+            """);
+
+    private static ClientResultException CreateClientResultException(int status)
+        => new("Service request failed.", new TestPipelineResponse(status), null);
+
+    private static JsonDocument ReadLatestObservation(string observabilityRootPath)
+    {
+        var jsonPath = Directory.GetFiles(observabilityRootPath, "*.json", SearchOption.AllDirectories)
+            .Where(path => !path.EndsWith("-extracted.json", StringComparison.OrdinalIgnoreCase))
+            .OrderByDescending(File.GetLastWriteTimeUtc)
+            .First();
+
+        return JsonDocument.Parse(File.ReadAllText(jsonPath));
+    }
 
     private sealed class TestChatClient : IChatClient
     {
@@ -322,5 +474,52 @@ public sealed class PromptExecutorTests
 
         public IChatClient CreateClient(string modelId)
             => _chatClient;
+    }
+
+    private sealed class TestPipelineResponse : PipelineResponse
+    {
+        public TestPipelineResponse(int status)
+        {
+            Status = status;
+        }
+
+        public override int Status { get; }
+
+        public override string ReasonPhrase => "test";
+
+        protected override PipelineResponseHeaders HeadersCore { get; } = new TestPipelineResponseHeaders();
+
+        public override Stream? ContentStream { get; set; } = Stream.Null;
+
+        public override BinaryData Content => BinaryData.FromString("{}");
+
+        public override bool IsError => Status >= 400;
+
+        public override BinaryData BufferContent(CancellationToken cancellationToken = default) => Content;
+
+        public override ValueTask<BinaryData> BufferContentAsync(CancellationToken cancellationToken = default)
+            => ValueTask.FromResult(Content);
+
+        public override void Dispose()
+        {
+        }
+    }
+
+    private sealed class TestPipelineResponseHeaders : PipelineResponseHeaders
+    {
+        public override bool TryGetValue(string name, out string? value)
+        {
+            value = null;
+            return false;
+        }
+
+        public override bool TryGetValues(string name, out IEnumerable<string>? values)
+        {
+            values = null;
+            return false;
+        }
+
+        public override IEnumerator<KeyValuePair<string, string>> GetEnumerator()
+            => Enumerable.Empty<KeyValuePair<string, string>>().GetEnumerator();
     }
 }

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.ClientModel;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.AI;
@@ -12,6 +13,14 @@ namespace Trading.AI.PromptExecution;
 
 public sealed class PromptExecutor
 {
+    private const int MaxTransientAttempts = 3;
+
+    private static readonly TimeSpan[] TransientRetryDelays =
+    [
+        TimeSpan.FromSeconds(2),
+        TimeSpan.FromSeconds(8),
+    ];
+
     private static readonly JsonSerializerOptions StructuredJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -26,19 +35,22 @@ public sealed class PromptExecutor
     private readonly PromptObservabilityWriter _observabilityWriter;
     private readonly IChatClientFactory _chatClientFactory;
     private readonly PromptInputConverter _inputConverter;
+    private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
 
     public PromptExecutor(
         PromptRegistry promptRegistry,
         PromptTemplateRenderer templateRenderer,
         PromptObservabilityWriter observabilityWriter,
         IChatClientFactory chatClientFactory,
-        PromptInputConverter inputConverter)
+        PromptInputConverter inputConverter,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
         _promptRegistry = promptRegistry;
         _templateRenderer = templateRenderer;
         _observabilityWriter = observabilityWriter;
         _chatClientFactory = chatClientFactory;
         _inputConverter = inputConverter;
+        _delayAsync = delayAsync ?? Task.Delay;
     }
 
     public Task<PromptTextResult> ExecuteTextAsync(
@@ -101,13 +113,17 @@ public sealed class PromptExecutor
         var session = await _observabilityWriter.StartAsync(invocation, requestText, requestOptions, cancellationToken);
         await _observabilityWriter.WriteAttachmentsAsync(session, invocation.Attachments, cancellationToken);
         var stopwatch = Stopwatch.StartNew();
+        var attempts = new List<PromptAttemptRecord>();
 
         try
         {
-            var response = await chatClient.GetResponseAsync(requestMessages, options, cancellationToken);
+            var response = await ExecuteProviderCallWithTransientRetryAsync(
+                token => chatClient.GetResponseAsync(requestMessages, options, token),
+                attempts,
+                cancellationToken);
             await _observabilityWriter.WriteTextAsync(session, response.Text, cancellationToken);
 
-            await _observabilityWriter.CompleteAsync(session, invocation, requestText, requestOptions, response, response.Text, null, stopwatch.Elapsed, cancellationToken);
+            await _observabilityWriter.CompleteAsync(session, invocation, requestText, requestOptions, response, response.Text, null, stopwatch.Elapsed, cancellationToken, attempts);
             return new PromptTextResult(
                 invocation.Prompt.Id,
                 invocation.Prompt.Name,
@@ -121,7 +137,7 @@ public sealed class PromptExecutor
         }
         catch (Exception exception)
         {
-            await _observabilityWriter.FailAsync(session, invocation, requestText, requestOptions, exception, stopwatch.Elapsed, cancellationToken);
+            await _observabilityWriter.FailAsync(session, invocation, requestText, requestOptions, exception, stopwatch.Elapsed, cancellationToken, attempts);
             throw;
         }
     }
@@ -143,6 +159,7 @@ public sealed class PromptExecutor
             var session = await _observabilityWriter.StartAsync(invocation, requestText, requestOptions, cancellationToken);
             await _observabilityWriter.WriteAttachmentsAsync(session, invocation.Attachments, cancellationToken);
             var stopwatch = Stopwatch.StartNew();
+            var attempts = new List<PromptAttemptRecord>();
 
             try
             {
@@ -151,16 +168,22 @@ public sealed class PromptExecutor
 
                 if (invocation.ResponseFormat is not null)
                 {
-                    response = await chatClient.GetResponseAsync(requestMessages, options, cancellationToken);
+                    response = await ExecuteProviderCallWithTransientRetryAsync(
+                        token => chatClient.GetResponseAsync(requestMessages, options, token),
+                        attempts,
+                        cancellationToken);
                     structured = DeserializeStructuredResponse<T>(response, invocation.Prompt.Name);
                 }
                 else
                 {
-                    var typedResponse = await chatClient.GetResponseAsync<T>(
-                        requestMessages,
-                        options,
-                        useJsonSchemaResponseFormat: true,
-                        cancellationToken: cancellationToken);
+                    var typedResponse = await ExecuteProviderCallWithTransientRetryAsync(
+                        token => chatClient.GetResponseAsync<T>(
+                            requestMessages,
+                            options,
+                            useJsonSchemaResponseFormat: true,
+                            cancellationToken: token),
+                        attempts,
+                        cancellationToken);
                     response = typedResponse;
                     if (!typedResponse.TryGetResult(out T? typedStructured) || typedStructured is null)
                     {
@@ -171,7 +194,7 @@ public sealed class PromptExecutor
                 }
 
                 await _observabilityWriter.WriteStructuredAsync(session, structured!, cancellationToken);
-                await _observabilityWriter.CompleteAsync(session, invocation, requestText, requestOptions, response, response.Text, structured!, stopwatch.Elapsed, cancellationToken);
+                await _observabilityWriter.CompleteAsync(session, invocation, requestText, requestOptions, response, response.Text, structured!, stopwatch.Elapsed, cancellationToken, attempts);
                 return new PromptStructuredResult<T>(
                     invocation.Prompt.Id,
                     invocation.Prompt.Name,
@@ -187,11 +210,11 @@ public sealed class PromptExecutor
             catch (Exception exception) when (attempt < 2 && ShouldRetryStructuredFailure(exception))
             {
                 lastException = exception;
-                await _observabilityWriter.FailAsync(session, invocation, requestText, requestOptions, exception, stopwatch.Elapsed, cancellationToken);
+                await _observabilityWriter.FailAsync(session, invocation, requestText, requestOptions, exception, stopwatch.Elapsed, cancellationToken, attempts);
             }
             catch (Exception exception)
             {
-                await _observabilityWriter.FailAsync(session, invocation, requestText, requestOptions, exception, stopwatch.Elapsed, cancellationToken);
+                await _observabilityWriter.FailAsync(session, invocation, requestText, requestOptions, exception, stopwatch.Elapsed, cancellationToken, attempts);
                 throw;
             }
         }
@@ -239,6 +262,75 @@ public sealed class PromptExecutor
 
     private static bool ShouldRetryStructuredFailure(Exception exception)
         => exception is StructuredOutputException;
+
+    private async Task<T> ExecuteProviderCallWithTransientRetryAsync<T>(
+        Func<CancellationToken, Task<T>> action,
+        List<PromptAttemptRecord> attempts,
+        CancellationToken cancellationToken)
+    {
+        for (var attempt = 1; attempt <= MaxTransientAttempts; attempt++)
+        {
+            var startedAtUtc = DateTimeOffset.UtcNow;
+            try
+            {
+                var result = await action(cancellationToken);
+                attempts.Add(new PromptAttemptRecord(
+                    attempt,
+                    startedAtUtc,
+                    DateTimeOffset.UtcNow,
+                    "Completed",
+                    null,
+                    null,
+                    null));
+                return result;
+            }
+            catch (Exception exception) when (ShouldRetryTransientProviderFailure(exception, attempt))
+            {
+                attempts.Add(CreateFailedAttempt(attempt, startedAtUtc, exception));
+                await _delayAsync(GetTransientRetryDelay(attempt), cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                attempts.Add(CreateFailedAttempt(attempt, startedAtUtc, exception));
+                throw;
+            }
+        }
+
+        throw new InvalidOperationException("Transient provider retry loop exited without a result or exception.");
+    }
+
+    private static PromptAttemptRecord CreateFailedAttempt(int attempt, DateTimeOffset startedAtUtc, Exception exception)
+        => new(
+            attempt,
+            startedAtUtc,
+            DateTimeOffset.UtcNow,
+            "Failed",
+            ResolveHttpStatus(exception),
+            exception.GetType().FullName,
+            exception.Message);
+
+    private static bool ShouldRetryTransientProviderFailure(Exception exception, int attempt)
+        => attempt < MaxTransientAttempts && IsTransientProviderFailure(exception);
+
+    private static bool IsTransientProviderFailure(Exception exception)
+        => exception switch
+        {
+            ClientResultException clientException => IsTransientHttpStatus(clientException.Status),
+            HttpRequestException => true,
+            _ => false,
+        };
+
+    private static bool IsTransientHttpStatus(int status)
+        => status is 500 or 502 or 503 or 504 or 520 or 522 or 524;
+
+    private static int? ResolveHttpStatus(Exception exception)
+        => exception is ClientResultException clientException ? clientException.Status : null;
+
+    private static TimeSpan GetTransientRetryDelay(int attempt)
+    {
+        var baseDelay = TransientRetryDelays[Math.Min(attempt - 1, TransientRetryDelays.Length - 1)];
+        return baseDelay + TimeSpan.FromMilliseconds(Random.Shared.Next(0, 500));
+    }
 
     private static IReadOnlyList<ChatMessage> BuildRequestMessages(string requestText, IReadOnlyList<PromptAttachment> attachments)
     {

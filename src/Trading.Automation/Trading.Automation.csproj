@@ -4,6 +4,7 @@
     <ProjectReference Include="..\Trading.AI\Trading.AI.csproj" />
     <ProjectReference Include="..\Trading.Charting\Trading.Charting.csproj" />
     <ProjectReference Include="..\Trading.IG\Trading.IG.csproj" />
+    <ProjectReference Include="..\Trading.MarketData\Trading.MarketData.csproj" />
     <ProjectReference Include="..\Trading.Strategy\Trading.Strategy.csproj" />
   </ItemGroup>
 
@@ -15,7 +16,7 @@
     <PackageReference Include="Serilog.AspNetCore" Version="9.0.0" />
     <PackageReference Include="Serilog.Settings.Configuration" Version="9.0.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
-    <PackageReference Include="TickerQ" Version="10.0.2" />
+    <PackageReference Include="TickerQ" Version="10.3.0" />
   </ItemGroup>
 
   <PropertyGroup>

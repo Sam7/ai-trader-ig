@@ -4,6 +4,7 @@ using Trading.AI.DependencyInjection;
 using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
 using Trading.Automation.Scheduling;
+using Trading.MarketData.DependencyInjection;
 using Trading.Strategy.DependencyInjection;
 using Trading.Strategy.Inputs;
 using Trading.Strategy.OpportunityReview;
@@ -18,6 +19,7 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(AutomationOptions.SectionName));
 
         services.AddTradingAi(configuration);
+        services.AddTradingMarketData(configuration);
         services.AddTradingStrategyCore();
 
         services.AddSingleton<SystemTradingClock>();

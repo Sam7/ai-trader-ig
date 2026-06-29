@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Hosting;
 using Serilog;
 using TickerQ.DependencyInjection;
+using Trading.Automation.Configuration;
 using Trading.Automation.DependencyInjection;
 using Trading.Charting.DependencyInjection;
 using Trading.IG.DependencyInjection;
@@ -17,7 +18,7 @@ public static class TradingWorkerApplication
         var builder = WebApplication.CreateBuilder(args);
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
-        builder.Configuration.AddJsonFile("tracked-markets.json", optional: true, reloadOnChange: false);
+        TrackedMarketsConfiguration.AddConfiguredTrackedMarketsFile(builder.Configuration);
         builder.Configuration.AddUserSecrets(typeof(TradingWorkerApplication).Assembly, optional: true);
 
         builder.Host.UseSerilog((context, services, loggerConfiguration) =>

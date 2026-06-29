@@ -5,6 +5,7 @@
     <ProjectReference Include="..\Trading.Automation\Trading.Automation.csproj" />
     <ProjectReference Include="..\Trading.Charting\Trading.Charting.csproj" />
     <ProjectReference Include="..\Trading.IG\Trading.IG.csproj" />
+    <ProjectReference Include="..\Trading.MarketData\Trading.MarketData.csproj" />
   </ItemGroup>
 
   <ItemGroup>

@@ -83,7 +83,8 @@ public sealed class PromptObservabilityWriter
         string responseText,
         object? structuredResponse,
         TimeSpan duration,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<PromptAttemptRecord>? attempts = null)
     {
         var usage = response.Usage ?? new UsageDetails();
         var cachedInputTokens = TryGetCachedInputTokenCount(usage);
@@ -105,6 +106,7 @@ public sealed class PromptObservabilityWriter
             Usage = usage,
             Cost = cost,
             RawResponse = ConvertRawRepresentation(response.RawRepresentation),
+            Attempts = attempts,
             DurationMs = duration.TotalMilliseconds,
             TextArtifactPath = TryGetArtifactPath(session.TextArtifactPath),
             StructuredArtifactPath = TryGetArtifactPath(session.StructuredArtifactPath),
@@ -121,7 +123,8 @@ public sealed class PromptObservabilityWriter
         object? requestOptions,
         Exception exception,
         TimeSpan duration,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyList<PromptAttemptRecord>? attempts = null)
     {
         var record = new PromptObservationRecord
         {
@@ -134,6 +137,7 @@ public sealed class PromptObservabilityWriter
             ModelId = invocation.Model.ModelId,
             RequestText = requestText,
             RequestOptions = requestOptions,
+            Attempts = attempts,
             Error = exception.ToString(),
             DurationMs = duration.TotalMilliseconds,
             TextArtifactPath = TryGetArtifactPath(session.TextArtifactPath),
