@@ -118,6 +118,7 @@ public sealed class IgMarketDataStreamClient : IMarketDataStreamClient
     {
         private readonly Func<StreamPriceBarUpdate, CancellationToken, Task> _onUpdate;
         private readonly ILogger _logger;
+        private readonly IgChartCandleUpdateAccumulator _accumulator = new();
 
         public ChartSubscriptionListener(
             Func<StreamPriceBarUpdate, CancellationToken, Task> onUpdate,
@@ -161,7 +162,15 @@ public sealed class IgMarketDataStreamClient : IMarketDataStreamClient
                     pair => pair.Key,
                     pair => (string?)pair.Value,
                     StringComparer.OrdinalIgnoreCase);
-                var candle = IgChartCandleMapper.Map(epic, scale, fields);
+                var candle = _accumulator.Apply(epic, scale, fields);
+                if (candle is null)
+                {
+                    _logger.LogDebug(
+                        "Ignored incomplete IG Lightstreamer chart update for {ItemName}.",
+                        itemUpdate.ItemName);
+                    return;
+                }
+
                 var update = IgMarketDataStreamMapper.ToStreamPriceBarUpdate(candle, DateTimeOffset.UtcNow);
                 _ = Task.Run(async () =>
                 {
@@ -174,6 +183,13 @@ public sealed class IgMarketDataStreamClient : IMarketDataStreamClient
                         _logger.LogError(exception, "Failed to process IG Lightstreamer chart update for {Epic}.", epic);
                     }
                 });
+            }
+            catch (IgStreamingDataException exception)
+            {
+                _logger.LogWarning(
+                    "Ignored invalid IG Lightstreamer chart update for {ItemName}: {Message}",
+                    itemUpdate.ItemName,
+                    exception.Message);
             }
             catch (Exception exception)
             {

@@ -6,6 +6,6 @@ public interface IMarketDataCollector
 {
     Task RunAsync(
         IReadOnlyList<InstrumentId> instruments,
-        TimeSpan duration,
+        TimeSpan? duration,
         CancellationToken cancellationToken = default);
 }

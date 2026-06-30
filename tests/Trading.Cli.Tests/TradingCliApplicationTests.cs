@@ -89,6 +89,88 @@ public sealed class TradingCliApplicationTests
     }
 
     [Fact]
+    public async Task RunAsync_WithMarketDataCollectWithoutDuration_ShouldRunIndefinitely()
+    {
+        var console = CreateConsole();
+        var collector = new FakeMarketDataCollector();
+        var application = CreateApplication(new FakeTradingGateway(), new FakePriceChartRenderer(), console, marketDataCollector: collector);
+
+        var exitCode = await application.RunAsync([
+            "marketdata",
+            "collect",
+            "--instruments",
+            "CS.D.BITCOIN.CFD.IP",
+        ]);
+
+        exitCode.Should().Be(0);
+        collector.Requests.Should().ContainSingle();
+        collector.Requests[0].Duration.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketDataCollectSixtyHourDuration_ShouldPassSixtyHours()
+    {
+        var console = CreateConsole();
+        var collector = new FakeMarketDataCollector();
+        var application = CreateApplication(new FakeTradingGateway(), new FakePriceChartRenderer(), console, marketDataCollector: collector);
+
+        var exitCode = await application.RunAsync([
+            "marketdata",
+            "collect",
+            "--instruments",
+            "CS.D.BITCOIN.CFD.IP",
+            "--duration",
+            "60:00:00",
+        ]);
+
+        exitCode.Should().Be(0);
+        collector.Requests.Should().ContainSingle();
+        collector.Requests[0].Duration.Should().Be(TimeSpan.FromHours(60));
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketDataCollectExplicitDayDuration_ShouldPassDuration()
+    {
+        var console = CreateConsole();
+        var collector = new FakeMarketDataCollector();
+        var application = CreateApplication(new FakeTradingGateway(), new FakePriceChartRenderer(), console, marketDataCollector: collector);
+
+        var exitCode = await application.RunAsync([
+            "marketdata",
+            "collect",
+            "--instruments",
+            "CS.D.BITCOIN.CFD.IP",
+            "--duration",
+            "2.12:00:00",
+        ]);
+
+        exitCode.Should().Be(0);
+        collector.Requests.Should().ContainSingle();
+        collector.Requests[0].Duration.Should().Be(TimeSpan.FromHours(60));
+    }
+
+    [Fact]
+    public async Task RunAsync_WithMarketDataCollectDurationOverMaximum_ShouldReturnUsageExitCode()
+    {
+        var console = CreateConsole();
+        var collector = new FakeMarketDataCollector();
+        var application = CreateApplication(new FakeTradingGateway(), new FakePriceChartRenderer(), console, marketDataCollector: collector);
+
+        var exitCode = await application.RunAsync([
+            "marketdata",
+            "collect",
+            "--instruments",
+            "CS.D.BITCOIN.CFD.IP",
+            "--duration",
+            "8.00:00:00",
+        ]);
+
+        exitCode.Should().Be(1);
+        collector.Requests.Should().BeEmpty();
+        console.Output.Should().Contain("Option --duration must be 7 days or less");
+    }
+
+    [Fact]
     public async Task RunAsync_WithMarketDataCollectMissingInstruments_ShouldReturnUsageExitCode()
     {
         var console = CreateConsole();
@@ -707,7 +789,7 @@ public sealed class TradingCliApplicationTests
 
         public Task RunAsync(
             IReadOnlyList<InstrumentId> instruments,
-            TimeSpan duration,
+            TimeSpan? duration,
             CancellationToken cancellationToken = default)
         {
             Requests.Add(new CollectRequest(instruments, duration));
@@ -717,5 +799,5 @@ public sealed class TradingCliApplicationTests
 
     private sealed record CollectRequest(
         IReadOnlyList<InstrumentId> Instruments,
-        TimeSpan Duration);
+        TimeSpan? Duration);
 }

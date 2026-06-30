@@ -143,6 +143,26 @@ public sealed class MarketDataCollectorTests
         health.LastHistoricalRepairStatus.Should().Be(MarketDataCoverageStatus.AllowanceBlocked);
     }
 
+    [Fact]
+    public async Task RunAsync_WithIndefiniteDuration_ShouldWaitUntilCancelledAndDisposeStream()
+    {
+        var stream = new FakeMarketDataStreamClient();
+        var collector = CreateCollector(
+            new InMemoryMarketDataStore(),
+            stream,
+            new FakeTradingGateway(),
+            nowUtc: "2026-06-29T00:17:00Z");
+        using var cancellation = new CancellationTokenSource();
+
+        var run = collector.RunAsync([new InstrumentId("CS.D.BITCOIN.CFD.IP")], null, cancellation.Token);
+        await stream.Started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+        cancellation.Cancel();
+
+        var action = async () => await run;
+        await action.Should().ThrowAsync<OperationCanceledException>();
+        stream.Session.DisposeCalls.Should().Be(1);
+    }
+
     private static MarketDataCollector CreateCollector(
         IMarketDataStore store,
         FakeMarketDataStreamClient stream,
@@ -191,6 +211,10 @@ public sealed class MarketDataCollectorTests
 
         public IReadOnlyList<MarketDataStreamSubscription> Subscriptions { get; private set; } = [];
 
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public NoOpMarketDataStreamSession Session { get; } = new();
+
         public Func<Func<StreamPriceBarUpdate, CancellationToken, Task>, Task>? OnStart { get; init; }
 
         public async Task<IMarketDataStreamSession> StartAsync(
@@ -206,7 +230,19 @@ public sealed class MarketDataCollectorTests
                 await OnStart(onUpdate);
             }
 
-            return new NoOpMarketDataStreamSession();
+            Started.TrySetResult();
+            return Session;
+        }
+    }
+
+    private sealed class NoOpMarketDataStreamSession : IMarketDataStreamSession
+    {
+        public int DisposeCalls { get; private set; }
+
+        public ValueTask DisposeAsync()
+        {
+            DisposeCalls++;
+            return ValueTask.CompletedTask;
         }
     }
 

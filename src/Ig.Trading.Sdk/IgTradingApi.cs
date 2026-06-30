@@ -117,8 +117,8 @@ internal sealed class IgTradingApi : IIgTradingApi
             return ExecuteAndNormalizePricesAsync(() => _marketsApi.GetPricesByRangeAsync(
                 request.Epic,
                 request.Resolution,
-                request.FromUtc.Value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss"),
-                request.ToUtc.Value.UtcDateTime.ToString("yyyy-MM-dd'T'HH:mm:ss"),
+                FormatPriceRangePathDate(request.FromUtc.Value),
+                FormatPriceRangePathDate(request.ToUtc.Value),
                 cancellationToken));
         }
 
@@ -259,6 +259,9 @@ internal sealed class IgTradingApi : IIgTradingApi
         var response = await ExecuteAsync(action);
         return NormalizePriceTimestamps(response);
     }
+
+    private static string FormatPriceRangePathDate(DateTimeOffset value)
+        => value.UtcDateTime.ToString("yyyy-MM-dd HH:mm:ss", CultureInfo.InvariantCulture);
 
     private static void EnsureSuccess<T>(ApiResponse<T> response)
     {

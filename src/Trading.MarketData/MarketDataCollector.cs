@@ -35,7 +35,7 @@ public sealed class MarketDataCollector : IMarketDataCollector
 
     public async Task RunAsync(
         IReadOnlyList<InstrumentId> instruments,
-        TimeSpan duration,
+        TimeSpan? duration,
         CancellationToken cancellationToken = default)
     {
         if (instruments.Count == 0)
@@ -64,9 +64,13 @@ public sealed class MarketDataCollector : IMarketDataCollector
             await RepairMissingCompletedCandlesAsync(instrument, resolution, cancellationToken);
         }
 
-        if (duration > TimeSpan.Zero)
+        if (duration is null)
         {
-            await Task.Delay(duration, cancellationToken);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        else if (duration > TimeSpan.Zero)
+        {
+            await Task.Delay(duration.Value, cancellationToken);
         }
     }
 

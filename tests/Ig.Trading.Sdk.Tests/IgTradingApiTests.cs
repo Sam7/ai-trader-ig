@@ -140,7 +140,8 @@ public class IgTradingApiTests
             DateTimeOffset.Parse("2026-03-10T00:00:00Z"),
             DateTimeOffset.Parse("2026-03-10T01:00:00Z")));
 
-        marketsApi.Calls.Should().ContainSingle(call => call.StartsWith("range:CC.D.VIX.UMA.IP:MINUTE:", StringComparison.Ordinal));
+        marketsApi.Calls.Should().ContainSingle()
+            .Which.Should().Be("range:CC.D.VIX.UMA.IP:MINUTE:2026-03-10 00:00:00:2026-03-10 01:00:00");
     }
 
     [Fact]

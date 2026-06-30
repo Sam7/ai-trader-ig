@@ -148,7 +148,8 @@ public sealed class TradingCliApplication
         configurator.AddExample(["markets", "details", "--instrument", "CC.D.VIX.UMA.IP"]);
         configurator.AddExample(["markets", "prices", "--instrument", "CC.D.VIX.UMA.IP", "--resolution", "hour", "--max", "10"]);
         configurator.AddExample(["markets", "chart", "--instrument", "CC.D.VIX.UMA.IP", "--resolution", "hour", "--max", "50", "--output", "artifacts\\vix-chart.png", "--style", "candlestick", "--sma", "20,50", "--bollinger", "20"]);
-        configurator.AddExample(["marketdata", "collect", "--instruments", "CS.D.BITCOIN.CFD.IP", "--duration", "00:10:00"]);
+        configurator.AddExample(["marketdata", "collect", "--instruments", "CS.D.BITCOIN.CFD.IP"]);
+        configurator.AddExample(["marketdata", "collect", "--instruments", "CS.D.BITCOIN.CFD.IP", "--duration", "60:00:00"]);
         configurator.AddExample(["positions", "list"]);
         configurator.AddExample(["positions", "update", "--deal-id", "DIAAAAAAA", "--stop-level", "1", "--limit-level", "100"]);
         configurator.AddExample(["positions", "close", "--deal-id", "DIAAAAAAA"]);
