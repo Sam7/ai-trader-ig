@@ -265,7 +265,7 @@ public sealed class IntradayOpportunityScanService
             latestBar.TimestampUtc,
             cachedSeries.RefreshMode,
             cachedSeries.FetchedBarCount,
-            $"{instrumentName} 4-day 10-minute chart",
+            IntradayChartAttachmentLabel.Format(instrumentName, options.ChartLookbackHours, options.ChartResolution),
             chartBytes);
     }
 
