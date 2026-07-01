@@ -29,6 +29,7 @@ jobs:
   deploy:
     name: Test, publish, provision, deploy
     runs-on: ubuntu-latest
+    environment: production
 
     steps:
       - name: Check out repository
