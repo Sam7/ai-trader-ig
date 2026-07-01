@@ -19,17 +19,18 @@ env:
   WORKER_PROJECT: src/Trading.Worker/Trading.Worker.csproj
   PUBLISH_DIR: artifacts/publish/worker
   PACKAGE_PATH: artifacts/ai-trader-worker.tar.gz
-  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
-  GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
-  GCP_ZONE: ${{ vars.GCP_ZONE || 'us-central1-a' }}
-  NAME_PREFIX: ${{ vars.NAME_PREFIX || 'ai-trader' }}
-  PULUMI_STACK: ${{ vars.PULUMI_STACK || 'dev' }}
 
 jobs:
   deploy:
     name: Test, publish, provision, deploy
     runs-on: ubuntu-latest
     environment: production
+    env:
+      GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+      GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+      GCP_ZONE: ${{ vars.GCP_ZONE || 'us-central1-a' }}
+      NAME_PREFIX: ${{ vars.NAME_PREFIX || 'ai-trader' }}
+      PULUMI_STACK: ${{ vars.PULUMI_STACK || 'dev' }}
 
     steps:
       - name: Check out repository
