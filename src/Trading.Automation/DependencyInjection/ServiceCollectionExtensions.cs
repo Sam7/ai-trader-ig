@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Trading.AI.DependencyInjection;
 using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
+using Trading.Automation.MarketData;
 using Trading.Automation.Scheduling;
 using Trading.MarketData.DependencyInjection;
 using Trading.Strategy.DependencyInjection;
@@ -17,6 +18,8 @@ public static class ServiceCollectionExtensions
     {
         services.AddOptions<AutomationOptions>()
             .Bind(configuration.GetSection(AutomationOptions.SectionName));
+        services.AddOptions<MarketDataCollectionOptions>()
+            .Bind(configuration.GetSection($"{AutomationOptions.SectionName}:MarketDataCollection"));
 
         services.AddTradingAi(configuration);
         services.AddTradingMarketData(configuration);
@@ -39,6 +42,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IntradayOpportunityScanService>();
         services.AddTransient<DailyBriefingTickerJob>();
         services.AddTransient<IntradayOpportunityTickerJob>();
+        services.AddHostedService<MarketDataCollectionHostedService>();
         services.AddHostedService<DailyBriefingScheduleInitializer>();
         services.AddHostedService<IntradayOpportunityScheduleInitializer>();
         return services;
