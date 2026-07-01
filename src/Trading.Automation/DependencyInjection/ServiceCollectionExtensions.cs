@@ -32,6 +32,10 @@ public static class ServiceCollectionExtensions
         services.AddTransient<DailyBriefingPlanService>();
         services.AddSingleton<IntradayPriceSeriesCache>();
         services.AddSingleton<IntradayOpportunityPreparationWriter>();
+        services.AddSingleton<DecisionAuditWriter>();
+        services.AddSingleton<PaperTradeOutcomeEvaluator>();
+        services.AddSingleton<PaperMarketAssessmentEvaluator>();
+        services.AddTransient<IDecisionAuditEvaluationService, DecisionAuditEvaluationService>();
         services.AddTransient<IntradayOpportunityScanService>();
         services.AddTransient<DailyBriefingTickerJob>();
         services.AddTransient<IntradayOpportunityTickerJob>();

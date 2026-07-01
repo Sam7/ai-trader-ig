@@ -215,3 +215,8 @@ appsettings.local.json
 appsettings.*.local.json
 appsettings.verification.json
 tracked-markets.verification.json
+
+# Local Pulumi stack configuration
+Pulumi.*.yaml
+!Pulumi.yaml
+gcp-credentials.json

@@ -84,7 +84,14 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<DailyPlanMapper>();
         services.AddSingleton<IntradayOpportunityMapper>();
         services.AddSingleton<IChatClientFactory, OpenAiChatClientFactory>();
-        services.AddTransient<PromptExecutor>();
+        services.AddSingleton<IBackgroundResponseClient, OpenAiBackgroundResponseClient>();
+        services.AddTransient(sp => new PromptExecutor(
+            sp.GetRequiredService<PromptRegistry>(),
+            sp.GetRequiredService<PromptTemplateRenderer>(),
+            sp.GetRequiredService<PromptObservabilityWriter>(),
+            sp.GetRequiredService<IChatClientFactory>(),
+            sp.GetRequiredService<PromptInputConverter>(),
+            sp.GetRequiredService<IBackgroundResponseClient>()));
         services.AddTransient<DailyBriefResearcher>();
         services.AddTransient<DailyPlanConverter>();
         services.AddTransient<IntradayOpportunityReviewer>();

@@ -23,4 +23,8 @@ public sealed class PromptObservationSession
     public string StructuredArtifactPath { get; }
 
     public List<string> AttachmentArtifactPaths { get; } = [];
+
+    public string? ProviderResponseId { get; set; }
+
+    public string? ProviderStatus { get; set; }
 }

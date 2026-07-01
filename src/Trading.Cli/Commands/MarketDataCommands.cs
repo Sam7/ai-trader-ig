@@ -93,7 +93,7 @@ public sealed class CollectMarketDataSettings : CommandSettings
             ? duration
             : throw new FormatException("Option --duration must be a valid TimeSpan.");
 
-    private static bool TryParseDuration(string? value, out TimeSpan? duration)
+    public static bool TryParseDuration(string? value, out TimeSpan? duration)
     {
         duration = null;
         if (string.IsNullOrWhiteSpace(value))

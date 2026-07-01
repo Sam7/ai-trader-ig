@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Spectre.Console;
 using Spectre.Console.Testing;
 using Trading.Abstractions;
+using Trading.Automation.Execution;
 using Trading.Charting;
 using Trading.MarketData;
 
@@ -147,6 +148,151 @@ public sealed class TradingCliApplicationTests
         exitCode.Should().Be(0);
         collector.Requests.Should().ContainSingle();
         collector.Requests[0].Duration.Should().Be(TimeSpan.FromHours(60));
+    }
+
+    [Fact]
+    public async Task RunAsync_WithAutomationRunDuration_ShouldPassBoundedDuration()
+    {
+        var console = CreateConsole();
+        var runtime = new FakeAutomationRuntime();
+        var application = CreateApplication(
+            new FakeTradingGateway(),
+            new FakePriceChartRenderer(),
+            console,
+            automationRuntime: runtime);
+
+        var exitCode = await application.RunAsync(["automation", "run", "--duration", "08:00:00"]);
+
+        exitCode.Should().Be(0);
+        runtime.Requests.Should().ContainSingle();
+        runtime.Requests[0].Duration.Should().Be(TimeSpan.FromHours(8));
+    }
+
+    [Fact]
+    public async Task RunAsync_WithAutomationRunDurationOverMaximum_ShouldReturnUsageExitCode()
+    {
+        var console = CreateConsole();
+        var runtime = new FakeAutomationRuntime();
+        var application = CreateApplication(
+            new FakeTradingGateway(),
+            new FakePriceChartRenderer(),
+            console,
+            automationRuntime: runtime);
+
+        var exitCode = await application.RunAsync(["automation", "run", "--duration", "8.00:00:00"]);
+
+        exitCode.Should().Be(1);
+        runtime.Requests.Should().BeEmpty();
+        console.Output.Should().Contain("Option --duration must be 7 days or less");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithAutomationAuditEvaluateCommand_ShouldEvaluateAndRenderDecisionAudit()
+    {
+        var console = CreateConsole();
+        var auditService = new FakeDecisionAuditEvaluationService();
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var application = CreateApplication(
+                new FakeTradingGateway(),
+                new FakePriceChartRenderer(),
+                console,
+                decisionAuditEvaluationService: auditService);
+
+            var exitCode = await application.RunAsync([
+                "automation",
+                "audit",
+                "evaluate",
+                "--root",
+                tempDirectory.FullName,
+                "--date",
+                "2026-03-12",
+                "--resolution",
+                "5minute",
+            ]);
+
+            exitCode.Should().Be(0);
+            auditService.Requests.Should().ContainSingle();
+            auditService.Requests[0].RootPath.Should().Be(tempDirectory.FullName);
+            auditService.Requests[0].TradingDate.Should().Be(new DateOnly(2026, 3, 12));
+            auditService.Requests[0].Resolution.Should().Be(PriceResolution.FiveMinutes);
+            console.Output.Should().Contain("Decision Audit Evaluation");
+            console.Output.Should().Contain("TargetHit");
+            console.Output.Should().Contain("Decision Bias");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_WithAutomationAuditEvaluateAndNoRecords_ShouldRenderEmptyState()
+    {
+        var console = CreateConsole();
+        var tempDirectory = Directory.CreateTempSubdirectory();
+        var auditService = new FakeDecisionAuditEvaluationService
+        {
+            ReportFactory = request => new DecisionAuditEvaluationReport(
+                request.RootPath,
+                request.TradingDate,
+                request.Resolution,
+                DateTimeOffset.Parse("2026-03-12T11:00:00Z"),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                null,
+                new DecisionBiasSummary(
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    0,
+                    "None",
+                    "None",
+                    new Dictionary<string, int>(StringComparer.Ordinal)),
+                new ArtifactReference(
+                    Path.Combine(request.RootPath, "decision-audit-summary.json"),
+                    new Uri(Path.GetFullPath(Path.Combine(request.RootPath, "decision-audit-summary.json"))).AbsoluteUri)),
+        };
+
+        try
+        {
+            var application = CreateApplication(
+                new FakeTradingGateway(),
+                new FakePriceChartRenderer(),
+                console,
+                decisionAuditEvaluationService: auditService);
+
+            var exitCode = await application.RunAsync([
+                "automation",
+                "audit",
+                "evaluate",
+                "--root",
+                tempDirectory.FullName,
+                "--date",
+                "2026-03-12",
+            ]);
+
+            exitCode.Should().Be(0);
+            console.Output.Should().Contain("No decision audit records were found");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
     }
 
     [Fact]
@@ -578,7 +724,8 @@ public sealed class TradingCliApplicationTests
         FakePriceChartRenderer chartRenderer,
         TestConsole console,
         FakeAutomationRuntime? automationRuntime = null,
-        FakeMarketDataCollector? marketDataCollector = null)
+        FakeMarketDataCollector? marketDataCollector = null,
+        FakeDecisionAuditEvaluationService? decisionAuditEvaluationService = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<ITradingGateway>(gateway);
@@ -586,6 +733,7 @@ public sealed class TradingCliApplicationTests
         services.AddSingleton<IAnsiConsole>(console);
         services.AddSingleton<IAutomationRuntime>(automationRuntime ?? new FakeAutomationRuntime());
         services.AddSingleton<IMarketDataCollector>(marketDataCollector ?? new FakeMarketDataCollector());
+        services.AddSingleton<IDecisionAuditEvaluationService>(decisionAuditEvaluationService ?? new FakeDecisionAuditEvaluationService());
         services.AddTradingCli();
 
         return new TradingCliApplication(services, console);
@@ -780,8 +928,16 @@ public sealed class TradingCliApplicationTests
 
     private sealed class FakeAutomationRuntime : IAutomationRuntime
     {
-        public Task RunAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+        public List<RunRequest> Requests { get; } = [];
+
+        public Task RunAsync(TimeSpan? duration = null, CancellationToken cancellationToken = default)
+        {
+            Requests.Add(new RunRequest(duration));
+            return Task.CompletedTask;
+        }
     }
+
+    private sealed record RunRequest(TimeSpan? Duration);
 
     private sealed class FakeMarketDataCollector : IMarketDataCollector
     {
@@ -800,4 +956,57 @@ public sealed class TradingCliApplicationTests
     private sealed record CollectRequest(
         IReadOnlyList<InstrumentId> Instruments,
         TimeSpan? Duration);
+
+    private sealed class FakeDecisionAuditEvaluationService : IDecisionAuditEvaluationService
+    {
+        public List<DecisionAuditEvaluationRequest> Requests { get; } = [];
+
+        public Func<DecisionAuditEvaluationRequest, DecisionAuditEvaluationReport>? ReportFactory { get; init; }
+
+        public Task<DecisionAuditEvaluationReport> EvaluateAsync(
+            DecisionAuditEvaluationRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            Requests.Add(request);
+            if (ReportFactory is not null)
+            {
+                return Task.FromResult(ReportFactory(request));
+            }
+
+            return Task.FromResult(new DecisionAuditEvaluationReport(
+                request.RootPath,
+                request.TradingDate,
+                request.Resolution,
+                DateTimeOffset.Parse("2026-03-12T11:00:00Z"),
+                2,
+                3,
+                1,
+                1,
+                0,
+                1,
+                0,
+                6,
+                4,
+                2,
+                0,
+                0,
+                0.25m,
+                new DecisionBiasSummary(
+                    6,
+                    3,
+                    4,
+                    2,
+                    2,
+                    1,
+                    "Buy",
+                    "Buy",
+                    new Dictionary<string, int>(StringComparer.Ordinal)
+                    {
+                        ["CC.D.TEST.IP"] = 3,
+                    }),
+                new ArtifactReference(
+                    Path.Combine(request.RootPath, "decision-audit-summary.json"),
+                    new Uri(Path.GetFullPath(Path.Combine(request.RootPath, "decision-audit-summary.json"))).AbsoluteUri)));
+        }
+    }
 }

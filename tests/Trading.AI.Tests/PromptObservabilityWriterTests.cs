@@ -102,6 +102,56 @@ public sealed class PromptObservabilityWriterTests
     }
 
     [Fact]
+    public async Task SubmitBackgroundAsync_ShouldPersistSubmittedStateAndProviderResponseId()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var writer = new PromptObservabilityWriter(
+                Options.Create(new PromptObservabilityOptions
+                {
+                    ObservabilityRootPath = tempDirectory.FullName,
+                }));
+
+            var invocation = new PromptInvocation(
+                PromptRegistry.IntradayOpportunityReview,
+                new PromptModelOptions
+                {
+                    ModelId = "gpt-test",
+                    UseBackgroundResponses = true,
+                },
+                new Dictionary<string, string> { ["TRADING_DATE"] = "2026-03-12" },
+                new DateOnly(2026, 3, 12),
+                DateTimeOffset.Parse("2026-03-12T06:30:45Z"),
+                null,
+                PromptTextArtifactKind.None,
+                []);
+
+            var session = await writer.StartAsync(invocation, "request text", null, CancellationToken.None);
+            await writer.SubmitBackgroundAsync(
+                session,
+                invocation,
+                "request text",
+                null,
+                "resp_test",
+                "queued",
+                TimeSpan.FromSeconds(1),
+                CancellationToken.None);
+
+            var submitted = JsonDocument.Parse(await File.ReadAllTextAsync(session.JsonPath));
+            submitted.RootElement.GetProperty("status").GetString().Should().Be("Submitted");
+            submitted.RootElement.GetProperty("processingMode").GetString().Should().Be("ResponsesBackground");
+            submitted.RootElement.GetProperty("providerResponseId").GetString().Should().Be("resp_test");
+            submitted.RootElement.GetProperty("providerStatus").GetString().Should().Be("queued");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
     public async Task WriteAttachmentsAsync_ShouldPersistAttachmentPaths()
     {
         var tempDirectory = Directory.CreateTempSubdirectory();

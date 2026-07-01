@@ -395,6 +395,14 @@ public sealed class TradingCliRenderer
             ("Extracted JSON", result.ExecutionArtifacts.ExtractedJsonArtifact.Path),
             ("Extracted URI", result.ExecutionArtifacts.ExtractedJsonArtifact.Uri));
 
+        if (result.ExecutionArtifacts.DecisionAuditArtifact is { } auditArtifact)
+        {
+            WriteKeyValuePanel(
+                "Decision Audit",
+                ("Audit JSON", auditArtifact.Path),
+                ("Audit URI", auditArtifact.Uri));
+        }
+
         if (result.ExecutionArtifacts.AttachmentArtifacts.Count > 0)
         {
             var attachments = CreateTable("Attachment Path", "Attachment URI");
@@ -407,6 +415,47 @@ public sealed class TradingCliRenderer
         }
 
         WriteIntradayOpportunityReview(result.WorkflowResult);
+    }
+
+    public void WriteDecisionAuditEvaluation(DecisionAuditEvaluationReport report)
+    {
+        WriteKeyValuePanel(
+            "Decision Audit Evaluation",
+            ("Root", report.RootPath),
+            ("Trading Date", report.TradingDate?.ToString("yyyy-MM-dd") ?? "all"),
+            ("Resolution", report.Resolution.ToString()),
+            ("Records", report.RecordsEvaluated.ToString()),
+            ("Candidates", report.CandidatesEvaluated.ToString()),
+            ("Average R", CliParsing.FormatDecimal(report.AverageEstimatedRMultiple)),
+            ("Report JSON", report.ReportArtifact?.Path ?? "n/a"));
+
+        if (report.RecordsEvaluated == 0)
+        {
+            WriteInfo("No decision audit records were found for the requested scope. Run automation run or automation intraday scan first, then evaluate after market data has been collected.");
+            return;
+        }
+
+        var outcomes = CreateTable("Outcome", "Count");
+        outcomes.AddRow(PaperTradeOutcomeStatus.TargetHit.ToString(), report.TargetHitCount.ToString());
+        outcomes.AddRow(PaperTradeOutcomeStatus.StoppedOut.ToString(), report.StoppedOutCount.ToString());
+        outcomes.AddRow(PaperTradeOutcomeStatus.Expired.ToString(), report.ExpiredCount.ToString());
+        outcomes.AddRow(PaperTradeOutcomeStatus.NoFill.ToString(), report.NoFillCount.ToString());
+        outcomes.AddRow(PaperTradeOutcomeStatus.DataInsufficient.ToString(), report.DataInsufficientCount.ToString());
+        _console.Write(outcomes);
+
+        WriteKeyValuePanel(
+            "Decision Bias",
+            ("Assessments", report.BiasSummary.AssessmentCount.ToString()),
+            ("Assessment Bias", report.BiasSummary.DominantAssessmentDirection),
+            ("Assessments Evaluated", report.AssessmentsEvaluated.ToString()),
+            ("Followed Bias", report.AssessmentFollowedBiasCount.ToString()),
+            ("Against Bias", report.AssessmentMovedAgainstBiasCount.ToString()),
+            ("Flat", report.AssessmentFlatCount.ToString()),
+            ("Assessment Data Gaps", report.AssessmentDataInsufficientCount.ToString()),
+            ("Candidates", report.BiasSummary.CandidateCount.ToString()),
+            ("Candidate Bias", report.BiasSummary.DominantCandidateDirection),
+            ("Buy Candidates", report.BiasSummary.BuyCandidateCount.ToString()),
+            ("Sell Candidates", report.BiasSummary.SellCandidateCount.ToString()));
     }
 
     private void WriteKeyValuePanel(string title, params (string Key, string Value)[] rows)

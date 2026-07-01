@@ -11,7 +11,7 @@ using Trading.Strategy.Rules;
 using Trading.Strategy.Shared;
 
 [Description("Start the background automation worker in the foreground.")]
-public sealed class AutomationRunCommand : AsyncCommand<EmptyCommandSettings>
+public sealed class AutomationRunCommand : AsyncCommand<AutomationRunSettings>
 {
     private readonly IAutomationRuntime _runtime;
 
@@ -20,11 +20,45 @@ public sealed class AutomationRunCommand : AsyncCommand<EmptyCommandSettings>
         _runtime = runtime;
     }
 
-    public override async Task<int> ExecuteAsync(CommandContext context, EmptyCommandSettings settings, CancellationToken cancellationToken)
+    public override async Task<int> ExecuteAsync(CommandContext context, AutomationRunSettings settings, CancellationToken cancellationToken)
     {
-        await _runtime.RunAsync(cancellationToken);
+        await _runtime.RunAsync(settings.ResolveDuration(), cancellationToken);
         return 0;
     }
+}
+
+public sealed class AutomationRunSettings : CommandSettings
+{
+    private static readonly TimeSpan MaxBoundedDuration = TimeSpan.FromDays(7);
+
+    [CommandOption("--duration <TIMESPAN>")]
+    [Description("Optional duration. Omit to run until cancelled. HH:mm:ss values support hours greater than 23.")]
+    public string? Duration { get; init; }
+
+    public override ValidationResult Validate()
+    {
+        if (!CollectMarketDataSettings.TryParseDuration(Duration, out var parsedDuration))
+        {
+            return ValidationResult.Error("Option --duration must be a valid TimeSpan.");
+        }
+
+        if (parsedDuration is null)
+        {
+            return ValidationResult.Success();
+        }
+
+        if (parsedDuration < TimeSpan.Zero)
+        {
+            return ValidationResult.Error("Option --duration must be zero or greater.");
+        }
+
+        return parsedDuration <= MaxBoundedDuration
+            ? ValidationResult.Success()
+            : ValidationResult.Error("Option --duration must be 7 days or less. Omit --duration to run indefinitely.");
+    }
+
+    public TimeSpan? ResolveDuration()
+        => CollectMarketDataSettings.ParseDuration(Duration);
 }
 
 [Description("Generate the research markdown brief for a trading date.")]
@@ -203,6 +237,33 @@ public sealed class AutomationIntradaySubmitCommand : AsyncCommand<AutomationInt
     }
 }
 
+[Description("Evaluate decision audit records against locally stored market data.")]
+public sealed class AutomationAuditEvaluateCommand : AsyncCommand<AutomationAuditEvaluateSettings>
+{
+    private readonly IDecisionAuditEvaluationService _evaluationService;
+    private readonly TradingCliRenderer _renderer;
+
+    public AutomationAuditEvaluateCommand(
+        IDecisionAuditEvaluationService evaluationService,
+        TradingCliRenderer renderer)
+    {
+        _evaluationService = evaluationService;
+        _renderer = renderer;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, AutomationAuditEvaluateSettings settings, CancellationToken cancellationToken)
+    {
+        var report = await _evaluationService.EvaluateAsync(
+            new DecisionAuditEvaluationRequest(
+                settings.Root,
+                settings.ResolveTradingDate(),
+                CliParsing.ParsePriceResolution(settings.Resolution)),
+            cancellationToken);
+        _renderer.WriteDecisionAuditEvaluation(report);
+        return 0;
+    }
+}
+
 public class AutomationBriefSettings : CommandSettings
 {
     [CommandOption("--date <YYYY-MM-DD>")]
@@ -307,4 +368,41 @@ public sealed class AutomationIntradaySubmitSettings : CommandSettings
             ? ValidationResult.Success()
             : ValidationResult.Error("Option --input must point to an existing preparation JSON file.");
     }
+}
+
+public sealed class AutomationAuditEvaluateSettings : CommandSettings
+{
+    [CommandOption("--root <PATH>")]
+    public string Root { get; init; } = Path.Combine("Logs", "Observability");
+
+    [CommandOption("--date <YYYY-MM-DD>")]
+    public string? Date { get; init; }
+
+    [CommandOption("--resolution <RESOLUTION>")]
+    public string Resolution { get; init; } = "5minute";
+
+    public override ValidationResult Validate()
+    {
+        if (string.IsNullOrWhiteSpace(Root))
+        {
+            return ValidationResult.Error("Option --root must not be empty.");
+        }
+
+        if (!Directory.Exists(Root))
+        {
+            return ValidationResult.Error("Option --root must point to an existing observability directory.");
+        }
+
+        if (Date is not null && !DateOnly.TryParseExact(Date, "yyyy-MM-dd", out _))
+        {
+            return ValidationResult.Error("Option --date must be in yyyy-MM-dd format.");
+        }
+
+        return CliParsing.IsValidPriceResolution(Resolution)
+            ? ValidationResult.Success()
+            : ValidationResult.Error("Option --resolution is not supported.");
+    }
+
+    public DateOnly? ResolveTradingDate()
+        => Date is null ? null : DateOnly.ParseExact(Date, "yyyy-MM-dd");
 }

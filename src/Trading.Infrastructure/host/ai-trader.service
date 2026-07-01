@@ -1,0 +1,32 @@
+[Unit]
+Description=AI Trader worker
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=ai-trader
+Group=ai-trader
+WorkingDirectory=/opt/ai-trader/app
+ExecStart=/opt/ai-trader/app/Trading.Worker
+Restart=on-failure
+RestartSec=10
+KillSignal=SIGINT
+TimeoutStopSec=30
+
+Environment=DOTNET_ENVIRONMENT=Production
+Environment=ASPNETCORE_ENVIRONMENT=Production
+Environment=MarketData__StorePath=/var/lib/ai-trader/market-data/ig-market-data.sqlite
+Environment=AI__Prompts__ObservabilityRootPath=/var/lib/ai-trader/observability
+
+StateDirectory=ai-trader
+LogsDirectory=ai-trader
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=/var/lib/ai-trader /var/log/ai-trader
+
+[Install]
+WantedBy=multi-user.target

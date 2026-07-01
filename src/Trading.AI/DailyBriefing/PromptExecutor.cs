@@ -34,6 +34,7 @@ public sealed class PromptExecutor
     private readonly PromptTemplateRenderer _templateRenderer;
     private readonly PromptObservabilityWriter _observabilityWriter;
     private readonly IChatClientFactory _chatClientFactory;
+    private readonly IBackgroundResponseClient? _backgroundResponseClient;
     private readonly PromptInputConverter _inputConverter;
     private readonly Func<TimeSpan, CancellationToken, Task> _delayAsync;
 
@@ -44,11 +45,31 @@ public sealed class PromptExecutor
         IChatClientFactory chatClientFactory,
         PromptInputConverter inputConverter,
         Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
+        : this(
+            promptRegistry,
+            templateRenderer,
+            observabilityWriter,
+            chatClientFactory,
+            inputConverter,
+            null,
+            delayAsync)
+    {
+    }
+
+    internal PromptExecutor(
+        PromptRegistry promptRegistry,
+        PromptTemplateRenderer templateRenderer,
+        PromptObservabilityWriter observabilityWriter,
+        IChatClientFactory chatClientFactory,
+        PromptInputConverter inputConverter,
+        IBackgroundResponseClient? backgroundResponseClient = null,
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
     {
         _promptRegistry = promptRegistry;
         _templateRenderer = templateRenderer;
         _observabilityWriter = observabilityWriter;
         _chatClientFactory = chatClientFactory;
+        _backgroundResponseClient = backgroundResponseClient;
         _inputConverter = inputConverter;
         _delayAsync = delayAsync ?? Task.Delay;
     }
@@ -117,9 +138,16 @@ public sealed class PromptExecutor
 
         try
         {
-            var response = await ExecuteProviderCallWithTransientRetryAsync(
-                token => chatClient.GetResponseAsync(requestMessages, options, token),
+            var response = await ExecuteChatResponseAsync(
+                invocation,
+                requestMessages,
+                options,
+                session,
+                requestText,
+                requestOptions,
+                stopwatch,
                 attempts,
+                token => chatClient.GetResponseAsync(requestMessages, options, token),
                 cancellationToken);
             await _observabilityWriter.WriteTextAsync(session, response.Text, cancellationToken);
 
@@ -166,11 +194,18 @@ public sealed class PromptExecutor
                 ChatResponse response;
                 T structured;
 
-                if (invocation.ResponseFormat is not null)
+                if (invocation.Model.UseBackgroundResponses || invocation.ResponseFormat is not null)
                 {
-                    response = await ExecuteProviderCallWithTransientRetryAsync(
-                        token => chatClient.GetResponseAsync(requestMessages, options, token),
+                    response = await ExecuteChatResponseAsync(
+                        invocation,
+                        requestMessages,
+                        options,
+                        session,
+                        requestText,
+                        requestOptions,
+                        stopwatch,
                         attempts,
+                        token => chatClient.GetResponseAsync(requestMessages, options, token),
                         cancellationToken);
                     structured = DeserializeStructuredResponse<T>(response, invocation.Prompt.Name);
                 }
@@ -183,7 +218,8 @@ public sealed class PromptExecutor
                             useJsonSchemaResponseFormat: true,
                             cancellationToken: token),
                         attempts,
-                        cancellationToken);
+                        cancellationToken,
+                        "CreateSynchronousResponse");
                     response = typedResponse;
                     if (!typedResponse.TryGetResult(out T? typedStructured) || typedStructured is null)
                     {
@@ -260,13 +296,118 @@ public sealed class PromptExecutor
         return options;
     }
 
+    private async Task<ChatResponse> ExecuteChatResponseAsync(
+        PromptInvocation invocation,
+        IReadOnlyList<ChatMessage> requestMessages,
+        ChatOptions options,
+        PromptObservationSession session,
+        string requestText,
+        object? requestOptions,
+        Stopwatch stopwatch,
+        List<PromptAttemptRecord> attempts,
+        Func<CancellationToken, Task<ChatResponse>> synchronousAction,
+        CancellationToken cancellationToken)
+    {
+        if (!invocation.Model.UseBackgroundResponses)
+        {
+            return await ExecuteProviderCallWithTransientRetryAsync(
+                synchronousAction,
+                attempts,
+                cancellationToken,
+                "CreateSynchronousResponse");
+        }
+
+        if (_backgroundResponseClient is null)
+        {
+            throw new InvalidOperationException("Background Responses execution is enabled, but no background response client is registered.");
+        }
+
+        var createResult = await ExecuteProviderCallWithTransientRetryAsync(
+            token => _backgroundResponseClient.CreateAsync(invocation, requestMessages, options, token),
+            attempts,
+            cancellationToken,
+            "CreateBackgroundResponse",
+            result => (result.ResponseId, result.Status));
+
+        if (string.IsNullOrWhiteSpace(createResult.ResponseId))
+        {
+            throw new InvalidOperationException("Background Responses execution did not return a response ID.");
+        }
+
+        session.ProviderResponseId = createResult.ResponseId;
+        session.ProviderStatus = createResult.Status;
+        await _observabilityWriter.SubmitBackgroundAsync(
+            session,
+            invocation,
+            requestText,
+            requestOptions,
+            createResult.ResponseId,
+            createResult.Status,
+            stopwatch.Elapsed,
+            cancellationToken,
+            attempts);
+
+        if (IsCompletedProviderStatus(createResult.Status))
+        {
+            return createResult.Response
+                ?? throw new InvalidOperationException($"Background response '{createResult.ResponseId}' completed without a response body.");
+        }
+
+        ThrowIfTerminalProviderStatus(createResult);
+
+        var timeout = invocation.Model.BackgroundPollTimeout ?? TimeSpan.FromMinutes(30);
+        var pollInterval = invocation.Model.BackgroundPollInterval > TimeSpan.Zero
+            ? invocation.Model.BackgroundPollInterval
+            : TimeSpan.FromSeconds(5);
+
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (stopwatch.Elapsed >= timeout)
+            {
+                await TryCancelBackgroundResponseAsync(invocation, session, createResult.ResponseId, attempts, cancellationToken);
+                throw new TimeoutException($"Background response '{createResult.ResponseId}' did not complete within {timeout}.");
+            }
+
+            await _delayAsync(pollInterval, cancellationToken);
+
+            var pollResult = await ExecuteProviderCallWithTransientRetryAsync(
+                token => _backgroundResponseClient.GetAsync(invocation.Model.ModelId, createResult.ResponseId, options, token),
+                attempts,
+                cancellationToken,
+                "PollBackgroundResponse",
+                result => (result.ResponseId ?? createResult.ResponseId, result.Status));
+
+            session.ProviderStatus = pollResult.Status;
+            if (!string.IsNullOrWhiteSpace(pollResult.ResponseId))
+            {
+                session.ProviderResponseId = pollResult.ResponseId;
+            }
+
+            if (IsRunningProviderStatus(pollResult.Status))
+            {
+                continue;
+            }
+
+            if (IsCompletedProviderStatus(pollResult.Status))
+            {
+                return pollResult.Response
+                    ?? throw new InvalidOperationException($"Background response '{createResult.ResponseId}' completed without a response body.");
+            }
+
+            ThrowIfTerminalProviderStatus(pollResult);
+        }
+    }
+
     private static bool ShouldRetryStructuredFailure(Exception exception)
         => exception is StructuredOutputException;
 
     private async Task<T> ExecuteProviderCallWithTransientRetryAsync<T>(
         Func<CancellationToken, Task<T>> action,
         List<PromptAttemptRecord> attempts,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string phase,
+        Func<T, (string? ProviderResponseId, string? ProviderStatus)>? providerInfoFactory = null)
     {
         for (var attempt = 1; attempt <= MaxTransientAttempts; attempt++)
         {
@@ -274,6 +415,7 @@ public sealed class PromptExecutor
             try
             {
                 var result = await action(cancellationToken);
+                var providerInfo = providerInfoFactory?.Invoke(result);
                 attempts.Add(new PromptAttemptRecord(
                     attempt,
                     startedAtUtc,
@@ -281,17 +423,20 @@ public sealed class PromptExecutor
                     "Completed",
                     null,
                     null,
-                    null));
+                    null,
+                    phase,
+                    providerInfo?.ProviderResponseId,
+                    providerInfo?.ProviderStatus));
                 return result;
             }
             catch (Exception exception) when (ShouldRetryTransientProviderFailure(exception, attempt))
             {
-                attempts.Add(CreateFailedAttempt(attempt, startedAtUtc, exception));
+                attempts.Add(CreateFailedAttempt(attempt, startedAtUtc, exception, phase));
                 await _delayAsync(GetTransientRetryDelay(attempt), cancellationToken);
             }
             catch (Exception exception) when (exception is not OperationCanceledException)
             {
-                attempts.Add(CreateFailedAttempt(attempt, startedAtUtc, exception));
+                attempts.Add(CreateFailedAttempt(attempt, startedAtUtc, exception, phase));
                 throw;
             }
         }
@@ -299,7 +444,43 @@ public sealed class PromptExecutor
         throw new InvalidOperationException("Transient provider retry loop exited without a result or exception.");
     }
 
-    private static PromptAttemptRecord CreateFailedAttempt(int attempt, DateTimeOffset startedAtUtc, Exception exception)
+    private async Task TryCancelBackgroundResponseAsync(
+        PromptInvocation invocation,
+        PromptObservationSession session,
+        string responseId,
+        List<PromptAttemptRecord> attempts,
+        CancellationToken cancellationToken)
+    {
+        if (_backgroundResponseClient is null)
+        {
+            return;
+        }
+
+        var startedAtUtc = DateTimeOffset.UtcNow;
+        try
+        {
+            await _backgroundResponseClient.CancelAsync(invocation.Model.ModelId, responseId, cancellationToken);
+            session.ProviderResponseId = responseId;
+            session.ProviderStatus = "cancelled";
+            attempts.Add(new PromptAttemptRecord(
+                1,
+                startedAtUtc,
+                DateTimeOffset.UtcNow,
+                "Completed",
+                null,
+                null,
+                null,
+                "CancelBackgroundResponse",
+                responseId,
+                "cancelled"));
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            attempts.Add(CreateFailedAttempt(1, startedAtUtc, exception, "CancelBackgroundResponse"));
+        }
+    }
+
+    private static PromptAttemptRecord CreateFailedAttempt(int attempt, DateTimeOffset startedAtUtc, Exception exception, string phase)
         => new(
             attempt,
             startedAtUtc,
@@ -307,7 +488,8 @@ public sealed class PromptExecutor
             "Failed",
             ResolveHttpStatus(exception),
             exception.GetType().FullName,
-            exception.Message);
+            exception.Message,
+            phase);
 
     private static bool ShouldRetryTransientProviderFailure(Exception exception, int attempt)
         => attempt < MaxTransientAttempts && IsTransientProviderFailure(exception);
@@ -325,6 +507,27 @@ public sealed class PromptExecutor
 
     private static int? ResolveHttpStatus(Exception exception)
         => exception is ClientResultException clientException ? clientException.Status : null;
+
+    private static bool IsRunningProviderStatus(string status)
+        => NormalizeProviderStatus(status) is "queued" or "inprogress";
+
+    private static bool IsCompletedProviderStatus(string status)
+        => NormalizeProviderStatus(status) == "completed";
+
+    private static void ThrowIfTerminalProviderStatus(BackgroundResponseResult result)
+    {
+        var normalizedStatus = NormalizeProviderStatus(result.Status);
+        if (normalizedStatus is "failed" or "cancelled" or "incomplete")
+        {
+            throw new InvalidOperationException(
+                $"Background response '{result.ResponseId}' ended with status '{result.Status}'. {result.ErrorMessage}".Trim());
+        }
+    }
+
+    private static string NormalizeProviderStatus(string status)
+        => status.Replace("_", string.Empty, StringComparison.Ordinal)
+            .Replace("-", string.Empty, StringComparison.Ordinal)
+            .ToLowerInvariant();
 
     private static TimeSpan GetTransientRetryDelay(int attempt)
     {

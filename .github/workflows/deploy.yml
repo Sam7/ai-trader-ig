@@ -1,0 +1,168 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: 10.0.x
+  INFRA_DIR: src/Trading.Infrastructure
+  WORKER_PROJECT: src/Trading.Worker/Trading.Worker.csproj
+  PUBLISH_DIR: artifacts/publish/worker
+  PACKAGE_PATH: artifacts/ai-trader-worker.tar.gz
+  GCP_PROJECT_ID: ${{ secrets.GCP_PROJECT_ID }}
+  GCP_REGION: ${{ vars.GCP_REGION || 'us-central1' }}
+  GCP_ZONE: ${{ vars.GCP_ZONE || 'us-central1-a' }}
+  NAME_PREFIX: ${{ vars.NAME_PREFIX || 'ai-trader' }}
+  PULUMI_STACK: ${{ vars.PULUMI_STACK || 'dev' }}
+
+jobs:
+  deploy:
+    name: Test, publish, provision, deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Validate required secrets
+        shell: bash
+        env:
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          APPSETTINGS_PRODUCTION_JSON: ${{ secrets.APPSETTINGS_PRODUCTION_JSON }}
+        run: |
+          required=(
+            GCP_CREDENTIALS
+            GCP_PROJECT_ID
+            PULUMI_ACCESS_TOKEN
+            PULUMI_CONFIG_PASSPHRASE
+            APPSETTINGS_PRODUCTION_JSON
+          )
+
+          for name in "${required[@]}"; do
+            if [[ -z "${!name:-}" ]]; then
+              echo "Missing required secret or environment value: $name" >&2
+              exit 1
+            fi
+          done
+
+      - name: Restore
+        run: dotnet restore ./Trading.slnx
+
+      - name: Test
+        run: dotnet test ./Trading.slnx --configuration Release --no-restore
+
+      - name: Publish worker
+        shell: bash
+        run: |
+          dotnet publish "$WORKER_PROJECT" \
+            --configuration Release \
+            --runtime linux-x64 \
+            --self-contained true \
+            --output "$PUBLISH_DIR" \
+            /p:PublishSingleFile=false \
+            /p:DebugType=None \
+            /p:DebugSymbols=false
+
+      - name: Inject production settings and package worker
+        shell: bash
+        env:
+          APPSETTINGS_PRODUCTION_JSON: ${{ secrets.APPSETTINGS_PRODUCTION_JSON }}
+        run: |
+          mkdir -p "$(dirname "$PACKAGE_PATH")"
+          printf '%s' "$APPSETTINGS_PRODUCTION_JSON" > "$PUBLISH_DIR/appsettings.json"
+          python3 -m json.tool "$PUBLISH_DIR/appsettings.json" >/dev/null
+          cp tracked-markets.json "$PUBLISH_DIR/tracked-markets.json"
+          chmod +x "$PUBLISH_DIR/Trading.Worker"
+          tar -czf "$PACKAGE_PATH" -C "$PUBLISH_DIR" .
+
+      - name: Authenticate to Google Cloud
+        uses: google-github-actions/auth@v3
+        with:
+          credentials_json: ${{ secrets.GCP_CREDENTIALS }}
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v3
+        with:
+          project_id: ${{ env.GCP_PROJECT_ID }}
+          version: ">= 416.0.0"
+
+      - name: Set up Pulumi CLI
+        uses: pulumi/setup-pulumi@v2
+
+      - name: Provision infrastructure
+        id: pulumi
+        shell: bash
+        env:
+          PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+        run: |
+          pulumi -C "$INFRA_DIR" stack select "$PULUMI_STACK" \
+            || pulumi -C "$INFRA_DIR" stack init "$PULUMI_STACK"
+
+          pulumi -C "$INFRA_DIR" config set gcp:project "$GCP_PROJECT_ID"
+          pulumi -C "$INFRA_DIR" config set gcp:region "$GCP_REGION"
+          pulumi -C "$INFRA_DIR" config set gcp:zone "$GCP_ZONE"
+          pulumi -C "$INFRA_DIR" config set region "$GCP_REGION"
+          pulumi -C "$INFRA_DIR" config set zone "$GCP_ZONE"
+          pulumi -C "$INFRA_DIR" config set namePrefix "$NAME_PREFIX"
+
+          pulumi -C "$INFRA_DIR" up --yes --refresh
+
+          {
+            echo "worker_instance_name=$(pulumi -C "$INFRA_DIR" stack output workerInstanceName)"
+            echo "worker_instance_zone=$(pulumi -C "$INFRA_DIR" stack output workerInstanceZone)"
+            echo "backup_bucket_name=$(pulumi -C "$INFRA_DIR" stack output backupBucketName)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Stage release on VM
+        shell: bash
+        env:
+          WORKER_INSTANCE_NAME: ${{ steps.pulumi.outputs.worker_instance_name }}
+          WORKER_INSTANCE_ZONE: ${{ steps.pulumi.outputs.worker_instance_zone }}
+        run: |
+          gcloud compute ssh "$WORKER_INSTANCE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --zone "$WORKER_INSTANCE_ZONE" \
+            --quiet \
+            --command "mkdir -p /tmp/ai-trader-deploy"
+
+          gcloud compute scp \
+            "$PACKAGE_PATH" \
+            "$INFRA_DIR/host/ai-trader.service" \
+            "$INFRA_DIR/host/ai-trader-backup.cron" \
+            "$INFRA_DIR/host/backup-db.sh" \
+            "$INFRA_DIR/host/install-vm.sh" \
+            "$WORKER_INSTANCE_NAME:/tmp/ai-trader-deploy/" \
+            --project "$GCP_PROJECT_ID" \
+            --zone "$WORKER_INSTANCE_ZONE" \
+            --quiet
+
+      - name: Install and restart service
+        shell: bash
+        env:
+          WORKER_INSTANCE_NAME: ${{ steps.pulumi.outputs.worker_instance_name }}
+          WORKER_INSTANCE_ZONE: ${{ steps.pulumi.outputs.worker_instance_zone }}
+          BACKUP_BUCKET_NAME: ${{ steps.pulumi.outputs.backup_bucket_name }}
+        run: |
+          gcloud compute ssh "$WORKER_INSTANCE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --zone "$WORKER_INSTANCE_ZONE" \
+            --quiet \
+            --command "sudo bash /tmp/ai-trader-deploy/install-vm.sh '$BACKUP_BUCKET_NAME'"

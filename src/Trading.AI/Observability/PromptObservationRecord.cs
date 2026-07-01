@@ -16,6 +16,12 @@ public sealed class PromptObservationRecord
 
     public required string ModelId { get; init; }
 
+    public string ProcessingMode { get; init; } = "Synchronous";
+
+    public string? ProviderResponseId { get; set; }
+
+    public string? ProviderStatus { get; set; }
+
     public required string RequestText { get; init; }
 
     public object? RequestOptions { get; init; }
@@ -59,4 +65,7 @@ public sealed record PromptAttemptRecord(
     string Status,
     int? HttpStatus,
     string? ErrorType,
-    string? ErrorMessage);
+    string? ErrorMessage,
+    string? Phase = null,
+    string? ProviderResponseId = null,
+    string? ProviderStatus = null);

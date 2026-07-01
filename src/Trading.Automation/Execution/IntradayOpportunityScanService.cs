@@ -24,6 +24,7 @@ public sealed class IntradayOpportunityScanService
     private readonly IPriceChartRenderer _priceChartRenderer;
     private readonly IntradayOpportunityReviewer _intradayOpportunityReviewer;
     private readonly IntradayOpportunityPreparationWriter _preparationWriter;
+    private readonly DecisionAuditWriter _decisionAuditWriter;
     private readonly ITradingDayWorkflow _workflow;
     private readonly AutomationOptions _automationOptions;
     private readonly IReadOnlyDictionary<string, string> _instrumentNames;
@@ -35,6 +36,7 @@ public sealed class IntradayOpportunityScanService
         IPriceChartRenderer priceChartRenderer,
         IntradayOpportunityReviewer intradayOpportunityReviewer,
         IntradayOpportunityPreparationWriter preparationWriter,
+        DecisionAuditWriter decisionAuditWriter,
         ITradingDayWorkflow workflow,
         IOptions<AutomationOptions> automationOptions,
         IOptions<DailyBriefingOptions> dailyBriefingOptions,
@@ -45,6 +47,7 @@ public sealed class IntradayOpportunityScanService
         _priceChartRenderer = priceChartRenderer;
         _intradayOpportunityReviewer = intradayOpportunityReviewer;
         _preparationWriter = preparationWriter;
+        _decisionAuditWriter = decisionAuditWriter;
         _workflow = workflow;
         _automationOptions = automationOptions.Value;
         _instrumentNames = dailyBriefingOptions.Value.TrackedMarkets.ToDictionary(
@@ -135,20 +138,27 @@ public sealed class IntradayOpportunityScanService
         var artifactReferences = execution.AttachmentArtifactPaths
             .Select(ToArtifactReference)
             .ToArray();
+        var executionArtifacts = new IntradayOpportunityExecutionArtifacts(
+            ToArtifactReference(execution.EnvelopeArtifactPath),
+            ToArtifactReference(execution.StructuredArtifactPath),
+            artifactReferences);
+        var decisionAuditArtifact = await _decisionAuditWriter.WriteInitialAsync(
+            prepared,
+            executionArtifacts,
+            workflowResult,
+            cancellationToken);
         var result = new IntradayOpportunitySubmitResult(
             prepared,
-            new IntradayOpportunityExecutionArtifacts(
-                ToArtifactReference(execution.EnvelopeArtifactPath),
-                ToArtifactReference(execution.StructuredArtifactPath),
-                artifactReferences),
+            executionArtifacts with { DecisionAuditArtifact = decisionAuditArtifact },
             execution.Batch,
             workflowResult);
 
         _logger.LogInformation(
-            "Submitted intraday opportunity review for {TradingDate}. Envelope: {EnvelopePath}. Extracted JSON: {StructuredPath}.",
+            "Submitted intraday opportunity review for {TradingDate}. Envelope: {EnvelopePath}. Extracted JSON: {StructuredPath}. Decision audit: {DecisionAuditPath}.",
             prepared.TradingDate,
             result.ExecutionArtifacts.PromptEnvelopeArtifact.Path,
-            result.ExecutionArtifacts.ExtractedJsonArtifact.Path);
+            result.ExecutionArtifacts.ExtractedJsonArtifact.Path,
+            result.ExecutionArtifacts.DecisionAuditArtifact?.Path);
 
         return result;
     }

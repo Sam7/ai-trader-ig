@@ -1,0 +1,8 @@
+SHELL=/bin/bash
+PATH=/usr/local/bin:/usr/bin:/bin:/snap/bin
+
+AI_TRADER_DB_PATH=/var/lib/ai-trader/market-data/ig-market-data.sqlite
+AI_TRADER_BACKUP_STAGING_DIR=/var/lib/ai-trader/backups/staging
+AI_TRADER_BACKUP_DESTINATION=gs://REPLACE_WITH_BACKUP_BUCKET/market-data
+
+*/5 * * * * ai-trader /opt/ai-trader/bin/backup-db.sh >> /var/log/ai-trader/backup-db.log 2>&1

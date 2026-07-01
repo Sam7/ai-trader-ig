@@ -277,7 +277,13 @@
             "Day"
           ],
           "LastValidatedUtc": "2026-03-12T14:15:00Z"
-        }
+        },
+        { "DisplayName": "EUR/USD", "InstrumentId": "CS.D.EURUSD.CFD.IP", "Sector": "FX", "Aliases": ["Euro"], "SelectionPriority": 13 },
+        { "DisplayName": "USD/JPY", "InstrumentId": "CS.D.USDJPY.CFD.IP", "Sector": "FX", "Aliases": ["Yen"], "SelectionPriority": 14 },
+        { "DisplayName": "GBP/USD", "InstrumentId": "CS.D.GBPUSD.CFD.IP", "Sector": "FX", "Aliases": ["Pound"], "SelectionPriority": 15 },
+        { "DisplayName": "USD/CHF", "InstrumentId": "CS.D.USDCHF.CFD.IP", "Sector": "FX", "Aliases": ["Swiss Franc"], "SelectionPriority": 16 },
+        { "DisplayName": "AUD/USD", "InstrumentId": "CS.D.AUDUSD.CFD.IP", "Sector": "FX", "Aliases": ["Australian Dollar"], "SelectionPriority": 17 },
+        { "DisplayName": "USD/CAD", "InstrumentId": "CS.D.USDCAD.CFD.IP", "Sector": "FX", "Aliases": ["Canadian Dollar"], "SelectionPriority": 18 }
       ]
     }
   }

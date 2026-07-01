@@ -12,6 +12,7 @@
     <Project Path="src/Trading.IG/Trading.IG.csproj" />
     <Project Path="src/Trading.MarketData/Trading.MarketData.csproj" />
     <Project Path="src/Trading.Strategy/Trading.Strategy.csproj" />
+    <Project Path="src/Trading.Infrastructure/Trading.Infrastructure.csproj" />
     <Project Path="src/Trading.Worker/Trading.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">

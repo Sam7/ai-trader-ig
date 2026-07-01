@@ -1,0 +1,3 @@
+name: ai-trader-ig-infrastructure
+description: Minimal GCP infrastructure for AI Trader IG.
+runtime: dotnet

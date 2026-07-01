@@ -48,7 +48,9 @@ if (Test-Path -LiteralPath $root) {
     }
 }
 
+$unfinished = @($records | Where-Object { $_.status -in @('Pending', 'Submitted') })
 $pending = @($records | Where-Object { $_.status -eq 'Pending' })
+$submitted = @($records | Where-Object { $_.status -eq 'Submitted' })
 $failed = @($records | Where-Object { $_.status -eq 'Failed' })
 $completed = @($records | Where-Object { $_.status -eq 'Completed' })
 
@@ -57,8 +59,10 @@ Write-JsonFile -Path $summaryPath -Value ([ordered]@{
     total = $records.Count
     completed = $completed.Count
     failed = $failed.Count
+    unfinished = $unfinished.Count
     pending = $pending.Count
+    submitted = $submitted.Count
     records = $records
 })
 
-Write-Host "Observability inspected: $($records.Count) records, $($pending.Count) pending."
+Write-Host "Observability inspected: $($records.Count) records, $($unfinished.Count) unfinished ($($pending.Count) pending, $($submitted.Count) submitted)."

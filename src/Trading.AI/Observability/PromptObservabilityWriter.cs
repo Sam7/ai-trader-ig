@@ -42,6 +42,7 @@ public sealed class PromptObservabilityWriter
             RequestedAtUtc = invocation.RequestedAtUtc,
             PromptDate = invocation.PromptDate,
             ModelId = invocation.Model.ModelId,
+            ProcessingMode = ResolveProcessingMode(invocation),
             RequestText = requestText,
             RequestOptions = requestOptions,
         };
@@ -74,6 +75,43 @@ public sealed class PromptObservabilityWriter
     internal Task WriteStructuredAsync(PromptObservationSession session, object structuredResponse, CancellationToken cancellationToken)
         => File.WriteAllTextAsync(session.StructuredArtifactPath, JsonSerializer.Serialize(structuredResponse, JsonOptions), cancellationToken);
 
+    internal async Task SubmitBackgroundAsync(
+        PromptObservationSession session,
+        PromptInvocation invocation,
+        string requestText,
+        object? requestOptions,
+        string providerResponseId,
+        string providerStatus,
+        TimeSpan duration,
+        CancellationToken cancellationToken,
+        IReadOnlyList<PromptAttemptRecord>? attempts = null)
+    {
+        session.ProviderResponseId = providerResponseId;
+        session.ProviderStatus = providerStatus;
+
+        var record = new PromptObservationRecord
+        {
+            PromptId = invocation.Prompt.Id,
+            PromptName = invocation.Prompt.Name,
+            Status = "Submitted",
+            RequestedAtUtc = invocation.RequestedAtUtc,
+            PromptDate = invocation.PromptDate,
+            ModelId = invocation.Model.ModelId,
+            ProcessingMode = ResolveProcessingMode(invocation),
+            ProviderResponseId = providerResponseId,
+            ProviderStatus = providerStatus,
+            RequestText = requestText,
+            RequestOptions = requestOptions,
+            Attempts = attempts,
+            DurationMs = duration.TotalMilliseconds,
+            TextArtifactPath = TryGetArtifactPath(session.TextArtifactPath),
+            StructuredArtifactPath = TryGetArtifactPath(session.StructuredArtifactPath),
+            AttachmentArtifactPaths = TryGetArtifactPaths(session.AttachmentArtifactPaths),
+        };
+
+        await WriteJsonAsync(session.JsonPath, record, cancellationToken);
+    }
+
     internal async Task CompleteAsync(
         PromptObservationSession session,
         PromptInvocation invocation,
@@ -99,6 +137,9 @@ public sealed class PromptObservabilityWriter
             CompletedAtUtc = DateTimeOffset.UtcNow,
             PromptDate = invocation.PromptDate,
             ModelId = response.ModelId ?? invocation.Model.ModelId,
+            ProcessingMode = ResolveProcessingMode(invocation),
+            ProviderResponseId = session.ProviderResponseId,
+            ProviderStatus = session.ProviderStatus,
             RequestText = requestText,
             RequestOptions = requestOptions,
             ResponseText = responseText,
@@ -135,6 +176,9 @@ public sealed class PromptObservabilityWriter
             CompletedAtUtc = DateTimeOffset.UtcNow,
             PromptDate = invocation.PromptDate,
             ModelId = invocation.Model.ModelId,
+            ProcessingMode = ResolveProcessingMode(invocation),
+            ProviderResponseId = session.ProviderResponseId,
+            ProviderStatus = session.ProviderStatus,
             RequestText = requestText,
             RequestOptions = requestOptions,
             Attempts = attempts,
@@ -147,6 +191,9 @@ public sealed class PromptObservabilityWriter
 
         await WriteJsonAsync(session.JsonPath, record, cancellationToken);
     }
+
+    private static string ResolveProcessingMode(PromptInvocation invocation)
+        => invocation.Model.UseBackgroundResponses ? "ResponsesBackground" : "Synchronous";
 
     private string BuildBasePath(DateOnly tradingDate, string promptName, DateTimeOffset requestedAtUtc)
     {

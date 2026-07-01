@@ -324,6 +324,225 @@ public sealed class PromptExecutorTests
     }
 
     [Fact]
+    public async Task ExecuteStructuredAsync_WithBackgroundResponses_ShouldPollAndPersistProviderMetadata()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var chatClient = new TestChatClient(_ => throw new InvalidOperationException("Synchronous client should not be called."));
+            var backgroundClient = new TestBackgroundResponseClient(
+                createHandlers:
+                [
+                    (_, messages, _) =>
+                    {
+                        messages.Should().ContainSingle();
+                        messages.Single().Contents.Should().HaveCountGreaterThan(1);
+                        return Task.FromResult(new BackgroundResponseResult("resp_test", "queued", null));
+                    }
+                ],
+                getHandlers:
+                [
+                    (_, _, _) => Task.FromResult(new BackgroundResponseResult("resp_test", "in_progress", null)),
+                    (_, _, _) => Task.FromResult(new BackgroundResponseResult("resp_test", "completed", CreateValidIntradayResponse()))
+                ]);
+            var executor = CreateExecutor(
+                tempDirectory.FullName,
+                chatClient,
+                (_, _) => Task.CompletedTask,
+                backgroundClient);
+
+            var result = await executor.ExecuteStructuredAsync<IntradayOpportunityReviewInput, IntradayOpportunityReviewDocument>(
+                PromptRegistry.IntradayOpportunityReview,
+                new PromptModelOptions
+                {
+                    ModelId = "gpt-test",
+                    EnableWebSearch = true,
+                    UseBackgroundResponses = true,
+                    BackgroundPollInterval = TimeSpan.FromMilliseconds(1),
+                },
+                CreateIntradayInput(),
+                [new PromptAttachment("WTI Crude Oil chart", "image/png", [1, 2, 3, 4])],
+                IntradayOpportunityReviewResponseFormat.Create(),
+                CancellationToken.None);
+
+            chatClient.CallCount.Should().Be(0);
+            backgroundClient.CreateCount.Should().Be(1);
+            backgroundClient.GetCount.Should().Be(2);
+            backgroundClient.CancelCount.Should().Be(0);
+            result.StructuredValue.MarketAssessments.Should().ContainSingle();
+
+            var record = ReadLatestObservation(tempDirectory.FullName);
+            record.RootElement.GetProperty("status").GetString().Should().Be("Completed");
+            record.RootElement.GetProperty("processingMode").GetString().Should().Be("ResponsesBackground");
+            record.RootElement.GetProperty("providerResponseId").GetString().Should().Be("resp_test");
+            record.RootElement.GetProperty("providerStatus").GetString().Should().Be("completed");
+            record.RootElement.GetProperty("attempts")
+                .EnumerateArray()
+                .Select(attempt => attempt.GetProperty("phase").GetString())
+                .Should()
+                .Contain(["CreateBackgroundResponse", "PollBackgroundResponse"]);
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteStructuredAsync_WithBackgroundResponses_ShouldRetryPoll520WithoutCreatingAgain()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var backgroundClient = new TestBackgroundResponseClient(
+                createHandlers:
+                [
+                    (_, _, _) => Task.FromResult(new BackgroundResponseResult("resp_test", "queued", null))
+                ],
+                getHandlers:
+                [
+                    (_, _, _) => throw CreateClientResultException(520),
+                    (_, _, _) => Task.FromResult(new BackgroundResponseResult("resp_test", "completed", CreateValidIntradayResponse()))
+                ]);
+            var executor = CreateExecutor(
+                tempDirectory.FullName,
+                new TestChatClient(_ => throw new InvalidOperationException("Synchronous client should not be called.")),
+                (_, _) => Task.CompletedTask,
+                backgroundClient);
+
+            var result = await executor.ExecuteStructuredAsync<IntradayOpportunityReviewInput, IntradayOpportunityReviewDocument>(
+                PromptRegistry.IntradayOpportunityReview,
+                new PromptModelOptions
+                {
+                    ModelId = "gpt-test",
+                    UseBackgroundResponses = true,
+                    BackgroundPollInterval = TimeSpan.FromMilliseconds(1),
+                },
+                CreateIntradayInput(),
+                [],
+                IntradayOpportunityReviewResponseFormat.Create(),
+                CancellationToken.None);
+
+            result.StructuredValue.MarketAssessments.Should().ContainSingle();
+            backgroundClient.CreateCount.Should().Be(1);
+            backgroundClient.GetCount.Should().Be(2);
+
+            var record = ReadLatestObservation(tempDirectory.FullName);
+            var attempts = record.RootElement.GetProperty("attempts").EnumerateArray().ToArray();
+            attempts.Should().Contain(attempt =>
+                attempt.GetProperty("phase").GetString() == "PollBackgroundResponse"
+                && attempt.GetProperty("status").GetString() == "Failed"
+                && attempt.GetProperty("httpStatus").GetInt32() == 520);
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteStructuredAsync_WithBackgroundResponses_ShouldRetryCreate520UntilMaximumAttempts()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var backgroundClient = new TestBackgroundResponseClient(
+                createHandlers:
+                [
+                    (_, _, _) => throw CreateClientResultException(520)
+                ],
+                getHandlers: []);
+            var executor = CreateExecutor(
+                tempDirectory.FullName,
+                new TestChatClient(_ => throw new InvalidOperationException("Synchronous client should not be called.")),
+                (_, _) => Task.CompletedTask,
+                backgroundClient);
+
+            var action = () => executor.ExecuteStructuredAsync<IntradayOpportunityReviewInput, IntradayOpportunityReviewDocument>(
+                PromptRegistry.IntradayOpportunityReview,
+                new PromptModelOptions
+                {
+                    ModelId = "gpt-test",
+                    UseBackgroundResponses = true,
+                    BackgroundPollInterval = TimeSpan.FromMilliseconds(1),
+                },
+                CreateIntradayInput(),
+                [],
+                IntradayOpportunityReviewResponseFormat.Create(),
+                CancellationToken.None);
+
+            await action.Should().ThrowAsync<ClientResultException>();
+            backgroundClient.CreateCount.Should().Be(3);
+            backgroundClient.GetCount.Should().Be(0);
+
+            var record = ReadLatestObservation(tempDirectory.FullName);
+            record.RootElement.GetProperty("status").GetString().Should().Be("Failed");
+            record.RootElement.GetProperty("providerResponseId").ValueKind.Should().Be(JsonValueKind.Null);
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteStructuredAsync_WithBackgroundResponses_ShouldCancelOnPollTimeout()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var backgroundClient = new TestBackgroundResponseClient(
+                createHandlers:
+                [
+                    (_, _, _) => Task.FromResult(new BackgroundResponseResult("resp_test", "queued", null))
+                ],
+                getHandlers: []);
+            var executor = CreateExecutor(
+                tempDirectory.FullName,
+                new TestChatClient(_ => throw new InvalidOperationException("Synchronous client should not be called.")),
+                (_, _) => Task.CompletedTask,
+                backgroundClient);
+
+            var action = () => executor.ExecuteStructuredAsync<IntradayOpportunityReviewInput, IntradayOpportunityReviewDocument>(
+                PromptRegistry.IntradayOpportunityReview,
+                new PromptModelOptions
+                {
+                    ModelId = "gpt-test",
+                    UseBackgroundResponses = true,
+                    BackgroundPollInterval = TimeSpan.FromMilliseconds(1),
+                    BackgroundPollTimeout = TimeSpan.Zero,
+                },
+                CreateIntradayInput(),
+                [],
+                IntradayOpportunityReviewResponseFormat.Create(),
+                CancellationToken.None);
+
+            await action.Should().ThrowAsync<TimeoutException>();
+            backgroundClient.CreateCount.Should().Be(1);
+            backgroundClient.GetCount.Should().Be(0);
+            backgroundClient.CancelCount.Should().Be(1);
+
+            var record = ReadLatestObservation(tempDirectory.FullName);
+            record.RootElement.GetProperty("status").GetString().Should().Be("Failed");
+            record.RootElement.GetProperty("providerResponseId").GetString().Should().Be("resp_test");
+            record.RootElement.GetProperty("providerStatus").GetString().Should().Be("cancelled");
+            record.RootElement.GetProperty("attempts")
+                .EnumerateArray()
+                .Select(attempt => attempt.GetProperty("phase").GetString())
+                .Should()
+                .Contain("CancelBackgroundResponse");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
     public void RenderRequestText_ShouldMatchPromptTemplateRendering()
     {
         var executor = CreateExecutor(Path.GetTempPath(), new TestChatClient(_ => Task.FromResult(CreateResponse("unused"))));
@@ -351,7 +570,8 @@ public sealed class PromptExecutorTests
     private static PromptExecutor CreateExecutor(
         string observabilityRootPath,
         IChatClient chatClient,
-        Func<TimeSpan, CancellationToken, Task>? delayAsync = null)
+        Func<TimeSpan, CancellationToken, Task>? delayAsync = null,
+        IBackgroundResponseClient? backgroundResponseClient = null)
     {
         var options = Options.Create(new PromptObservabilityOptions
         {
@@ -364,6 +584,7 @@ public sealed class PromptExecutorTests
             new PromptObservabilityWriter(options),
             new StubChatClientFactory(chatClient),
             new PromptInputConverter(),
+            backgroundResponseClient,
             delayAsync);
     }
 
@@ -416,6 +637,39 @@ public sealed class PromptExecutorTests
               "opportunities": [],
               "risks": [],
               "calendarEvents": []
+            }
+            """);
+
+    private static IntradayOpportunityReviewInput CreateIntradayInput()
+        => new(
+            new DateOnly(2026, 3, 12),
+            DateTimeOffset.Parse("2026-03-12T05:30:00Z"),
+            DateTimeOffset.Parse("2026-03-12T06:30:00Z"),
+            1,
+            4,
+            "Australia/Melbourne",
+            "Macro summary",
+            "One watched market",
+            "No calendar events",
+            new DateOnly(2026, 3, 12),
+            DateTimeOffset.Parse("2026-03-12T06:30:45Z"));
+
+    private static ChatResponse CreateValidIntradayResponse()
+        => CreateResponse("""
+            {
+              "recentDevelopmentsSummary": "USD softer and energy stable.",
+              "marketAssessments": [
+                {
+                  "instrumentId": "CC.D.WTI.UMA.IP",
+                  "instrumentName": "WTI Crude Oil",
+                  "opportunityScore": 68,
+                  "directionalBias": "Buy",
+                  "summary": "Constructive intraday structure.",
+                  "whyNow": "Momentum improved in the last hour.",
+                  "standAsideReason": ""
+                }
+              ],
+              "candidateOpportunities": []
             }
             """);
 
@@ -474,6 +728,54 @@ public sealed class PromptExecutorTests
 
         public IChatClient CreateClient(string modelId)
             => _chatClient;
+    }
+
+    private sealed class TestBackgroundResponseClient : IBackgroundResponseClient
+    {
+        private readonly Queue<Func<PromptInvocation, IReadOnlyList<ChatMessage>, ChatOptions, Task<BackgroundResponseResult>>> _createHandlers;
+        private readonly Queue<Func<string, string, ChatOptions, Task<BackgroundResponseResult>>> _getHandlers;
+
+        public TestBackgroundResponseClient(
+            IReadOnlyList<Func<PromptInvocation, IReadOnlyList<ChatMessage>, ChatOptions, Task<BackgroundResponseResult>>> createHandlers,
+            IReadOnlyList<Func<string, string, ChatOptions, Task<BackgroundResponseResult>>> getHandlers)
+        {
+            _createHandlers = new Queue<Func<PromptInvocation, IReadOnlyList<ChatMessage>, ChatOptions, Task<BackgroundResponseResult>>>(createHandlers);
+            _getHandlers = new Queue<Func<string, string, ChatOptions, Task<BackgroundResponseResult>>>(getHandlers);
+        }
+
+        public int CreateCount { get; private set; }
+
+        public int GetCount { get; private set; }
+
+        public int CancelCount { get; private set; }
+
+        public Task<BackgroundResponseResult> CreateAsync(
+            PromptInvocation invocation,
+            IReadOnlyList<ChatMessage> messages,
+            ChatOptions options,
+            CancellationToken cancellationToken)
+        {
+            CreateCount++;
+            var handler = _createHandlers.Count > 1 ? _createHandlers.Dequeue() : _createHandlers.Peek();
+            return handler(invocation, messages, options);
+        }
+
+        public Task<BackgroundResponseResult> GetAsync(
+            string modelId,
+            string responseId,
+            ChatOptions options,
+            CancellationToken cancellationToken)
+        {
+            GetCount++;
+            var handler = _getHandlers.Count > 1 ? _getHandlers.Dequeue() : _getHandlers.Peek();
+            return handler(modelId, responseId, options);
+        }
+
+        public Task CancelAsync(string modelId, string responseId, CancellationToken cancellationToken)
+        {
+            CancelCount++;
+            return Task.CompletedTask;
+        }
     }
 
     private sealed class TestPipelineResponse : PipelineResponse
