@@ -50,7 +50,7 @@ return await Deployment.RunAsync(() =>
             AutoDelete = true,
             InitializeParams = new Gcp.Compute.Inputs.InstanceBootDiskInitializeParamsArgs
             {
-                Image = "ubuntu-os-cloud/ubuntu-2404-lts",
+                Image = "ubuntu-os-cloud/ubuntu-2404-lts-amd64",
                 Labels = labels,
                 Size = 30,
                 Type = "pd-standard",
