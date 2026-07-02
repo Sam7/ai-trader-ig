@@ -51,6 +51,7 @@ install -d -o ai-trader -g ai-trader -m 0750 \
     "$DATA_DIR/market-data" \
     "$DATA_DIR/backups/staging" \
     "$DATA_DIR/observability"
+chown -R ai-trader:ai-trader "$DATA_DIR/backups"
 
 find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 tar -xzf "$WORKER_PACKAGE" -C "$APP_DIR"

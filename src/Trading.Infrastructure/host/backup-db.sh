@@ -74,6 +74,7 @@ quick_check="$("$SQLITE_BIN" "$tmp_backup_path" "PRAGMA quick_check;")"
 [[ "$quick_check" == "ok" ]] || fail "backup quick_check failed: $quick_check"
 
 mv -f "$tmp_backup_path" "$backup_path"
+rm -f "$checksum_path"
 sha256sum "$backup_path" | sed "s#  .*#  $backup_name#" > "$checksum_path"
 
 if [[ "$DRY_RUN" == "true" ]]; then
