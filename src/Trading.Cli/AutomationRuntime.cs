@@ -2,16 +2,24 @@ using Trading.Automation;
 
 public interface IAutomationRuntime
 {
-    Task RunAsync(TimeSpan? duration = null, CancellationToken cancellationToken = default);
+    Task RunAsync(
+        TimeSpan? duration = null,
+        IReadOnlyList<string>? instruments = null,
+        string? observabilityRootPath = null,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class AutomationRuntime : IAutomationRuntime
 {
-    public async Task RunAsync(TimeSpan? duration = null, CancellationToken cancellationToken = default)
+    public async Task RunAsync(
+        TimeSpan? duration = null,
+        IReadOnlyList<string>? instruments = null,
+        string? observabilityRootPath = null,
+        CancellationToken cancellationToken = default)
     {
         if (duration is null)
         {
-            await TradingWorkerApplication.RunAsync([], cancellationToken);
+            await TradingWorkerApplication.RunAsync([], cancellationToken, instruments ?? [], observabilityRootPath);
             return;
         }
 
@@ -20,7 +28,7 @@ public sealed class AutomationRuntime : IAutomationRuntime
 
         try
         {
-            await TradingWorkerApplication.RunAsync([], durationCancellation.Token);
+            await TradingWorkerApplication.RunAsync([], durationCancellation.Token, instruments ?? [], observabilityRootPath);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested && durationCancellation.IsCancellationRequested)
         {

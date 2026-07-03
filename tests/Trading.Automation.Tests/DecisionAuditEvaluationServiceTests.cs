@@ -72,7 +72,8 @@ public sealed class DecisionAuditEvaluationServiceTests
                     store,
                     new FakeTradingGateway(),
                     Options.Create(new MarketDataOptions { BackfillEnabled = false }),
-                    NullLogger<MarketDataService>.Instance));
+                    NullLogger<MarketDataService>.Instance),
+                new AuditMarketDataQualityAnalyzer(store, store));
 
             var report = await service.EvaluateAsync(
                 new DecisionAuditEvaluationRequest(tempDirectory.FullName, new DateOnly(2026, 3, 12), PriceResolution.FiveMinutes),
@@ -129,7 +130,7 @@ public sealed class DecisionAuditEvaluationServiceTests
                     ObservabilityRootPath = tempDirectory.FullName,
                 }));
             var auditPath = Path.Combine(tempDirectory.FullName, "2026-03-12", "100000000-decision-audit.json");
-            await writer.SaveAsync(auditPath, CreateAuditRecord(instrument), CancellationToken.None);
+            await writer.SaveAsync(auditPath, CreateAuditRecord(instrument, assessments: []), CancellationToken.None);
             var service = new DecisionAuditEvaluationService(
                 writer,
                 new PaperTradeOutcomeEvaluator(),
@@ -138,7 +139,8 @@ public sealed class DecisionAuditEvaluationServiceTests
                     store,
                     new FakeTradingGateway(),
                     Options.Create(new MarketDataOptions { BackfillEnabled = false }),
-                    NullLogger<MarketDataService>.Instance));
+                    NullLogger<MarketDataService>.Instance),
+                new AuditMarketDataQualityAnalyzer(store, store));
 
             var report = await service.EvaluateAsync(
                 new DecisionAuditEvaluationRequest(tempDirectory.FullName, new DateOnly(2026, 3, 12), PriceResolution.FiveMinutes),
@@ -160,7 +162,131 @@ public sealed class DecisionAuditEvaluationServiceTests
         }
     }
 
-    private static DecisionAuditRecord CreateAuditRecord(InstrumentId instrument)
+    [Fact]
+    public async Task EvaluateAsync_ShouldAcceptCandidateTargetHitBeforeLaterMissingBar()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var instrument = new InstrumentId("CC.D.TEST.IP");
+            var store = new InMemoryMarketDataStore();
+            await store.UpsertAsync(
+            [
+                StoredPriceBar.FromPriceBar(
+                    instrument,
+                    PriceResolution.FiveMinutes,
+                    Bar("2026-03-12T10:00:00Z", bidLow: 99m, bidHigh: 104m, bidClose: 102m, askLow: 99.2m, askHigh: 104.2m, askClose: 102.2m),
+                    MarketDataSource.Stream),
+                StoredPriceBar.FromPriceBar(
+                    instrument,
+                    PriceResolution.FiveMinutes,
+                    Bar("2026-03-12T10:05:00Z", bidLow: 101m, bidHigh: 111m, bidClose: 110m, askLow: 101.2m, askHigh: 111.2m, askClose: 110.2m),
+                    MarketDataSource.Stream),
+            ]);
+            var writer = CreateWriter(tempDirectory);
+            var auditPath = Path.Combine(tempDirectory.FullName, "2026-03-12", "100000000-decision-audit.json");
+            await writer.SaveAsync(auditPath, CreateAuditRecord(instrument, assessments: []), CancellationToken.None);
+            var service = CreateService(writer, store);
+
+            var report = await service.EvaluateAsync(
+                new DecisionAuditEvaluationRequest(tempDirectory.FullName, new DateOnly(2026, 3, 12), PriceResolution.FiveMinutes),
+                CancellationToken.None);
+
+            report.TargetHitCount.Should().Be(1);
+            report.DataInsufficientCount.Should().Be(0);
+            report.DataQuality!.InsufficientTailWindows.Should().Be(1);
+
+            var updated = JsonSerializer.Deserialize<DecisionAuditRecord>(
+                await File.ReadAllTextAsync(auditPath),
+                DecisionAuditJson.Options);
+            updated!.PaperOutcomes[0].Status.Should().Be(PaperTradeOutcomeStatus.TargetHit);
+            updated.PaperOutcomes[0].Reason.Should().Contain("first unsafe data-quality issue starts after the close");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_ShouldEvaluateAssessmentWithOneInteriorGapByDefault()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var instrument = new InstrumentId("CC.D.TEST.IP");
+            var store = new InMemoryMarketDataStore();
+            await store.UpsertAsync(CreateAssessmentBars(instrument, skipTimestampUtc: "2026-03-12T10:30:00Z"));
+            var writer = CreateWriter(tempDirectory);
+            var auditPath = Path.Combine(tempDirectory.FullName, "2026-03-12", "100000000-decision-audit.json");
+            var record = CreateAuditRecord(instrument, candidates: []);
+            await writer.SaveAsync(auditPath, record, CancellationToken.None);
+            var service = CreateService(writer, store);
+
+            var report = await service.EvaluateAsync(
+                new DecisionAuditEvaluationRequest(tempDirectory.FullName, new DateOnly(2026, 3, 12), PriceResolution.FiveMinutes),
+                CancellationToken.None);
+
+            report.AssessmentFollowedBiasCount.Should().Be(1);
+            report.AssessmentDataInsufficientCount.Should().Be(0);
+            report.DataQuality!.EvaluatedWithToleratedGaps.Should().Be(1);
+
+            var updated = JsonSerializer.Deserialize<DecisionAuditRecord>(
+                await File.ReadAllTextAsync(auditPath),
+                DecisionAuditJson.Options);
+            updated!.MarketAssessmentOutcomes[0].Status.Should().Be(PaperMarketAssessmentOutcomeStatus.FollowedBias);
+            updated.MarketAssessmentOutcomes[0].Reason.Should().Contain("small interior data gap");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
+    public async Task EvaluateAsync_WithStrictData_ShouldRejectAssessmentWithInteriorGap()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+
+        try
+        {
+            var instrument = new InstrumentId("CC.D.TEST.IP");
+            var store = new InMemoryMarketDataStore();
+            await store.UpsertAsync(CreateAssessmentBars(instrument, skipTimestampUtc: "2026-03-12T10:30:00Z"));
+            var writer = CreateWriter(tempDirectory);
+            var auditPath = Path.Combine(tempDirectory.FullName, "2026-03-12", "100000000-decision-audit.json");
+            await writer.SaveAsync(auditPath, CreateAuditRecord(instrument, candidates: []), CancellationToken.None);
+            var service = CreateService(writer, store);
+
+            var report = await service.EvaluateAsync(
+                new DecisionAuditEvaluationRequest(
+                    tempDirectory.FullName,
+                    new DateOnly(2026, 3, 12),
+                    PriceResolution.FiveMinutes,
+                    StrictData: true),
+                CancellationToken.None);
+
+            report.AssessmentFollowedBiasCount.Should().Be(0);
+            report.AssessmentDataInsufficientCount.Should().Be(1);
+
+            var updated = JsonSerializer.Deserialize<DecisionAuditRecord>(
+                await File.ReadAllTextAsync(auditPath),
+                DecisionAuditJson.Options);
+            updated!.MarketAssessmentOutcomes[0].Status.Should().Be(PaperMarketAssessmentOutcomeStatus.DataInsufficient);
+            updated.MarketAssessmentOutcomes[0].Reason.Should().Contain("Strict data mode");
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    private static DecisionAuditRecord CreateAuditRecord(
+        InstrumentId instrument,
+        IReadOnlyList<DecisionAuditAssessment>? assessments = null,
+        IReadOnlyList<DecisionAuditCandidate>? candidates = null)
     {
         var assessment = new DecisionAuditAssessment(
             instrument,
@@ -186,6 +312,8 @@ public sealed class DecisionAuditEvaluationServiceTests
             "Invalidation",
             "Why now",
             DateTimeOffset.Parse("2026-03-12T10:30:00Z"));
+        assessments ??= [assessment];
+        candidates ??= [candidate];
 
         return new DecisionAuditRecord(
             new DateOnly(2026, 3, 12),
@@ -202,11 +330,57 @@ public sealed class DecisionAuditEvaluationServiceTests
                 "ResponsesBackground",
                 "resp_test",
                 "completed"),
-            [assessment],
-            [candidate],
+            assessments,
+            candidates,
             [],
             [],
-            DecisionBiasSummary.From([assessment], [candidate]));
+            DecisionBiasSummary.From(assessments, candidates));
+    }
+
+    private static DecisionAuditWriter CreateWriter(DirectoryInfo root)
+        => new(Options.Create(new PromptObservabilityOptions
+        {
+            ObservabilityRootPath = root.FullName,
+        }));
+
+    private static DecisionAuditEvaluationService CreateService(
+        DecisionAuditWriter writer,
+        InMemoryMarketDataStore store)
+        => new(
+            writer,
+            new PaperTradeOutcomeEvaluator(),
+            new PaperMarketAssessmentEvaluator(),
+            new MarketDataService(
+                store,
+                new FakeTradingGateway(),
+                Options.Create(new MarketDataOptions { BackfillEnabled = false }),
+                NullLogger<MarketDataService>.Instance),
+            new AuditMarketDataQualityAnalyzer(store, store));
+
+    private static IReadOnlyList<StoredPriceBar> CreateAssessmentBars(
+        InstrumentId instrument,
+        string skipTimestampUtc)
+    {
+        var skip = DateTimeOffset.Parse(skipTimestampUtc);
+        var bars = new List<StoredPriceBar>();
+        for (var timestamp = DateTimeOffset.Parse("2026-03-12T10:00:00Z");
+             timestamp <= DateTimeOffset.Parse("2026-03-12T11:00:00Z");
+             timestamp = timestamp.AddMinutes(5))
+        {
+            if (timestamp == skip)
+            {
+                continue;
+            }
+
+            var offset = (decimal)(timestamp - DateTimeOffset.Parse("2026-03-12T10:00:00Z")).TotalMinutes / 5m;
+            bars.Add(StoredPriceBar.FromPriceBar(
+                instrument,
+                PriceResolution.FiveMinutes,
+                Bar(timestamp.ToString("O"), 99m + offset, 101m + offset, 100m + offset, 99.2m + offset, 101.2m + offset, 100.2m + offset),
+                MarketDataSource.Stream));
+        }
+
+        return bars;
     }
 
     private static PriceBar Bar(

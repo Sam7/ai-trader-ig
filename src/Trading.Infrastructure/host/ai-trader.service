@@ -17,6 +17,12 @@ TimeoutStopSec=30
 Environment=DOTNET_ENVIRONMENT=Production
 Environment=ASPNETCORE_ENVIRONMENT=Production
 Environment=MarketData__StorePath=/var/lib/ai-trader/market-data/ig-market-data.sqlite
+Environment=MarketData__CloudSnapshot__BucketName=REPLACE_WITH_BACKUP_BUCKET
+Environment=MarketData__CloudSnapshot__ObjectName=market-data/ig-market-data.sqlite
+Environment=MarketData__CloudSnapshot__Publisher__Enabled=true
+Environment=MarketData__CloudSnapshot__Publisher__Interval=00:05:00
+Environment=MarketData__CloudSnapshot__Publisher__StagingDirectory=/var/lib/ai-trader/snapshot-publisher
+Environment=MarketData__CloudSnapshot__Mirror__Enabled=false
 Environment=AI__Prompts__ObservabilityRootPath=/var/lib/ai-trader/observability
 
 StateDirectory=ai-trader

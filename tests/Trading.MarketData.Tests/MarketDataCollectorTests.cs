@@ -144,6 +144,56 @@ public sealed class MarketDataCollectorTests
     }
 
     [Fact]
+    public async Task RunAsync_WithCloudMirrorEnabled_ShouldSkipHistoricalRepairAndKeepStreaming()
+    {
+        var store = new InMemoryMarketDataStore();
+        var healthStore = new InMemoryMarketDataHealthStore();
+        var stream = new FakeMarketDataStreamClient
+        {
+            OnStart = async handler =>
+            {
+                await handler(new StreamPriceBarUpdate(
+                    new InstrumentId("CS.D.BITCOIN.CFD.IP"),
+                    PriceResolution.FiveMinutes,
+                    CreateBar("2026-06-29T00:15:00Z"),
+                    IsFinal: true,
+                    ObservedAtUtc: DateTimeOffset.Parse("2026-06-29T00:20:00Z")),
+                    CancellationToken.None);
+            },
+        };
+        var gateway = new FakeTradingGateway();
+        var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
+        var collector = CreateCollector(
+            store,
+            stream,
+            gateway,
+            healthStore,
+            nowUtc: "2026-06-29T00:20:00Z",
+            marketDataOptions: new MarketDataOptions
+            {
+                CloudSnapshot = new MarketDataCloudSnapshotOptions
+                {
+                    Mirror = new MarketDataSnapshotMirrorOptions { Enabled = true },
+                },
+            });
+
+        await collector.RunAsync([instrument], TimeSpan.Zero);
+
+        gateway.PriceRequests.Should().BeEmpty();
+        stream.StartCalls.Should().Be(1);
+        var bars = await store.GetRangeAsync(
+            instrument,
+            PriceResolution.FiveMinutes,
+            DateTimeOffset.Parse("2026-06-29T00:15:00Z"),
+            DateTimeOffset.Parse("2026-06-29T00:20:00Z"));
+        bars.Should().ContainSingle();
+        var health = await healthStore.GetAsync(instrument, PriceResolution.FiveMinutes);
+        health.Should().NotBeNull();
+        health!.RepairState.Should().Be(MarketDataRepairState.Idle);
+    }
+
+
+    [Fact]
     public async Task RunAsync_WithIndefiniteDuration_ShouldWaitUntilCancelledAndDisposeStream()
     {
         var stream = new FakeMarketDataStreamClient();
@@ -175,13 +225,16 @@ public sealed class MarketDataCollectorTests
         FakeMarketDataStreamClient stream,
         FakeTradingGateway gateway,
         IMarketDataHealthStore healthStore,
-        string nowUtc)
+        string nowUtc,
+        MarketDataOptions? marketDataOptions = null)
         => new(
             stream,
             store,
             healthStore,
+            (IMarketSessionEvidenceStore)store,
             gateway,
             new FixedMarketDataClock(DateTimeOffset.Parse(nowUtc)),
+            Options.Create(marketDataOptions ?? new MarketDataOptions()),
             Options.Create(new MarketDataCollectorOptions()),
             NullLogger<MarketDataCollector>.Instance);
 

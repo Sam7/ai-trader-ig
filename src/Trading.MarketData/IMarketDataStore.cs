@@ -30,4 +30,11 @@ public interface IMarketDataStore
     Task RecordCoverageAsync(
         MarketDataCoverageRecord coverage,
         CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<MarketDataCoverageRecord>> GetCoverageAsync(
+        InstrumentId instrument,
+        PriceResolution resolution,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default);
 }

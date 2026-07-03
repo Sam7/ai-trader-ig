@@ -7,14 +7,14 @@ namespace Trading.Automation.Scheduling;
 
 public sealed class DailyBriefingTickerJob
 {
-    private readonly DailyBriefingPlanService _planService;
+    private readonly DailyPlanEnsureService _planEnsureService;
     private readonly ILogger<DailyBriefingTickerJob> _logger;
 
     public DailyBriefingTickerJob(
-        DailyBriefingPlanService planService,
+        DailyPlanEnsureService planEnsureService,
         ILogger<DailyBriefingTickerJob> logger)
     {
-        _planService = planService;
+        _planEnsureService = planEnsureService;
         _logger = logger;
     }
 
@@ -22,6 +22,6 @@ public sealed class DailyBriefingTickerJob
     public async Task RunAsync(TickerFunctionContext context, CancellationToken cancellationToken)
     {
         _logger.LogInformation("Running scheduled daily briefing job {JobId}.", context.Id);
-        await _planService.RunForTodayAsync(cancellationToken);
+        await _planEnsureService.EnsureForTodayAsync(cancellationToken);
     }
 }

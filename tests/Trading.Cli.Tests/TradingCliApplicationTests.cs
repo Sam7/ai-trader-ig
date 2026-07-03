@@ -169,6 +169,74 @@ public sealed class TradingCliApplicationTests
     }
 
     [Fact]
+    public async Task RunAsync_WithAutomationRunInstruments_ShouldPassInstrumentFilter()
+    {
+        var console = CreateConsole();
+        var runtime = new FakeAutomationRuntime();
+        var application = CreateApplication(
+            new FakeTradingGateway(),
+            new FakePriceChartRenderer(),
+            console,
+            automationRuntime: runtime);
+
+        var exitCode = await application.RunAsync([
+            "automation",
+            "run",
+            "--duration",
+            "00:00:00",
+            "--instruments",
+            "CC.D.CL.UMA.IP,CS.D.CFAGOLD.CFA.IP",
+        ]);
+
+        exitCode.Should().Be(0);
+        runtime.Requests.Should().ContainSingle();
+        runtime.Requests[0].Instruments.Should().Equal("CC.D.CL.UMA.IP", "CS.D.CFAGOLD.CFA.IP");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithAutomationRunRoot_ShouldPassObservabilityRoot()
+    {
+        var console = CreateConsole();
+        var runtime = new FakeAutomationRuntime();
+        var application = CreateApplication(
+            new FakeTradingGateway(),
+            new FakePriceChartRenderer(),
+            console,
+            automationRuntime: runtime);
+
+        var exitCode = await application.RunAsync([
+            "automation",
+            "run",
+            "--duration",
+            "00:00:00",
+            "--root",
+            "Logs/Observability/evidence-check",
+        ]);
+
+        exitCode.Should().Be(0);
+        runtime.Requests.Should().ContainSingle();
+        runtime.Requests[0].ObservabilityRootPath.Should().Be("Logs/Observability/evidence-check");
+    }
+
+    [Fact]
+    public async Task RunAsync_WithAutomationRunEmptyInstrumentList_ShouldReturnUsageExitCode()
+    {
+        var console = CreateConsole();
+        var runtime = new FakeAutomationRuntime();
+        var application = CreateApplication(
+            new FakeTradingGateway(),
+            new FakePriceChartRenderer(),
+            console,
+            automationRuntime: runtime);
+
+        var exitCode = await application.RunAsync(["automation", "run", "--instruments", ","]);
+
+        exitCode.Should().Be(1);
+        runtime.Requests.Should().BeEmpty();
+        console.Output.Should().Contain("Option --instruments must include at least one EPIC.");
+    }
+
+    [Fact]
     public async Task RunAsync_WithAutomationRunDurationOverMaximum_ShouldReturnUsageExitCode()
     {
         var console = CreateConsole();
@@ -211,6 +279,13 @@ public sealed class TradingCliApplicationTests
                 "2026-03-12",
                 "--resolution",
                 "5minute",
+                "--strict-data",
+                "--max-assessment-missing-bars",
+                "3",
+                "--max-assessment-consecutive-missing-bars",
+                "2",
+                "--max-assessment-missing-ratio",
+                "0.25",
             ]);
 
             exitCode.Should().Be(0);
@@ -218,8 +293,13 @@ public sealed class TradingCliApplicationTests
             auditService.Requests[0].RootPath.Should().Be(tempDirectory.FullName);
             auditService.Requests[0].TradingDate.Should().Be(new DateOnly(2026, 3, 12));
             auditService.Requests[0].Resolution.Should().Be(PriceResolution.FiveMinutes);
+            auditService.Requests[0].StrictData.Should().BeTrue();
+            auditService.Requests[0].MaxAssessmentInteriorMissingBars.Should().Be(3);
+            auditService.Requests[0].MaxAssessmentConsecutiveMissingBars.Should().Be(2);
+            auditService.Requests[0].MaxAssessmentMissingRatio.Should().Be(0.25m);
             console.Output.Should().Contain("Decision Audit Evaluation");
             console.Output.Should().Contain("TargetHit");
+            console.Output.Should().Contain("Audit Data Quality");
             console.Output.Should().Contain("Decision Bias");
         }
         finally
@@ -930,14 +1010,21 @@ public sealed class TradingCliApplicationTests
     {
         public List<RunRequest> Requests { get; } = [];
 
-        public Task RunAsync(TimeSpan? duration = null, CancellationToken cancellationToken = default)
+        public Task RunAsync(
+            TimeSpan? duration = null,
+            IReadOnlyList<string>? instruments = null,
+            string? observabilityRootPath = null,
+            CancellationToken cancellationToken = default)
         {
-            Requests.Add(new RunRequest(duration));
+            Requests.Add(new RunRequest(duration, instruments ?? [], observabilityRootPath));
             return Task.CompletedTask;
         }
     }
 
-    private sealed record RunRequest(TimeSpan? Duration);
+    private sealed record RunRequest(
+        TimeSpan? Duration,
+        IReadOnlyList<string> Instruments,
+        string? ObservabilityRootPath);
 
     private sealed class FakeMarketDataCollector : IMarketDataCollector
     {

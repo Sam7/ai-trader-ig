@@ -7,6 +7,7 @@ public enum MarketDataSource
     Stream = 2,
     RestBackfill = 3,
     ManualImport = 4,
+    CloudMirror = 5,
 }
 
 public enum MarketDataResultSource

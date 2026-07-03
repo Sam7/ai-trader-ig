@@ -13,13 +13,19 @@ namespace Trading.Automation;
 
 public static class TradingWorkerApplication
 {
-    public static async Task RunAsync(string[] args, CancellationToken cancellationToken = default)
+    public static async Task RunAsync(
+        string[] args,
+        CancellationToken cancellationToken = default,
+        IReadOnlyList<string>? trackedMarketInstrumentFilter = null,
+        string? observabilityRootPath = null)
     {
         var builder = WebApplication.CreateBuilder(args);
         builder.WebHost.UseUrls("http://127.0.0.1:0");
         builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
         TrackedMarketsConfiguration.AddConfiguredTrackedMarketsFile(builder.Configuration);
+        TrackedMarketsConfiguration.ApplyTrackedMarketsOverride(builder.Configuration, trackedMarketInstrumentFilter ?? []);
         builder.Configuration.AddUserSecrets(typeof(TradingWorkerApplication).Assembly, optional: true);
+        PromptObservabilityConfiguration.ApplyRootOverride(builder.Configuration, observabilityRootPath);
 
         builder.Host.UseSerilog((context, services, loggerConfiguration) =>
         {

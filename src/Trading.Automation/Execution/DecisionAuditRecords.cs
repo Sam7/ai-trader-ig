@@ -165,7 +165,19 @@ public sealed record DecisionBiasSummary(
 public sealed record DecisionAuditEvaluationRequest(
     string RootPath,
     DateOnly? TradingDate,
-    PriceResolution Resolution);
+    PriceResolution Resolution,
+    bool StrictData = false,
+    int MaxAssessmentInteriorMissingBars = 1,
+    int MaxAssessmentConsecutiveMissingBars = 1,
+    decimal MaxAssessmentMissingRatio = 0.10m)
+{
+    public AuditDataQualityPolicy CreateDataQualityPolicy()
+        => new(
+            StrictData,
+            MaxAssessmentInteriorMissingBars,
+            MaxAssessmentConsecutiveMissingBars,
+            MaxAssessmentMissingRatio);
+}
 
 public sealed record DecisionAuditEvaluationReport(
     string RootPath,
@@ -186,7 +198,8 @@ public sealed record DecisionAuditEvaluationReport(
     int AssessmentDataInsufficientCount,
     decimal? AverageEstimatedRMultiple,
     DecisionBiasSummary BiasSummary,
-    ArtifactReference? ReportArtifact);
+    ArtifactReference? ReportArtifact,
+    DecisionAuditDataQualitySummary? DataQuality = null);
 
 internal static class DecisionAuditJson
 {

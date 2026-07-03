@@ -72,6 +72,7 @@ Build a small, clean, test-first trading solution with an isolated IG SDK and a 
 
 ## Review workflow
 
+- Include documentation impact in every implementation plan. Update the root `README.md`, project-level README files, or files under `docs/` when a change makes existing documentation stale or when documenting the change would materially improve developer understanding. Skip documentation edits for trivial or internal-only changes where the docs remain accurate.
 - After any meaningful chunk of implementation, invoke the local `$code-review-guard` skill before concluding the work.
 - Scope the review to uncommitted changes.
 - Fix clear, local issues immediately when the fix is low-risk.

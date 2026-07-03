@@ -18,6 +18,21 @@ public static class ServiceCollectionExtensions
 
         services.AddOptions<DailyBriefingOptions>()
             .Bind(configuration.GetSection(DailyBriefingOptions.SectionName));
+        services.PostConfigure<DailyBriefingOptions>(options =>
+        {
+            if (options.TrackedMarketInstrumentFilter.Length == 0)
+            {
+                return;
+            }
+
+            var marketsByInstrument = options.TrackedMarkets.ToDictionary(market => market.InstrumentId, StringComparer.Ordinal);
+            options.TrackedMarkets = options.TrackedMarketInstrumentFilter
+                .Select(instrument => marketsByInstrument.TryGetValue(instrument, out var market)
+                    ? market
+                    : throw new InvalidOperationException(
+                        $"Requested instrument '{instrument}' is not configured in tracked markets."))
+                .ToArray();
+        });
 
         services.AddOptions<IntradayOpportunityReviewOptions>()
             .Bind(configuration.GetSection(IntradayOpportunityReviewOptions.SectionName));

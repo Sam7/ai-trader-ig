@@ -12,17 +12,20 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
     private readonly PaperTradeOutcomeEvaluator _outcomeEvaluator;
     private readonly PaperMarketAssessmentEvaluator _assessmentEvaluator;
     private readonly MarketDataService _marketDataService;
+    private readonly AuditMarketDataQualityAnalyzer _dataQualityAnalyzer;
 
     public DecisionAuditEvaluationService(
         DecisionAuditWriter writer,
         PaperTradeOutcomeEvaluator outcomeEvaluator,
         PaperMarketAssessmentEvaluator assessmentEvaluator,
-        MarketDataService marketDataService)
+        MarketDataService marketDataService,
+        AuditMarketDataQualityAnalyzer dataQualityAnalyzer)
     {
         _writer = writer;
         _outcomeEvaluator = outcomeEvaluator;
         _assessmentEvaluator = assessmentEvaluator;
         _marketDataService = marketDataService;
+        _dataQualityAnalyzer = dataQualityAnalyzer;
     }
 
     public async Task<DecisionAuditEvaluationReport> EvaluateAsync(
@@ -32,6 +35,8 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
         var evaluatedAtUtc = DateTimeOffset.UtcNow;
         var files = _writer.FindAuditFiles(request.RootPath, request.TradingDate);
         var evaluatedRecords = new List<DecisionAuditRecord>(files.Count);
+        var dataQualityResults = new List<AuditDataQualityResult>();
+        var dataQualityPolicy = request.CreateDataQualityPolicy();
 
         foreach (var file in files)
         {
@@ -41,12 +46,16 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
 
             foreach (var assessment in record.MarketAssessments)
             {
-                assessmentOutcomes.Add(await EvaluateAssessmentAsync(record, assessment, request.Resolution, evaluatedAtUtc, cancellationToken));
+                var result = await EvaluateAssessmentAsync(record, assessment, request.Resolution, dataQualityPolicy, evaluatedAtUtc, cancellationToken);
+                assessmentOutcomes.Add(result.Outcome);
+                dataQualityResults.Add(result.DataQuality);
             }
 
             foreach (var candidate in record.CandidateOpportunities)
             {
-                outcomes.Add(await EvaluateCandidateAsync(record, candidate, request.Resolution, evaluatedAtUtc, cancellationToken));
+                var result = await EvaluateCandidateAsync(record, candidate, request.Resolution, dataQualityPolicy, evaluatedAtUtc, cancellationToken);
+                outcomes.Add(result.Outcome);
+                dataQualityResults.Add(result.DataQuality);
             }
 
             var updated = record with
@@ -60,156 +69,184 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
         }
 
         var reportPath = BuildReportPath(request.RootPath, request.TradingDate);
-        var report = CreateReport(request, evaluatedAtUtc, evaluatedRecords, ToArtifactReference(reportPath));
+        var report = CreateReport(
+            request,
+            evaluatedAtUtc,
+            evaluatedRecords,
+            ToArtifactReference(reportPath),
+            DecisionAuditDataQualitySummary.From(dataQualityResults));
         await SaveReportAsync(reportPath, report, cancellationToken);
         return report;
     }
 
-    private async Task<PaperTradeOutcome> EvaluateCandidateAsync(
+    private async Task<(PaperTradeOutcome Outcome, AuditDataQualityResult DataQuality)> EvaluateCandidateAsync(
         DecisionAuditRecord record,
         DecisionAuditCandidate candidate,
         PriceResolution resolution,
+        AuditDataQualityPolicy dataQualityPolicy,
         DateTimeOffset evaluatedAtUtc,
         CancellationToken cancellationToken)
     {
         if (candidate.SetupExpiresAtUtc <= record.ReviewedAtUtc)
         {
-            return new PaperTradeOutcome(
-                candidate.Instrument,
-                candidate.Direction,
-                PaperTradeOutcomeStatus.DataInsufficient,
-                evaluatedAtUtc,
+            var noBars = new AuditDataQualityResult(
+                AuditDataQualityUseCase.Candidate,
+                AuditDataQualityClassification.NoBars,
                 null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                candidate.CurrentSpread,
-                CalculateSpreadCostR(candidate),
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
                 0,
                 "Setup expiry was not after the review timestamp.");
+            return (CreateCandidateDataInsufficient(candidate, evaluatedAtUtc, 0, noBars.Reason), noBars);
         }
 
+        var interval = GetResolutionInterval(resolution);
+        var windowToUtc = candidate.SetupExpiresAtUtc.Add(interval);
         var result = await _marketDataService.GetBarsAsync(
             new MarketDataRequest(
                 candidate.Instrument,
                 resolution,
                 record.ReviewedAtUtc,
-                candidate.SetupExpiresAtUtc.Add(GetResolutionInterval(resolution)),
+                windowToUtc,
                 AllowBackfill: false),
+            cancellationToken);
+        var quality = await _dataQualityAnalyzer.AnalyzeAsync(
+            candidate.Instrument,
+            resolution,
+            record.ReviewedAtUtc,
+            windowToUtc,
+            AuditDataQualityUseCase.Candidate,
+            dataQualityPolicy,
             cancellationToken);
 
         if (result.Series.Bars.Count == 0)
         {
-            return new PaperTradeOutcome(
-                candidate.Instrument,
-                candidate.Direction,
-                PaperTradeOutcomeStatus.DataInsufficient,
+            return (CreateCandidateDataInsufficient(
+                candidate,
                 evaluatedAtUtc,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                candidate.CurrentSpread,
-                CalculateSpreadCostR(candidate),
                 0,
-                FormatMarketDataIssue(result, "No local market-data bars were available for the setup outcome window."));
+                FormatAuditDataQualityIssue(quality, "No local market-data bars were available for the setup outcome window.")), quality);
         }
 
-        if (result.Status != MarketDataStatus.Completed)
+        if (quality.Classification == AuditDataQualityClassification.Complete)
         {
-            return new PaperTradeOutcome(
-                candidate.Instrument,
-                candidate.Direction,
-                PaperTradeOutcomeStatus.DataInsufficient,
-                evaluatedAtUtc,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                candidate.CurrentSpread,
-                CalculateSpreadCostR(candidate),
-                result.Series.Bars.Count,
-                FormatMarketDataIssue(result, "Local market data was incomplete for the setup outcome window."));
+            return (_outcomeEvaluator.Evaluate(candidate, record.ReviewedAtUtc, result.Series, evaluatedAtUtc), quality);
         }
 
-        return _outcomeEvaluator.Evaluate(candidate, record.ReviewedAtUtc, result.Series, evaluatedAtUtc);
+        var tentative = _outcomeEvaluator.Evaluate(candidate, record.ReviewedAtUtc, result.Series, evaluatedAtUtc);
+        if (IsDecisiveBeforeFirstIssue(tentative, quality))
+        {
+            return (tentative with
+            {
+                Reason = $"{tentative.Reason} Audit accepted the decisive outcome because the first unsafe data-quality issue starts after the close: {quality.FirstIssue!.FromUtc:O}."
+            }, quality);
+        }
+
+        if (quality.Classification == AuditDataQualityClassification.ClosedMarket
+            && quality.FirstIssue is { } closed
+            && closed.FromUtc > record.ReviewedAtUtc)
+        {
+            var clippedExpiry = closed.FromUtc.Subtract(interval);
+            if (clippedExpiry >= record.ReviewedAtUtc)
+            {
+                var clippedCandidate = candidate with { SetupExpiresAtUtc = clippedExpiry };
+                var clipped = _outcomeEvaluator.Evaluate(clippedCandidate, record.ReviewedAtUtc, result.Series, evaluatedAtUtc);
+                if (clipped.Status != PaperTradeOutcomeStatus.DataInsufficient)
+                {
+                    return (clipped with
+                    {
+                        Reason = $"{clipped.Reason} Audit window was clipped at broker closed-market evidence beginning {closed.FromUtc:O}."
+                    }, quality);
+                }
+            }
+        }
+
+        return (CreateCandidateDataInsufficient(
+            candidate,
+            evaluatedAtUtc,
+            result.Series.Bars.Count,
+            FormatAuditDataQualityIssue(quality, "Local market data was incomplete for the setup outcome window.")), quality);
     }
 
-    private async Task<PaperMarketAssessmentOutcome> EvaluateAssessmentAsync(
+    private async Task<(PaperMarketAssessmentOutcome Outcome, AuditDataQualityResult DataQuality)> EvaluateAssessmentAsync(
         DecisionAuditRecord record,
         DecisionAuditAssessment assessment,
         PriceResolution resolution,
+        AuditDataQualityPolicy dataQualityPolicy,
         DateTimeOffset evaluatedAtUtc,
         CancellationToken cancellationToken)
     {
         var horizonEndsAtUtc = record.ReviewedAtUtc.Add(AssessmentOutcomeHorizon);
+        var windowToUtc = horizonEndsAtUtc.Add(GetResolutionInterval(resolution));
         var result = await _marketDataService.GetBarsAsync(
             new MarketDataRequest(
                 assessment.Instrument,
                 resolution,
                 record.ReviewedAtUtc,
-                horizonEndsAtUtc.Add(GetResolutionInterval(resolution)),
+                windowToUtc,
                 AllowBackfill: false),
+            cancellationToken);
+        var quality = await _dataQualityAnalyzer.AnalyzeAsync(
+            assessment.Instrument,
+            resolution,
+            record.ReviewedAtUtc,
+            windowToUtc,
+            AuditDataQualityUseCase.Assessment,
+            dataQualityPolicy,
             cancellationToken);
 
         if (result.Series.Bars.Count == 0)
         {
-            return new PaperMarketAssessmentOutcome(
-                assessment.Instrument,
-                assessment.DirectionalBias,
-                PaperMarketAssessmentOutcomeStatus.DataInsufficient,
+            return (CreateAssessmentDataInsufficient(
+                assessment,
                 evaluatedAtUtc,
                 horizonEndsAtUtc,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
                 0,
-                FormatMarketDataIssue(result, "No local market-data bars were available for the assessment horizon."));
+                FormatAuditDataQualityIssue(quality, "No local market-data bars were available for the assessment horizon.")), quality);
         }
 
-        if (result.Status != MarketDataStatus.Completed)
+        if (quality.Classification is AuditDataQualityClassification.Complete
+            or AuditDataQualityClassification.EvaluatedWithToleratedGaps
+            or AuditDataQualityClassification.ClosedMarket)
         {
-            return new PaperMarketAssessmentOutcome(
-                assessment.Instrument,
-                assessment.DirectionalBias,
-                PaperMarketAssessmentOutcomeStatus.DataInsufficient,
-                evaluatedAtUtc,
+            var outcome = _assessmentEvaluator.Evaluate(
+                assessment,
+                record.ReviewedAtUtc,
                 horizonEndsAtUtc,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null,
-                result.Series.Bars.Count,
-                FormatMarketDataIssue(result, "Local market data was incomplete for the assessment horizon."));
+                result.Series,
+                evaluatedAtUtc);
+
+            if (outcome.Status != PaperMarketAssessmentOutcomeStatus.DataInsufficient
+                && quality.Classification != AuditDataQualityClassification.Complete)
+            {
+                return (outcome with
+                {
+                    Reason = $"{outcome.Reason} {quality.Reason} First data-quality issue: {quality.FirstIssue?.FromUtc:O}."
+                }, quality);
+            }
+
+            return (outcome, quality);
         }
 
-        return _assessmentEvaluator.Evaluate(
+        return (CreateAssessmentDataInsufficient(
             assessment,
-            record.ReviewedAtUtc,
+            evaluatedAtUtc,
             horizonEndsAtUtc,
-            result.Series,
-            evaluatedAtUtc);
+            result.Series.Bars.Count,
+            FormatAuditDataQualityIssue(quality, "Local market data was incomplete for the assessment horizon.")), quality);
     }
 
     private static DecisionAuditEvaluationReport CreateReport(
         DecisionAuditEvaluationRequest request,
         DateTimeOffset evaluatedAtUtc,
         IReadOnlyList<DecisionAuditRecord> records,
-        ArtifactReference reportArtifact)
+        ArtifactReference reportArtifact,
+        DecisionAuditDataQualitySummary dataQuality)
     {
         var allOutcomes = records.SelectMany(record => record.PaperOutcomes).ToArray();
         var allAssessmentOutcomes = records.SelectMany(record => record.MarketAssessmentOutcomes).ToArray();
@@ -239,7 +276,8 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
             allAssessmentOutcomes.Count(outcome => outcome.Status == PaperMarketAssessmentOutcomeStatus.DataInsufficient),
             estimatedRValues.Length == 0 ? null : estimatedRValues.Average(),
             DecisionBiasSummary.From(assessments, candidates),
-            reportArtifact);
+            reportArtifact,
+            dataQuality);
     }
 
     private static string BuildReportPath(string rootPath, DateOnly? tradingDate)
@@ -287,20 +325,65 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
         return risk > 0m ? candidate.CurrentSpread / risk : null;
     }
 
-    private static string FormatMarketDataIssue(MarketDataResult result, string fallback)
+    private static bool IsDecisiveBeforeFirstIssue(
+        PaperTradeOutcome outcome,
+        AuditDataQualityResult quality)
+        => outcome.Status is PaperTradeOutcomeStatus.TargetHit or PaperTradeOutcomeStatus.StoppedOut
+            && outcome.ClosedAtUtc is DateTimeOffset closedAtUtc
+            && quality.FirstIssue is { } firstIssue
+            && closedAtUtc < firstIssue.FromUtc;
+
+    private static PaperTradeOutcome CreateCandidateDataInsufficient(
+        DecisionAuditCandidate candidate,
+        DateTimeOffset evaluatedAtUtc,
+        int barsEvaluated,
+        string reason)
+        => new(
+            candidate.Instrument,
+            candidate.Direction,
+            PaperTradeOutcomeStatus.DataInsufficient,
+            evaluatedAtUtc,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            candidate.CurrentSpread,
+            CalculateSpreadCostR(candidate),
+            barsEvaluated,
+            reason);
+
+    private static PaperMarketAssessmentOutcome CreateAssessmentDataInsufficient(
+        DecisionAuditAssessment assessment,
+        DateTimeOffset evaluatedAtUtc,
+        DateTimeOffset horizonEndsAtUtc,
+        int barsEvaluated,
+        string reason)
+        => new(
+            assessment.Instrument,
+            assessment.DirectionalBias,
+            PaperMarketAssessmentOutcomeStatus.DataInsufficient,
+            evaluatedAtUtc,
+            horizonEndsAtUtc,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            barsEvaluated,
+            reason);
+
+    private static string FormatAuditDataQualityIssue(AuditDataQualityResult quality, string fallback)
     {
-        if (!string.IsNullOrWhiteSpace(result.Message))
+        if (quality.FirstIssue is not { } firstIssue)
         {
-            return result.Message;
+            return $"{fallback} {quality.Reason}";
         }
 
-        if (result.Gaps.Count == 0)
-        {
-            return fallback;
-        }
-
-        var firstGap = result.Gaps[0];
-        return $"{fallback} First missing range: {firstGap.FromUtc:O} to {firstGap.ToUtc:O}.";
+        return $"{fallback} {quality.Reason} First missing range: {firstIssue.FromUtc:O} to {firstIssue.ToUtc:O}.";
     }
 
     private static ArtifactReference ToArtifactReference(string path)

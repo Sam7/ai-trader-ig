@@ -443,6 +443,17 @@ public sealed class TradingCliRenderer
         outcomes.AddRow(PaperTradeOutcomeStatus.DataInsufficient.ToString(), report.DataInsufficientCount.ToString());
         _console.Write(outcomes);
 
+        var dataQuality = report.DataQuality ?? DecisionAuditDataQualitySummary.Empty;
+        WriteKeyValuePanel(
+            "Audit Data Quality",
+            ("Complete", dataQuality.CompleteWindows.ToString()),
+            ("Tolerated Gaps", dataQuality.EvaluatedWithToleratedGaps.ToString()),
+            ("Closed Market", dataQuality.ClosedMarketWindows.ToString()),
+            ("Abnormal Non-Tradeable", dataQuality.AbnormalNonTradeableWindows.ToString()),
+            ("Unsafe Gaps", dataQuality.UnsafeUnknownGapWindows.ToString()),
+            ("Insufficient Tail", dataQuality.InsufficientTailWindows.ToString()),
+            ("No Bars", dataQuality.NoBarsWindows.ToString()));
+
         WriteKeyValuePanel(
             "Decision Bias",
             ("Assessments", report.BiasSummary.AssessmentCount.ToString()),

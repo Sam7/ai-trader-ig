@@ -2,11 +2,12 @@ using Trading.Abstractions;
 
 namespace Trading.MarketData;
 
-public sealed class InMemoryMarketDataStore : IMarketDataStore
+public sealed class InMemoryMarketDataStore : IMarketDataStore, IMarketSessionEvidenceStore
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<(string Instrument, PriceResolution Resolution, DateTimeOffset TimestampUtc), StoredPriceBar> _bars = [];
     private readonly List<MarketDataCoverageRecord> _coverage = [];
+    private readonly List<MarketSessionStatusRecord> _sessionStatus = [];
 
     public async Task UpsertAsync(
         IReadOnlyList<StoredPriceBar> bars,
@@ -122,6 +123,72 @@ public sealed class InMemoryMarketDataStore : IMarketDataStore
                 && record.FromUtc == coverage.FromUtc
                 && record.ToUtc == coverage.ToUtc);
             _coverage.Add(coverage);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<MarketDataCoverageRecord>> GetCoverageAsync(
+        InstrumentId instrument,
+        PriceResolution resolution,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            return _coverage
+                .Where(record => string.Equals(record.Instrument.Value, instrument.Value, StringComparison.Ordinal)
+                    && record.Resolution == resolution
+                    && record.FromUtc < toUtc
+                    && record.ToUtc > fromUtc)
+                .OrderBy(record => record.FromUtc)
+                .ToArray();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task UpsertSessionStatusAsync(
+        MarketSessionStatusRecord status,
+        CancellationToken cancellationToken = default)
+    {
+        status.Validate();
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            _sessionStatus.RemoveAll(record =>
+                string.Equals(record.Instrument.Value, status.Instrument.Value, StringComparison.Ordinal)
+                && record.ObservedAtUtc == status.ObservedAtUtc);
+            _sessionStatus.Add(status);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<MarketSessionStatusRecord>> GetSessionStatusAsync(
+        InstrumentId instrument,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            return _sessionStatus
+                .Where(record => string.Equals(record.Instrument.Value, instrument.Value, StringComparison.Ordinal)
+                    && record.ObservedAtUtc < toUtc
+                    && record.ValidUntilUtc > fromUtc)
+                .OrderBy(record => record.ObservedAtUtc)
+                .ToArray();
         }
         finally
         {

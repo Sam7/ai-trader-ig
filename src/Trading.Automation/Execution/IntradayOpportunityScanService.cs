@@ -25,6 +25,7 @@ public sealed class IntradayOpportunityScanService
     private readonly IntradayOpportunityReviewer _intradayOpportunityReviewer;
     private readonly IntradayOpportunityPreparationWriter _preparationWriter;
     private readonly DecisionAuditWriter _decisionAuditWriter;
+    private readonly DailyPlanEnsureService _dailyPlanEnsureService;
     private readonly ITradingDayWorkflow _workflow;
     private readonly AutomationOptions _automationOptions;
     private readonly IReadOnlyDictionary<string, string> _instrumentNames;
@@ -37,6 +38,7 @@ public sealed class IntradayOpportunityScanService
         IntradayOpportunityReviewer intradayOpportunityReviewer,
         IntradayOpportunityPreparationWriter preparationWriter,
         DecisionAuditWriter decisionAuditWriter,
+        DailyPlanEnsureService dailyPlanEnsureService,
         ITradingDayWorkflow workflow,
         IOptions<AutomationOptions> automationOptions,
         IOptions<DailyBriefingOptions> dailyBriefingOptions,
@@ -48,6 +50,7 @@ public sealed class IntradayOpportunityScanService
         _intradayOpportunityReviewer = intradayOpportunityReviewer;
         _preparationWriter = preparationWriter;
         _decisionAuditWriter = decisionAuditWriter;
+        _dailyPlanEnsureService = dailyPlanEnsureService;
         _workflow = workflow;
         _automationOptions = automationOptions.Value;
         _instrumentNames = dailyBriefingOptions.Value.TrackedMarkets.ToDictionary(
@@ -99,6 +102,19 @@ public sealed class IntradayOpportunityScanService
         DateTimeOffset requestedAtUtc,
         CancellationToken cancellationToken = default)
     {
+        try
+        {
+            await _dailyPlanEnsureService.EnsureAsync(tradingDate, cancellationToken);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogError(
+                exception,
+                "Skipping intraday opportunity scan for {TradingDate}: daily plan could not be created.",
+                tradingDate);
+            return null;
+        }
+
         var prepared = await PrepareAsync(tradingDate, requestedAtUtc, cancellationToken);
         if (prepared is null)
         {

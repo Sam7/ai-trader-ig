@@ -5,7 +5,7 @@ using Trading.Abstractions;
 
 namespace Trading.MarketData;
 
-public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthStore
+public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthStore, IMarketDataSnapshotImporter, IMarketSessionEvidenceStore
 {
     private const long PriceScale = 100_000;
 
@@ -279,6 +279,130 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
         }
     }
 
+    public async Task<IReadOnlyList<MarketDataCoverageRecord>> GetCoverageAsync(
+        InstrumentId instrument,
+        PriceResolution resolution,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken);
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            return await ReadCoverageAsync(connection, instrument, resolution, fromUtc, toUtc, cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task UpsertSessionStatusAsync(
+        MarketSessionStatusRecord status,
+        CancellationToken cancellationToken = default)
+    {
+        status.Validate();
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken);
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            var instrumentIds = new Dictionary<string, long>(StringComparer.Ordinal);
+            var instrumentId = await GetOrCreateInstrumentIdAsync(
+                connection,
+                (SqliteTransaction)transaction,
+                status.Instrument.Value,
+                instrumentIds,
+                cancellationToken);
+
+            await using var command = connection.CreateCommand();
+            command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = """
+                INSERT INTO market_session_status (
+                    instrument_fk, observed_at_utc_ticks, valid_until_utc_ticks, status, source, message)
+                VALUES (
+                    $instrument_fk, $observed_at_utc_ticks, $valid_until_utc_ticks, $status, $source, $message)
+                ON CONFLICT(instrument_fk, observed_at_utc_ticks) DO UPDATE SET
+                    valid_until_utc_ticks = excluded.valid_until_utc_ticks,
+                    status = excluded.status,
+                    source = excluded.source,
+                    message = excluded.message;
+                """;
+            command.Parameters.AddWithValue("$instrument_fk", instrumentId);
+            command.Parameters.AddWithValue("$observed_at_utc_ticks", status.ObservedAtUtc.ToUniversalTime().UtcTicks);
+            command.Parameters.AddWithValue("$valid_until_utc_ticks", status.ValidUntilUtc.ToUniversalTime().UtcTicks);
+            command.Parameters.AddWithValue("$status", (int)status.Status);
+            command.Parameters.AddWithValue("$source", (int)status.Source);
+            command.Parameters.AddWithValue("$message", (object?)status.Message ?? DBNull.Value);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<IReadOnlyList<MarketSessionStatusRecord>> GetSessionStatusAsync(
+        InstrumentId instrument,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken);
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+
+            var instrumentId = await TryGetInstrumentIdAsync(connection, instrument.Value, cancellationToken);
+            if (instrumentId is null)
+            {
+                return [];
+            }
+
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT observed_at_utc_ticks, valid_until_utc_ticks, status, source, message
+                FROM market_session_status
+                WHERE instrument_fk = $instrument_fk
+                  AND observed_at_utc_ticks < $to_utc_ticks
+                  AND valid_until_utc_ticks > $from_utc_ticks
+                ORDER BY observed_at_utc_ticks ASC;
+                """;
+            command.Parameters.AddWithValue("$instrument_fk", instrumentId.Value);
+            command.Parameters.AddWithValue("$from_utc_ticks", fromUtc.ToUniversalTime().UtcTicks);
+            command.Parameters.AddWithValue("$to_utc_ticks", toUtc.ToUniversalTime().UtcTicks);
+
+            var results = new List<MarketSessionStatusRecord>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                results.Add(new MarketSessionStatusRecord(
+                    instrument,
+                    (MarketStatus)reader.GetInt32(2),
+                    FromDbTicks(reader.GetInt64(0)),
+                    FromDbTicks(reader.GetInt64(1)),
+                    (MarketSessionEvidenceSource)reader.GetInt32(3),
+                    reader.IsDBNull(4) ? null : reader.GetString(4)));
+            }
+
+            return results;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
     public async Task UpsertAsync(
         MarketDataHealthRecord health,
         CancellationToken cancellationToken = default)
@@ -376,6 +500,125 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
             return await reader.ReadAsync(cancellationToken)
                 ? ReadHealth(instrument, resolution, reader)
                 : null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public async Task<MarketDataSnapshotImportResult> ImportSnapshotAsync(
+        string snapshotPath,
+        CancellationToken cancellationToken = default)
+    {
+        var fullPath = Path.GetFullPath(snapshotPath);
+        if (!File.Exists(fullPath))
+        {
+            throw new FileNotFoundException("Market-data snapshot was not found.", fullPath);
+        }
+
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken);
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var attach = connection.CreateCommand();
+            attach.CommandText = "ATTACH DATABASE $snapshot_path AS snapshot;";
+            attach.Parameters.AddWithValue("$snapshot_path", fullPath);
+            await attach.ExecuteNonQueryAsync(cancellationToken);
+
+            try
+            {
+                await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+                await ExecuteNonQueryAsync(connection, (SqliteTransaction)transaction, """
+                    INSERT OR IGNORE INTO instruments (instrument_value)
+                    SELECT source.instrument_value
+                    FROM snapshot.instruments AS source;
+                    """, cancellationToken);
+
+                await using var import = connection.CreateCommand();
+                import.Transaction = (SqliteTransaction)transaction;
+                import.CommandText = """
+                    INSERT INTO price_bars (
+                        instrument_fk, resolution, bucket_start_utc_ticks, bid_open, bid_high, bid_low, bid_close,
+                        ask_open, ask_high, ask_low, ask_close, volume, is_final, source, first_seen_utc_ticks, last_seen_utc_ticks)
+                    SELECT
+                        destination_instrument.id,
+                        source_bar.resolution,
+                        source_bar.bucket_start_utc_ticks,
+                        source_bar.bid_open,
+                        source_bar.bid_high,
+                        source_bar.bid_low,
+                        source_bar.bid_close,
+                        source_bar.ask_open,
+                        source_bar.ask_high,
+                        source_bar.ask_low,
+                        source_bar.ask_close,
+                        source_bar.volume,
+                        source_bar.is_final,
+                        $cloud_source,
+                        source_bar.first_seen_utc_ticks,
+                        source_bar.last_seen_utc_ticks
+                    FROM snapshot.price_bars AS source_bar
+                    INNER JOIN snapshot.instruments AS source_instrument
+                        ON source_instrument.id = source_bar.instrument_fk
+                    INNER JOIN instruments AS destination_instrument
+                        ON destination_instrument.instrument_value = source_instrument.instrument_value
+                    WHERE source_bar.is_final = 1
+                    ON CONFLICT(instrument_fk, resolution, bucket_start_utc_ticks) DO UPDATE SET
+                        bid_open = excluded.bid_open,
+                        bid_high = excluded.bid_high,
+                        bid_low = excluded.bid_low,
+                        bid_close = excluded.bid_close,
+                        ask_open = excluded.ask_open,
+                        ask_high = excluded.ask_high,
+                        ask_low = excluded.ask_low,
+                        ask_close = excluded.ask_close,
+                        volume = excluded.volume,
+                        is_final = excluded.is_final,
+                        source = excluded.source,
+                        last_seen_utc_ticks = excluded.last_seen_utc_ticks
+                    WHERE price_bars.source <> $manual_source
+                      AND (
+                          price_bars.is_final = 0
+                          OR (
+                              excluded.last_seen_utc_ticks > price_bars.last_seen_utc_ticks
+                          )
+                          OR (
+                              excluded.last_seen_utc_ticks = price_bars.last_seen_utc_ticks
+                              AND price_bars.source NOT IN ($stream_source, $manual_source, $cloud_source)
+                          )
+                      );
+                    """;
+                import.Parameters.AddWithValue("$cloud_source", (int)MarketDataSource.CloudMirror);
+                import.Parameters.AddWithValue("$manual_source", (int)MarketDataSource.ManualImport);
+                import.Parameters.AddWithValue("$stream_source", (int)MarketDataSource.Stream);
+                await import.ExecuteNonQueryAsync(cancellationToken);
+
+                var finalCount = checked((int)await ExecuteScalarLongAsync(
+                    connection,
+                    (SqliteTransaction)transaction,
+                    "SELECT COUNT(*) FROM snapshot.price_bars WHERE is_final = 1;",
+                    cancellationToken));
+                var latestTicks = await ExecuteNullableScalarLongAsync(
+                    connection,
+                    (SqliteTransaction)transaction,
+                    "SELECT MAX(bucket_start_utc_ticks) FROM snapshot.price_bars WHERE is_final = 1;",
+                    cancellationToken);
+
+                await transaction.CommitAsync(cancellationToken);
+
+                return new MarketDataSnapshotImportResult(
+                    finalCount,
+                    latestTicks is null ? null : FromDbTicks(latestTicks.Value));
+            }
+            finally
+            {
+                await using var detach = connection.CreateCommand();
+                detach.CommandText = "DETACH DATABASE snapshot;";
+                await detach.ExecuteNonQueryAsync(cancellationToken);
+            }
         }
         finally
         {
@@ -494,6 +737,16 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
                 last_historical_repair_message TEXT NULL,
                 updated_at_utc_ticks INTEGER NOT NULL,
                 PRIMARY KEY (instrument_fk, resolution)
+            ) WITHOUT ROWID;
+
+            CREATE TABLE IF NOT EXISTS market_session_status (
+                instrument_fk INTEGER NOT NULL REFERENCES instruments(id),
+                observed_at_utc_ticks INTEGER NOT NULL,
+                valid_until_utc_ticks INTEGER NOT NULL,
+                status INTEGER NOT NULL,
+                source INTEGER NOT NULL,
+                message TEXT NULL,
+                PRIMARY KEY (instrument_fk, observed_at_utc_ticks)
             ) WITHOUT ROWID;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
@@ -751,6 +1004,32 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
         command.Transaction = transaction;
         command.CommandText = commandText;
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private static async Task<long> ExecuteScalarLongAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        string commandText,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = commandText;
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is null || result is DBNull ? 0 : Convert.ToInt64(result, CultureInfo.InvariantCulture);
+    }
+
+    private static async Task<long?> ExecuteNullableScalarLongAsync(
+        SqliteConnection connection,
+        SqliteTransaction? transaction,
+        string commandText,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.Transaction = transaction;
+        command.CommandText = commandText;
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is null || result is DBNull ? null : Convert.ToInt64(result, CultureInfo.InvariantCulture);
     }
 
     private static async Task<bool> TableExistsAsync(
@@ -1042,6 +1321,53 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
                 FromDbTicks(reader.GetInt64(0)),
                 FromDbTicks(reader.GetInt64(1)),
                 MarketDataCoverageStatus.NoBars,
+                FromDbTicks(reader.GetInt64(3)),
+                reader.IsDBNull(4) ? null : reader.GetString(4),
+                reader.IsDBNull(5) ? null : reader.GetString(5)));
+        }
+
+        return results;
+    }
+
+    private static async Task<IReadOnlyList<MarketDataCoverageRecord>> ReadCoverageAsync(
+        SqliteConnection connection,
+        InstrumentId instrument,
+        PriceResolution resolution,
+        DateTimeOffset fromUtc,
+        DateTimeOffset toUtc,
+        CancellationToken cancellationToken)
+    {
+        var instrumentId = await TryGetInstrumentIdAsync(connection, instrument.Value, cancellationToken);
+        if (instrumentId is null)
+        {
+            return [];
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT from_utc_ticks, to_utc_ticks, status, checked_at_utc_ticks, message, broker_error_code
+            FROM market_data_coverage
+            WHERE instrument_fk = $instrument_fk
+              AND resolution = $resolution
+              AND from_utc_ticks < $to_utc_ticks
+              AND to_utc_ticks > $from_utc_ticks
+            ORDER BY from_utc_ticks ASC;
+            """;
+        command.Parameters.AddWithValue("$instrument_fk", instrumentId.Value);
+        command.Parameters.AddWithValue("$resolution", (int)resolution);
+        command.Parameters.AddWithValue("$from_utc_ticks", fromUtc.ToUniversalTime().UtcTicks);
+        command.Parameters.AddWithValue("$to_utc_ticks", toUtc.ToUniversalTime().UtcTicks);
+
+        var results = new List<MarketDataCoverageRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            results.Add(new MarketDataCoverageRecord(
+                instrument,
+                resolution,
+                FromDbTicks(reader.GetInt64(0)),
+                FromDbTicks(reader.GetInt64(1)),
+                (MarketDataCoverageStatus)reader.GetInt32(2),
                 FromDbTicks(reader.GetInt64(3)),
                 reader.IsDBNull(4) ? null : reader.GetString(4),
                 reader.IsDBNull(5) ? null : reader.GetString(5)));

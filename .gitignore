@@ -215,6 +215,9 @@ appsettings.local.json
 appsettings.*.local.json
 appsettings.verification.json
 tracked-markets.verification.json
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Local Pulumi stack configuration
 Pulumi.*.yaml

@@ -52,7 +52,7 @@ public sealed class MarketDataService
         var backfilledBarCount = 0;
         var attemptedBackfill = false;
 
-        if (missing.Count > 0 && request.AllowBackfill && _options.BackfillEnabled)
+        if (missing.Count > 0 && request.AllowBackfill && _options.BackfillEnabled && !_options.CloudSnapshot.Mirror.Enabled)
         {
             foreach (var gap in missing)
             {

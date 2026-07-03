@@ -150,6 +150,33 @@ public sealed class MarketDataServiceTests
         gateway.PriceRequests.Should().BeEmpty();
     }
 
+    [Fact]
+    public async Task GetBarsAsync_WithCloudMirrorEnabled_ShouldNotAutomaticallyBackfillFromBroker()
+    {
+        var gateway = new FakeTradingGateway();
+        var service = CreateService(
+            new InMemoryMarketDataStore(),
+            gateway,
+            new MarketDataOptions
+            {
+                BackfillEnabled = true,
+                CloudSnapshot = new MarketDataCloudSnapshotOptions
+                {
+                    Mirror = new MarketDataSnapshotMirrorOptions { Enabled = true },
+                },
+            });
+
+        var result = await service.GetBarsAsync(new MarketDataRequest(
+            new InstrumentId("CS.D.BITCOIN.CFD.IP"),
+            PriceResolution.FiveMinutes,
+            DateTimeOffset.Parse("2026-06-29T00:00:00Z"),
+            DateTimeOffset.Parse("2026-06-29T00:05:00Z")));
+
+        result.Status.Should().Be(MarketDataStatus.Partial);
+        result.Source.Should().Be(MarketDataResultSource.None);
+        gateway.PriceRequests.Should().BeEmpty();
+    }
+
     private static MarketDataService CreateService(IMarketDataStore store, FakeTradingGateway gateway)
         => CreateService(store, gateway, new MarketDataOptions());
 

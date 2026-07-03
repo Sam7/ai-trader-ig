@@ -9,8 +9,10 @@ public sealed class MarketDataCollector : IMarketDataCollector
     private readonly IMarketDataStreamClient _streamClient;
     private readonly IMarketDataStore _store;
     private readonly IMarketDataHealthStore _healthStore;
+    private readonly IMarketSessionEvidenceStore _sessionEvidenceStore;
     private readonly ITradingGateway _tradingGateway;
     private readonly IMarketDataClock _clock;
+    private readonly MarketDataOptions _marketDataOptions;
     private readonly MarketDataCollectorOptions _options;
     private readonly ILogger<MarketDataCollector> _logger;
     private ITradingSession? _session;
@@ -19,16 +21,20 @@ public sealed class MarketDataCollector : IMarketDataCollector
         IMarketDataStreamClient streamClient,
         IMarketDataStore store,
         IMarketDataHealthStore healthStore,
+        IMarketSessionEvidenceStore sessionEvidenceStore,
         ITradingGateway tradingGateway,
         IMarketDataClock clock,
+        IOptions<MarketDataOptions> marketDataOptions,
         IOptions<MarketDataCollectorOptions> options,
         ILogger<MarketDataCollector> logger)
     {
         _streamClient = streamClient;
         _store = store;
         _healthStore = healthStore;
+        _sessionEvidenceStore = sessionEvidenceStore;
         _tradingGateway = tradingGateway;
         _clock = clock;
+        _marketDataOptions = marketDataOptions.Value;
         _options = options.Value;
         _logger = logger;
     }
@@ -59,9 +65,25 @@ public sealed class MarketDataCollector : IMarketDataCollector
                 cancellationToken: cancellationToken);
         }
 
-        foreach (var instrument in instruments)
+        if (_marketDataOptions.CloudSnapshot.Mirror.Enabled)
         {
-            await RepairMissingCompletedCandlesAsync(instrument, resolution, cancellationToken);
+            _logger.LogInformation("Skipping automatic historical market-data repair because cloud mirror mode is enabled.");
+            foreach (var instrument in instruments)
+            {
+                await UpsertHealthAsync(
+                    instrument,
+                    resolution,
+                    MarketDataConnectionState.Connected,
+                    repairState: MarketDataRepairState.Idle,
+                    cancellationToken: cancellationToken);
+            }
+        }
+        else
+        {
+            foreach (var instrument in instruments)
+            {
+                await RepairMissingCompletedCandlesAsync(instrument, resolution, cancellationToken);
+            }
         }
 
         if (duration is null)
@@ -146,6 +168,7 @@ public sealed class MarketDataCollector : IMarketDataCollector
             try
             {
                 await EnsureAuthenticatedAsync(cancellationToken);
+                await RecordCurrentSessionStatusAsync(instrument, resolution, cancellationToken);
                 var series = await _tradingGateway.GetPricesAsync(
                     new GetPricesRequest(instrument, resolution, FromUtc: gap.FromUtc, ToUtc: gap.ToUtc),
                     cancellationToken);
@@ -244,6 +267,35 @@ public sealed class MarketDataCollector : IMarketDataCollector
     private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken)
     {
         _session ??= await _tradingGateway.AuthenticateAsync(cancellationToken);
+    }
+
+    private async Task RecordCurrentSessionStatusAsync(
+        InstrumentId instrument,
+        PriceResolution resolution,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var market = await _tradingGateway.GetMarketDetailsAsync(instrument, cancellationToken);
+            var observedAtUtc = _clock.UtcNow;
+            var interval = PriceResolutionIntervals.ToTimeSpan(resolution);
+            await _sessionEvidenceStore.UpsertSessionStatusAsync(
+                new MarketSessionStatusRecord(
+                    instrument,
+                    market.Status,
+                    observedAtUtc,
+                    observedAtUtc.Add(interval + interval),
+                    MarketSessionEvidenceSource.BrokerSnapshot,
+                    $"IG market status snapshot: {market.Status}."),
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is TradingGatewayException or NotSupportedException)
+        {
+            _logger.LogDebug(
+                exception,
+                "Could not record broker session status for {Instrument} while repairing market data.",
+                instrument);
+        }
     }
 
     private async Task RecordCoverageAsync(

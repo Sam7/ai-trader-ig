@@ -131,6 +131,12 @@ public sealed class TradingCliApplication
         configurator.AddBranch("marketdata", marketData =>
         {
             marketData.AddCommand<CollectMarketDataCommand>("collect");
+            marketData.AddCommand<BackfillMarketDataCommand>("backfill");
+            marketData.AddBranch("mirror", mirror =>
+            {
+                mirror.AddCommand<SyncMarketDataMirrorCommand>("sync");
+                mirror.AddCommand<ShowMarketDataMirrorStatusCommand>("status");
+            });
         });
 
         configurator.AddBranch("orders", orders =>
@@ -140,7 +146,7 @@ public sealed class TradingCliApplication
         });
 
         configurator.AddExample(["auth"]);
-        configurator.AddExample(["automation", "run", "--duration", "08:00:00"]);
+        configurator.AddExample(["automation", "run", "--duration", "08:00:00", "--root", "Logs\\Observability\\long-run", "--instruments", "CC.D.CL.UMA.IP,CS.D.CFAGOLD.CFA.IP"]);
         configurator.AddExample(["automation", "brief", "research", "--date", "2026-03-12"]);
         configurator.AddExample(["automation", "brief", "plan", "--date", "2026-03-12"]);
         configurator.AddExample(["automation", "brief", "convert", "--date", "2026-03-12", "--input", "Logs\\Observability\\2026-03-12\\002044798-daily-brief-research.md"]);
@@ -156,6 +162,9 @@ public sealed class TradingCliApplication
         configurator.AddExample(["markets", "chart", "--instrument", "CC.D.VIX.UMA.IP", "--resolution", "hour", "--max", "50", "--output", "artifacts\\vix-chart.png", "--style", "candlestick", "--sma", "20,50", "--bollinger", "20"]);
         configurator.AddExample(["marketdata", "collect", "--instruments", "CS.D.BITCOIN.CFD.IP"]);
         configurator.AddExample(["marketdata", "collect", "--instruments", "CS.D.BITCOIN.CFD.IP", "--duration", "60:00:00"]);
+        configurator.AddExample(["marketdata", "mirror", "sync"]);
+        configurator.AddExample(["marketdata", "mirror", "status"]);
+        configurator.AddExample(["marketdata", "backfill", "--instrument", "CS.D.BITCOIN.CFD.IP", "--resolution", "5minute", "--from", "2026-06-29T00:00:00Z", "--to", "2026-06-29T01:00:00Z"]);
         configurator.AddExample(["positions", "list"]);
         configurator.AddExample(["positions", "update", "--deal-id", "DIAAAAAAA", "--stop-level", "1", "--limit-level", "100"]);
         configurator.AddExample(["positions", "close", "--deal-id", "DIAAAAAAA"]);

@@ -29,6 +29,9 @@ public static class CliServiceCollectionExtensions
         services.AddTransient<ShowPricesCommand>();
         services.AddTransient<RenderMarketChartCommand>();
         services.AddTransient<CollectMarketDataCommand>();
+        services.AddTransient<SyncMarketDataMirrorCommand>();
+        services.AddTransient<ShowMarketDataMirrorStatusCommand>();
+        services.AddTransient<BackfillMarketDataCommand>();
         services.AddTransient<ListOrdersCommand>();
         services.AddTransient<ShowOrderStatusCommand>();
 

@@ -10,5 +10,7 @@ public sealed class DailyBriefingOptions
 
     public string DefaultTimezone { get; init; } = "Australia/Melbourne";
 
-    public TrackedMarketOptions[] TrackedMarkets { get; init; } = [];
+    public string[] TrackedMarketInstrumentFilter { get; set; } = [];
+
+    public TrackedMarketOptions[] TrackedMarkets { get; set; } = [];
 }

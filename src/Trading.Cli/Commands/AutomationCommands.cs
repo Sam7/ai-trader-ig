@@ -22,7 +22,7 @@ public sealed class AutomationRunCommand : AsyncCommand<AutomationRunSettings>
 
     public override async Task<int> ExecuteAsync(CommandContext context, AutomationRunSettings settings, CancellationToken cancellationToken)
     {
-        await _runtime.RunAsync(settings.ResolveDuration(), cancellationToken);
+        await _runtime.RunAsync(settings.ResolveDuration(), settings.ResolveInstruments(), settings.Root, cancellationToken);
         return 0;
     }
 }
@@ -35,11 +35,38 @@ public sealed class AutomationRunSettings : CommandSettings
     [Description("Optional duration. Omit to run until cancelled. HH:mm:ss values support hours greater than 23.")]
     public string? Duration { get; init; }
 
+    [CommandOption("--instruments <EPICS>")]
+    [Description("Optional comma-separated EPIC filter. When set, automation runs only for these configured tracked markets.")]
+    public string? Instruments { get; init; }
+
+    [CommandOption("--root <PATH>")]
+    [Description("Optional prompt/evidence root path for automation artifacts.")]
+    public string? Root { get; init; }
+
     public override ValidationResult Validate()
     {
         if (!CollectMarketDataSettings.TryParseDuration(Duration, out var parsedDuration))
         {
             return ValidationResult.Error("Option --duration must be a valid TimeSpan.");
+        }
+
+        if (Instruments is not null)
+        {
+            var instruments = ResolveInstruments();
+            if (instruments.Count == 0)
+            {
+                return ValidationResult.Error("Option --instruments must include at least one EPIC.");
+            }
+
+            if (instruments.Any(instrument => instrument.Any(char.IsWhiteSpace)))
+            {
+                return ValidationResult.Error("Option --instruments must contain comma-separated EPICs without whitespace.");
+            }
+        }
+
+        if (Root is not null && string.IsNullOrWhiteSpace(Root))
+        {
+            return ValidationResult.Error("Option --root must not be empty.");
         }
 
         if (parsedDuration is null)
@@ -59,6 +86,11 @@ public sealed class AutomationRunSettings : CommandSettings
 
     public TimeSpan? ResolveDuration()
         => CollectMarketDataSettings.ParseDuration(Duration);
+
+    public IReadOnlyList<string> ResolveInstruments()
+        => string.IsNullOrWhiteSpace(Instruments)
+            ? []
+            : Instruments.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
 }
 
 [Description("Generate the research markdown brief for a trading date.")]
@@ -257,7 +289,11 @@ public sealed class AutomationAuditEvaluateCommand : AsyncCommand<AutomationAudi
             new DecisionAuditEvaluationRequest(
                 settings.Root,
                 settings.ResolveTradingDate(),
-                CliParsing.ParsePriceResolution(settings.Resolution)),
+                CliParsing.ParsePriceResolution(settings.Resolution),
+                settings.StrictData,
+                settings.MaxAssessmentMissingBars,
+                settings.MaxAssessmentConsecutiveMissingBars,
+                settings.MaxAssessmentMissingRatio),
             cancellationToken);
         _renderer.WriteDecisionAuditEvaluation(report);
         return 0;
@@ -381,6 +417,22 @@ public sealed class AutomationAuditEvaluateSettings : CommandSettings
     [CommandOption("--resolution <RESOLUTION>")]
     public string Resolution { get; init; } = "5minute";
 
+    [CommandOption("--strict-data")]
+    [Description("Require every expected final bar in each audit outcome window.")]
+    public bool StrictData { get; init; }
+
+    [CommandOption("--max-assessment-missing-bars <COUNT>")]
+    [Description("Maximum small interior missing bars tolerated for market assessment outcomes.")]
+    public int MaxAssessmentMissingBars { get; init; } = 1;
+
+    [CommandOption("--max-assessment-consecutive-missing-bars <COUNT>")]
+    [Description("Maximum consecutive interior missing bars tolerated for market assessment outcomes.")]
+    public int MaxAssessmentConsecutiveMissingBars { get; init; } = 1;
+
+    [CommandOption("--max-assessment-missing-ratio <RATIO>")]
+    [Description("Maximum interior missing-bar ratio tolerated for market assessment outcomes.")]
+    public decimal MaxAssessmentMissingRatio { get; init; } = 0.10m;
+
     public override ValidationResult Validate()
     {
         if (string.IsNullOrWhiteSpace(Root))
@@ -398,9 +450,24 @@ public sealed class AutomationAuditEvaluateSettings : CommandSettings
             return ValidationResult.Error("Option --date must be in yyyy-MM-dd format.");
         }
 
-        return CliParsing.IsValidPriceResolution(Resolution)
+        if (!CliParsing.IsValidPriceResolution(Resolution))
+        {
+            return ValidationResult.Error("Option --resolution is not supported.");
+        }
+
+        if (MaxAssessmentMissingBars < 0)
+        {
+            return ValidationResult.Error("Option --max-assessment-missing-bars must be zero or greater.");
+        }
+
+        if (MaxAssessmentConsecutiveMissingBars < 0)
+        {
+            return ValidationResult.Error("Option --max-assessment-consecutive-missing-bars must be zero or greater.");
+        }
+
+        return MaxAssessmentMissingRatio >= 0m && MaxAssessmentMissingRatio <= 1m
             ? ValidationResult.Success()
-            : ValidationResult.Error("Option --resolution is not supported.");
+            : ValidationResult.Error("Option --max-assessment-missing-ratio must be between 0 and 1.");
     }
 
     public DateOnly? ResolveTradingDate()

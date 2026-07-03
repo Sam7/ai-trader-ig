@@ -143,3 +143,145 @@ public sealed class CollectMarketDataSettings : CommandSettings
         return false;
     }
 }
+
+[Description("Download and import the latest configured cloud market-data snapshot once.")]
+public sealed class SyncMarketDataMirrorCommand : AsyncCommand
+{
+    private readonly MarketDataSnapshotSynchronizer _synchronizer;
+    private readonly IAnsiConsole _console;
+
+    public SyncMarketDataMirrorCommand(MarketDataSnapshotSynchronizer synchronizer, IAnsiConsole console)
+    {
+        _synchronizer = synchronizer;
+        _console = console;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        var result = await _synchronizer.SynchronizeOnceAsync(cancellationToken);
+        _console.MarkupLine($"Market-data mirror sync: [cyan]{result.Status}[/] - {Markup.Escape(result.Message)}");
+        if (result.LatestBarUtc is not null)
+        {
+            _console.MarkupLine($"Latest mirrored bar: [cyan]{result.LatestBarUtc:O}[/]");
+        }
+
+        if (!string.IsNullOrWhiteSpace(result.LocalSnapshotPath))
+        {
+            _console.MarkupLine($"Snapshot: [grey]{Markup.Escape(result.LocalSnapshotPath)}[/]");
+        }
+
+        return result.Status == MarketDataSnapshotRefreshStatus.Failed
+            ? 2
+            : 0;
+    }
+}
+
+[Description("Show local cloud market-data mirror status.")]
+public sealed class ShowMarketDataMirrorStatusCommand : AsyncCommand
+{
+    private readonly MarketDataMirrorStatusService _statusService;
+    private readonly IAnsiConsole _console;
+
+    public ShowMarketDataMirrorStatusCommand(MarketDataMirrorStatusService statusService, IAnsiConsole console)
+    {
+        _statusService = statusService;
+        _console = console;
+    }
+
+    public override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        var status = await _statusService.GetStatusAsync(cancellationToken);
+        var table = new Table().Title("Market Data Mirror");
+        table.AddColumn("Field");
+        table.AddColumn("Value");
+        table.AddRow("Enabled", status.Enabled.ToString());
+        table.AddRow("Configured", status.IsConfigured.ToString());
+        table.AddRow("Stale", status.IsStale.ToString());
+        table.AddRow("Last Attempt UTC", status.LastAttemptUtc?.ToString("O") ?? "-");
+        table.AddRow("Last Success UTC", status.LastSuccessfulSyncUtc?.ToString("O") ?? "-");
+        table.AddRow("Latest Bar UTC", status.LatestBarUtc?.ToString("O") ?? "-");
+        table.AddRow("Remote Generation", status.RemoteGeneration ?? "-");
+        table.AddRow("Remote SHA-256", status.RemoteSha256 ?? "-");
+        table.AddRow("Snapshot", status.LocalSnapshotPath ?? "-");
+        table.AddRow("Last Status", status.LastStatus.ToString());
+        table.AddRow("Message", status.LastMessage ?? "-");
+        _console.Write(table);
+        return status.Enabled && (!status.IsConfigured || status.IsStale)
+            ? 2
+            : 0;
+    }
+}
+
+[Description("Explicitly backfill historical market data from IG REST.")]
+public sealed class BackfillMarketDataCommand : AsyncCommand<BackfillMarketDataSettings>
+{
+    private readonly MarketDataHistoricalBackfillService _backfill;
+    private readonly IAnsiConsole _console;
+
+    public BackfillMarketDataCommand(MarketDataHistoricalBackfillService backfill, IAnsiConsole console)
+    {
+        _backfill = backfill;
+        _console = console;
+    }
+
+    public override async Task<int> ExecuteAsync(
+        CommandContext context,
+        BackfillMarketDataSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var count = await _backfill.BackfillAsync(
+            new InstrumentId(settings.Instrument),
+            CliParsing.ParsePriceResolution(settings.Resolution),
+            settings.From!.Value,
+            settings.To!.Value,
+            cancellationToken);
+
+        _console.MarkupLine($"Backfilled [cyan]{count}[/] historical bar(s) from IG REST.");
+        return 0;
+    }
+}
+
+public sealed class BackfillMarketDataSettings : CommandSettings
+{
+    [CommandOption("-i|--instrument <EPIC>")]
+    public string Instrument { get; init; } = string.Empty;
+
+    [CommandOption("--resolution <VALUE>")]
+    public string Resolution { get; init; } = string.Empty;
+
+    [CommandOption("--from <ISO-8601>")]
+    public DateTimeOffset? From { get; init; }
+
+    [CommandOption("--to <ISO-8601>")]
+    public DateTimeOffset? To { get; init; }
+
+    public override ValidationResult Validate()
+    {
+        if (string.IsNullOrWhiteSpace(Instrument))
+        {
+            return ValidationResult.Error("Missing required option --instrument.");
+        }
+
+        if (Instrument.Any(char.IsWhiteSpace))
+        {
+            return ValidationResult.Error("Option --instrument must be a single EPIC without whitespace.");
+        }
+
+        if (!CliParsing.IsValidPriceResolution(Resolution))
+        {
+            return ValidationResult.Error("Option --resolution is required and must be supported.");
+        }
+
+        if (From is null || To is null)
+        {
+            return ValidationResult.Error("Options --from and --to are required.");
+        }
+
+        if (From >= To)
+        {
+            return ValidationResult.Error("Option --from must be earlier than --to.");
+        }
+
+        return ValidationResult.Success();
+    }
+}
