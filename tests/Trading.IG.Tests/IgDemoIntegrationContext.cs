@@ -194,7 +194,7 @@ internal sealed class IgDemoIntegrationContext : IAsyncDisposable
             }
 
             lastOrders = orders;
-            await Task.Delay(TimeSpan.FromSeconds(1));
+            await Task.Delay(TimeSpan.FromSeconds(5));
         }
 
         throw new TimeoutException($"No matching order activity was returned within {timeout}. Last order count: {lastOrders.Count}.");

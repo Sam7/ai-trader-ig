@@ -12,7 +12,25 @@ public sealed record CreatePositionRequest(
     [property: JsonPropertyName("timeInForce")] string TimeInForce,
     [property: JsonPropertyName("forceOpen")] bool ForceOpen,
     [property: JsonPropertyName("guaranteedStop")] bool GuaranteedStop,
-    [property: JsonPropertyName("dealReference")] string DealReference);
+    [property: JsonPropertyName("dealReference")] string DealReference,
+    [property: JsonPropertyName("stopLevel")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    decimal? StopLevel = null,
+    [property: JsonPropertyName("stopDistance")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    decimal? StopDistance = null,
+    [property: JsonPropertyName("limitLevel")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    decimal? LimitLevel = null,
+    [property: JsonPropertyName("limitDistance")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    decimal? LimitDistance = null,
+    [property: JsonPropertyName("trailingStop")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    bool? TrailingStop = null,
+    [property: JsonPropertyName("trailingStopIncrement")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    decimal? TrailingStopIncrement = null);
 
 public sealed record CreatePositionResponse(
     [property: JsonPropertyName("dealReference")] string DealReference);

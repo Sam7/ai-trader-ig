@@ -95,6 +95,10 @@ public class IgTradingGatewayTests
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.DealReference.Should().MatchRegex("^[A-Z0-9]{1,30}$");
+        capturedRequest.StopLevel.Should().BeNull();
+        capturedRequest.LimitLevel.Should().BeNull();
+        capturedRequest.StopDistance.Should().BeNull();
+        capturedRequest.LimitDistance.Should().BeNull();
     }
 
     [Fact]
