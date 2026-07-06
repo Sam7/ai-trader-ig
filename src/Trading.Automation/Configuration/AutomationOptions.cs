@@ -15,4 +15,6 @@ public sealed class AutomationOptions
     public string JobName { get; init; } = DailyBriefingConstants.JobName;
 
     public IntradayOpportunityScanOptions IntradayOpportunities { get; init; } = new();
+
+    public ExecutionOptions Execution { get; init; } = new();
 }

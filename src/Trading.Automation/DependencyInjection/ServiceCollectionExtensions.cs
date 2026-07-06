@@ -24,6 +24,11 @@ public static class ServiceCollectionExtensions
         services.AddTradingAi(configuration);
         services.AddTradingMarketData(configuration);
         services.AddTradingStrategyCore();
+        services.AddSingleton(sp =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AutomationOptions>>().Value;
+            return options.Execution.CreateShadowDecisionPolicy(options.Timezone);
+        });
 
         services.AddSingleton<SystemTradingClock>();
         services.AddSingleton<ITradingClock>(sp => sp.GetRequiredService<SystemTradingClock>());

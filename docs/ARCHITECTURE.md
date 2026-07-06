@@ -84,12 +84,12 @@ Throughout the day, the system looks for actionable setups on the watched market
 * **AI Review:** If escalated, the `IntradayOpportunityScanService` retrieves the recent `PriceSeries`, renders a PNG chart, and asks the AI to review the opportunity against the Daily Plan context.
 * **Output:** The AI returns a JSON array of `CandidateOpportunities`, suggesting a Direction, Entry Method (Market/Limit/Stop), Stop Loss, and Take Profit.
 
-**3. Mechanical Risk Gating (The Final Guard)**
-The AI proposes trades, but **the system makes the final mechanical decision**.
+**3. Shadow Execution Decision (The First Execution Bridge)**
+The AI proposes trades, but **the system makes the final deterministic phase-one decision** before any future broker execution path can use the candidate.
 
-* **Action:** The `OpportunityReviewer` intercepts the AI's candidate.
-* **Mechanism:** It validates the math (e.g., ensuring a Buy order has a Stop below the Entry and a Target above the Entry). It evaluates strict rules: Does the setup meet the `MinimumRewardRiskRatio`? Is the `MaxSpread` exceeded? Is a high-impact calendar event too close?.
-* **Sizing:** If approved, the `PositionSizer` uses the account equity and the `RiskPerTradeFraction` to calculate the exact trade quantity.
+* **Action:** The intraday opportunity workflow evaluates each AI candidate against `Automation:Execution` policy.
+* **Mechanism:** It validates watchlist membership, expiry, quote freshness, price geometry, independently recalculated reward/risk, spread/risk, execution price movement, score threshold, supported instrument, supported entry method, duplicate decisions, trading-date interpretation, and high-impact event windows.
+* **Intent:** If approved in `Shadow` mode, the system records an execution-ready intent with entry, stop, target, expiry, quantity policy, decision id, source audit id, rules, and context. It does not submit orders to IG in phase one.
 
 ---
 
@@ -110,7 +110,7 @@ To understand the architecture, you must understand how data flows through the b
 
 * **Trading Day State is Volatile:** The daily plan and current execution state (pending trades, active trades) are stored in memory via `InMemoryTradingDayStore`. If the worker restarts, the next full intraday scan lazily recreates today's plan before analysis continues. Do not attempt to persist this to a database without an architectural review.
 * **Market Data is Durable:** Price bars, gap tracking, and stream accumulation are strictly persisted to `ig-market-data.sqlite` using Write-Ahead Logging (WAL).
-* **Decision Audits are Immutable:** Every LLM prompt, context, chart, and extracted JSON must be saved to disk under the `Logs/Observability` folder to ensure the AI's reasoning is 100% auditable and reproducible.
+* **Decision Audits are Immutable:** Every LLM prompt, context, chart, extracted JSON, shadow decision, and selected execution-ready intent must be saved to disk under the `Logs/Observability` folder so each automated trading decision can be reconstructed.
 
 ---
 

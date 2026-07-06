@@ -71,7 +71,7 @@ The solution strictly enforces separation of concerns to keep the business logic
 * **`Trading.Abstractions`**: The core domain. Contains zero implementation logic. Defines things like `ITradingGateway`, `PriceSeries`, and `OrderStatus`.
 * **`Ig.Trading.Sdk`**: An isolated, Refit-based SDK for IG's REST API. Manages session tokens (`CST`, `X-SECURITY-TOKEN`), handles RSA encrypted passwords, and maps DTOs.
 * **`Trading.IG`**: The Adapter. Implements `ITradingGateway` using the SDK, translates IG HTTP errors into domain `TradingGatewayException`s, and orchestrates order status lookups.
-* **`Trading.Strategy`**: The workflow orchestrator. Models the daily briefing, intraday opportunity reviews, and risk gating (e.g., position sizing based on risk rules).
+* **`Trading.Strategy`**: The workflow orchestrator. Models the daily briefing, intraday opportunity reviews, deterministic shadow decisions, and broker-neutral execution-ready intents.
 * **`Trading.AI`**: The LLM interaction layer. Manages prompts via `PromptRegistry` and enforces strict JSON schema output via `Microsoft.Extensions.AI`.
 * **`Trading.MarketData`**: Manages price data ingestion, historical backfilling, SQLite persistence, and GCS-backed market-data snapshots.
 * **`Trading.Charting`**: Generates broker-neutral price chart images (PNG) using `ScottPlot`.
@@ -157,7 +157,7 @@ The trading strategy is executed in two main automated phases, orchestrated by `
 2. **Intraday Scan**: Runs on a cron schedule (e.g., every 15 minutes).
 * **Attention Filter**: Quickly filters out noise (e.g., spread too wide, or no price volatility) without calling OpenAI.
 * **AI Review**: Uses `IntradayOpportunityReviewer` to analyze ScottPlot PNG charts and the Daily Plan to find entry, stop, and target prices.
-* **Guards**: Validates the math (e.g., Reward/Risk > minimum threshold) and calculates exact position sizes via the `PositionSizer`.
+* **Shadow Decisions**: The system independently validates AI candidates, recalculates reward/risk, checks configured phase-one execution rules, and records whether each candidate would be rejected, unsupported, already processed, or approved as a shadow execution intent. Shadow mode never writes to IG.
 
 
 
@@ -171,7 +171,7 @@ If the LLM misbehaves, you edit the embedded Markdown files located at `Trading.
 
 * **Observability Dumps**: The system drops everything into the `Logs/Observability/<Date>` directory. You will find the exact rendered text prompts, the PNG charts sent to the vision model, raw OpenAI responses, and extracted JSONs.
 * **CLI Evidence Root**: `automation run --root <PATH>` overrides the prompt/evidence root for that run. Use this to keep long-run evidence in a dedicated subfolder.
-* **Decision Audits**: AI trade setups are saved as `DecisionAuditRecord`s. The `DecisionAuditEvaluationService` tests these records against actual market data (paper trading) to calculate true R-multiples and outcome statuses (Target Hit, Stopped Out).
+* **Decision Audits**: AI trade setups are saved as `DecisionAuditRecord`s with prompt references, paper-evaluation fields, and phase-one shadow decision evidence. The audit records show rejected/unsupported/duplicate candidates, any selected execution-ready intent, and later paper-trading outcomes.
 
 ---
 

@@ -316,6 +316,7 @@ public sealed class DecisionAuditEvaluationServiceTests
         candidates ??= [candidate];
 
         return new DecisionAuditRecord(
+            "2026-03-12/100000000-decision-audit",
             new DateOnly(2026, 3, 12),
             DateTimeOffset.Parse("2026-03-12T10:00:00Z"),
             DateTimeOffset.Parse("2026-03-12T10:01:00Z"),
@@ -332,6 +333,10 @@ public sealed class DecisionAuditEvaluationServiceTests
                 "completed"),
             assessments,
             candidates,
+            TradingExecutionMode.Disabled,
+            [],
+            null,
+            new IntradayCandidateDecisionSummary(candidates.Count, 0, candidates.Count, 0, 0),
             [],
             [],
             DecisionBiasSummary.From(assessments, candidates));

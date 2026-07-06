@@ -6,8 +6,12 @@ public sealed record IntradayOpportunityBatch(
     DateTimeOffset LookbackStartUtc,
     DateTimeOffset LookbackEndUtc,
     IReadOnlyList<IntradayMarketAssessment> MarketAssessments,
-    IReadOnlyList<IntradayOpportunityCandidate> CandidateOpportunities)
+    IReadOnlyList<IntradayOpportunityCandidate> CandidateOpportunities,
+    IReadOnlyList<IntradayMarketQuote>? MarketQuotes = null,
+    string SourceDecisionAuditId = "")
 {
+    public IReadOnlyList<IntradayMarketQuote> Quotes => MarketQuotes ?? [];
+
     public void Validate(int maxCandidatesPerRun)
     {
         if (MarketAssessments.Count == 0)

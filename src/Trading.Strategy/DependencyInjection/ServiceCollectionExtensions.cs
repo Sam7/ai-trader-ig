@@ -22,9 +22,11 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton(rules);
         services.TryAddSingleton<ITradingDayStore, InMemoryTradingDayStore>();
+        services.TryAddSingleton(ShadowDecisionPolicy.Disabled());
         services.AddSingleton<PositionSizer>();
         services.AddSingleton<BreakEvenStopRule>();
         services.AddTransient<TradingDayPlanner>();
+        services.AddTransient<IntradayCandidateDecisionService>();
         services.AddTransient<IntradayOpportunityReviewService>();
         services.AddTransient<MarketAttentionService>();
         services.AddTransient<OpportunityReviewer>();

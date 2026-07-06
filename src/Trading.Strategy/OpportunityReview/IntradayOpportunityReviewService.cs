@@ -7,10 +7,14 @@ namespace Trading.Strategy.OpportunityReview;
 public sealed class IntradayOpportunityReviewService
 {
     private readonly ITradingDayStore _tradingDayStore;
+    private readonly IntradayCandidateDecisionService _candidateDecisionService;
 
-    public IntradayOpportunityReviewService(ITradingDayStore tradingDayStore)
+    public IntradayOpportunityReviewService(
+        ITradingDayStore tradingDayStore,
+        IntradayCandidateDecisionService candidateDecisionService)
     {
         _tradingDayStore = tradingDayStore;
+        _candidateDecisionService = candidateDecisionService;
     }
 
     public async Task<IntradayOpportunityReviewResult> ReviewAsync(
@@ -34,22 +38,37 @@ public sealed class IntradayOpportunityReviewService
             }
         }
 
-        foreach (var candidate in batch.CandidateOpportunities)
+        var decisionReview = _candidateDecisionService.Review(record, batch);
+        if (decisionReview.SelectedShadowIntent is { } selectedIntent)
         {
-            if (!watchedMarkets.ContainsKey(candidate.Instrument))
-            {
-                throw new InvalidOperationException(
-                    $"Intraday opportunity instrument '{candidate.Instrument}' is not on the watch list for {batch.TradingDate:yyyy-MM-dd}.");
-            }
+            await _tradingDayStore.SaveAsync(record.MarkShadowDecisionHandled(selectedIntent.DecisionId), cancellationToken);
         }
 
-        // TODO: Introduce deterministic decision logic that decides whether to ignore, queue, or execute any returned opportunity.
         return new IntradayOpportunityReviewResult(
             batch.TradingDate,
             batch.MarketAssessments,
             batch.CandidateOpportunities,
+            decisionReview.ExecutionMode,
+            decisionReview.Decisions,
+            decisionReview.SelectedShadowIntent,
+            decisionReview.Summary,
             batch.ReviewedAtUtc,
-            "Validated intraday opportunity batch. Decision logic pending.");
+            FormatOutcome(decisionReview));
+    }
+
+    private static string FormatOutcome(IntradayCandidateDecisionReview decisionReview)
+    {
+        if (decisionReview.ExecutionMode == TradingExecutionMode.Disabled)
+        {
+            return "Validated intraday opportunity batch. Execution mode is Disabled; no shadow intent was approved.";
+        }
+
+        if (decisionReview.SelectedShadowIntent is null)
+        {
+            return "Validated intraday opportunity batch. No candidate was approved for shadow execution.";
+        }
+
+        return $"Validated intraday opportunity batch. Selected shadow intent {decisionReview.SelectedShadowIntent.DecisionId}.";
     }
 
     private sealed class InstrumentIdComparer : IEqualityComparer<InstrumentId>

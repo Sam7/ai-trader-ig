@@ -30,8 +30,9 @@ public sealed class DecisionAuditWriter
     public async Task<DecisionAuditRecord> LoadAsync(string path, CancellationToken cancellationToken = default)
     {
         var json = await File.ReadAllTextAsync(path, cancellationToken);
-        return JsonSerializer.Deserialize<DecisionAuditRecord>(json, DecisionAuditJson.Options)
+        var record = JsonSerializer.Deserialize<DecisionAuditRecord>(json, DecisionAuditJson.Options)
             ?? throw new InvalidOperationException($"Decision audit record '{path}' could not be deserialized.");
+        return NormalizeLoadedRecord(path, record);
     }
 
     public async Task SaveAsync(
@@ -72,15 +73,15 @@ public sealed class DecisionAuditWriter
             .Select(ToAuditCandidate)
             .ToArray();
         var promptMetadata = ReadPromptMetadata(executionArtifacts.PromptEnvelopeArtifact.Path);
+        var auditId = CreateAuditId(prepared.TradingDate, prepared.RequestedAtUtc);
 
         return new DecisionAuditRecord(
+            auditId,
             prepared.TradingDate,
             workflowResult.ReviewedAtUtc,
             DateTimeOffset.UtcNow,
-            candidates.Length == 0 ? DecisionAuditDecision.NoCandidate : DecisionAuditDecision.PaperOnly,
-            candidates.Length == 0
-                ? "No actionable candidates were returned; stand-aside decision captured for later review."
-                : "Candidates captured for paper evaluation only. No broker order was placed.",
+            ResolveDecision(workflowResult),
+            ResolveOutcome(workflowResult, candidates.Length),
             new PromptAuditReference(
                 prepared.PreparedArtifact,
                 prepared.RequestTextArtifact,
@@ -92,6 +93,10 @@ public sealed class DecisionAuditWriter
                 promptMetadata.ProviderStatus),
             assessments,
             candidates,
+            workflowResult.ExecutionMode,
+            workflowResult.CandidateDecisions,
+            workflowResult.SelectedShadowIntent,
+            workflowResult.DecisionSummary,
             candidates
                 .Select(candidate => new PaperTradeOutcome(
                     candidate.Instrument,
@@ -134,6 +139,64 @@ public sealed class DecisionAuditWriter
         var rootPath = Path.GetFullPath(_options.ObservabilityRootPath);
         var dayPath = Path.Combine(rootPath, tradingDate.ToString("yyyy-MM-dd"));
         return Path.Combine(dayPath, $"{requestedAtUtc:HHmmssfff}-decision-audit.json");
+    }
+
+    public string CreateAuditId(DateOnly tradingDate, DateTimeOffset requestedAtUtc)
+        => $"{tradingDate:yyyy-MM-dd}/{requestedAtUtc:HHmmssfff}-decision-audit";
+
+    private static DecisionAuditDecision ResolveDecision(IntradayOpportunityReviewResult workflowResult)
+    {
+        if (workflowResult.CandidateOpportunities.Count == 0)
+        {
+            return DecisionAuditDecision.NoCandidate;
+        }
+
+        if (workflowResult.SelectedShadowIntent is not null)
+        {
+            return DecisionAuditDecision.ShadowApproved;
+        }
+
+        return workflowResult.CandidateDecisions.Count > 0
+            ? DecisionAuditDecision.ShadowRejected
+            : DecisionAuditDecision.PaperOnly;
+    }
+
+    private static string ResolveOutcome(IntradayOpportunityReviewResult workflowResult, int candidateCount)
+    {
+        if (candidateCount == 0)
+        {
+            return "No actionable candidates were returned; stand-aside decision captured for later review.";
+        }
+
+        if (workflowResult.SelectedShadowIntent is not null)
+        {
+            return "Candidates were evaluated for shadow execution and one execution-ready intent was selected. No broker order was placed.";
+        }
+
+        return "Candidates were evaluated for shadow execution, but no execution-ready intent was selected. No broker order was placed.";
+    }
+
+    private static DecisionAuditRecord NormalizeLoadedRecord(string path, DecisionAuditRecord record)
+    {
+        var shadowDecisions = record.ShadowDecisions ?? [];
+        return record with
+        {
+            AuditId = string.IsNullOrWhiteSpace(record.AuditId) ? CreateAuditIdFromPath(path) : record.AuditId,
+            ShadowDecisions = shadowDecisions,
+            DecisionSummary = record.DecisionSummary ?? new IntradayCandidateDecisionSummary(
+                record.CandidateOpportunities.Count,
+                shadowDecisions.Count(decision => decision.Status == IntradayCandidateDecisionStatus.ApprovedForShadowExecution),
+                shadowDecisions.Count(decision => decision.Status == IntradayCandidateDecisionStatus.Rejected),
+                shadowDecisions.Count(decision => decision.Status == IntradayCandidateDecisionStatus.AlreadyProcessed),
+                shadowDecisions.Count(decision => decision.Status == IntradayCandidateDecisionStatus.UnsupportedByCurrentExecutionScope)),
+        };
+    }
+
+    private static string CreateAuditIdFromPath(string path)
+    {
+        var fileName = Path.GetFileNameWithoutExtension(path);
+        var day = Path.GetFileName(Path.GetDirectoryName(path));
+        return string.IsNullOrWhiteSpace(day) ? fileName : $"{day}/{fileName}";
     }
 
     private static DecisionAuditAssessment ToAuditAssessment(IntradayMarketAssessment assessment)

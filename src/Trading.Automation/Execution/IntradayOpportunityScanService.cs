@@ -143,7 +143,19 @@ public sealed class IntradayOpportunityScanService
             .ToArray();
 
         var execution = await _intradayOpportunityReviewer.ReviewAsync(prepared.Input, attachments, cancellationToken);
-        var workflowResult = await _workflow.ReviewIntradayOpportunitiesAsync(execution.Batch, cancellationToken);
+        var auditId = _decisionAuditWriter.CreateAuditId(prepared.TradingDate, prepared.RequestedAtUtc);
+        var batch = execution.Batch with
+        {
+            MarketQuotes = prepared.Markets
+                .Select(market => new IntradayMarketQuote(
+                    new InstrumentId(market.InstrumentId),
+                    market.CurrentPrice,
+                    market.CurrentSpread,
+                    market.LatestBarAtUtc))
+                .ToArray(),
+            SourceDecisionAuditId = auditId,
+        };
+        var workflowResult = await _workflow.ReviewIntradayOpportunitiesAsync(batch, cancellationToken);
         _logger.LogInformation(
             "Validated intraday opportunity batch for {TradingDate}. Assessments: {AssessmentCount}. Candidates: {CandidateCount}. Outcome: {Outcome}",
             workflowResult.TradingDate,
@@ -166,7 +178,7 @@ public sealed class IntradayOpportunityScanService
         var result = new IntradayOpportunitySubmitResult(
             prepared,
             executionArtifacts with { DecisionAuditArtifact = decisionAuditArtifact },
-            execution.Batch,
+            batch,
             workflowResult);
 
         _logger.LogInformation(

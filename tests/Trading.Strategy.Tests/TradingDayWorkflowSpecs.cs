@@ -175,7 +175,11 @@ public class TradingDayWorkflowSpecs
             ]));
 
         result.CandidateOpportunities.Should().HaveCount(1);
-        result.Outcome.Should().Contain("Decision logic pending");
+        result.ExecutionMode.Should().Be(TradingExecutionMode.Disabled);
+        result.CandidateDecisions.Should().ContainSingle();
+        result.CandidateDecisions[0].Status.Should().Be(IntradayCandidateDecisionStatus.Rejected);
+        result.CandidateDecisions[0].Reasons.Should().Contain(IntradayCandidateDecisionReason.ExecutionDisabled);
+        result.Outcome.Should().Contain("Execution mode is Disabled");
     }
 
     private sealed class WorkflowHarness
@@ -238,7 +242,7 @@ public class TradingDayWorkflowSpecs
             var rules = StrategyRules.Default;
             var workflow = new TradingDayWorkflow(
                 new TradingDayPlanner(rules, composer, clock, store),
-                new IntradayOpportunityReviewService(store),
+                new IntradayOpportunityReviewService(store, new IntradayCandidateDecisionService(ShadowDecisionPolicy.Disabled())),
                 new MarketAttentionService(rules, store),
                 new OpportunityReviewer(riskContextSource, setupPlanner, tradeApprover, store, clock, new PositionSizer()),
                 new ActiveTradeReviewer(clock, store, rules, new BreakEvenStopRule()),

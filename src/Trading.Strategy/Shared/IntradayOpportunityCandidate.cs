@@ -46,14 +46,6 @@ public sealed record IntradayOpportunityCandidate(
             throw new ArgumentOutOfRangeException(nameof(RewardRiskRatio), "Reward-to-risk ratio must be greater than zero.");
         }
 
-        if (Direction == TradeDirection.Buy && (StopLossPrice >= EntryPrice || TakeProfitPrice <= EntryPrice))
-        {
-            throw new ArgumentException("Buy opportunities require stop-loss below entry and take-profit above entry.");
-        }
-
-        if (Direction == TradeDirection.Sell && (StopLossPrice <= EntryPrice || TakeProfitPrice >= EntryPrice))
-        {
-            throw new ArgumentException("Sell opportunities require stop-loss above entry and take-profit below entry.");
-        }
+        // Directional geometry is a phase-one decision rule so invalid model output can be audited as a rejection.
     }
 }

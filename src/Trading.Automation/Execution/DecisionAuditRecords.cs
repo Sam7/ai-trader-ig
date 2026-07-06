@@ -11,6 +11,8 @@ public enum DecisionAuditDecision
     PaperOnly = 2,
     InvalidCandidate = 3,
     DataInsufficient = 4,
+    ShadowApproved = 5,
+    ShadowRejected = 6,
 }
 
 public enum PaperTradeOutcomeStatus
@@ -31,6 +33,7 @@ public enum PaperMarketAssessmentOutcomeStatus
 }
 
 public sealed record DecisionAuditRecord(
+    string AuditId,
     DateOnly TradingDate,
     DateTimeOffset ReviewedAtUtc,
     DateTimeOffset GeneratedAtUtc,
@@ -39,6 +42,10 @@ public sealed record DecisionAuditRecord(
     PromptAuditReference Prompt,
     IReadOnlyList<DecisionAuditAssessment> MarketAssessments,
     IReadOnlyList<DecisionAuditCandidate> CandidateOpportunities,
+    TradingExecutionMode ExecutionMode,
+    IReadOnlyList<IntradayCandidateDecision> ShadowDecisions,
+    ExecutionReadyTradeIntent? SelectedShadowIntent,
+    IntradayCandidateDecisionSummary DecisionSummary,
     IReadOnlyList<PaperTradeOutcome> PaperOutcomes,
     IReadOnlyList<PaperMarketAssessmentOutcome> MarketAssessmentOutcomes,
     DecisionBiasSummary BiasSummary);

@@ -320,6 +320,12 @@ public sealed class TradingCliRenderer
             ("Reviewed At", CliParsing.FormatDate(result.ReviewedAtUtc)),
             ("Assessments", result.MarketAssessments.Count.ToString()),
             ("Candidates", result.CandidateOpportunities.Count.ToString()),
+            ("Execution Mode", result.ExecutionMode.ToString()),
+            ("Approved", result.DecisionSummary.Approved.ToString()),
+            ("Rejected", result.DecisionSummary.Rejected.ToString()),
+            ("Unsupported", result.DecisionSummary.Unsupported.ToString()),
+            ("Already Processed", result.DecisionSummary.AlreadyProcessed.ToString()),
+            ("Selected Intent", result.SelectedShadowIntent?.DecisionId ?? "n/a"),
             ("Outcome", result.Outcome));
 
         var assessments = CreateTable("Instrument", "Bias", "Score", "Why Now", "Stand Aside");
@@ -357,6 +363,26 @@ public sealed class TradingCliRenderer
         }
 
         _console.Write(candidates);
+
+        if (result.CandidateDecisions.Count == 0)
+        {
+            return;
+        }
+
+        var decisions = CreateTable("Decision ID", "Instrument", "Status", "Reasons", "R:R", "Spread/R", "Move/R");
+        foreach (var decision in result.CandidateDecisions)
+        {
+            decisions.AddRow(
+                decision.DecisionId,
+                decision.Instrument.Value,
+                decision.Status.ToString(),
+                string.Join(", ", decision.Reasons),
+                CliParsing.FormatDecimal(decision.RecalculatedRewardRiskRatio),
+                CliParsing.FormatDecimal(decision.SpreadRiskRatio),
+                CliParsing.FormatDecimal(decision.PriceMovementRiskRatio));
+        }
+
+        _console.Write(decisions);
     }
 
     public void WriteIntradayOpportunityPreparation(IntradayOpportunityPreparationDocument preparation)

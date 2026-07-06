@@ -11,6 +11,8 @@ public sealed record TradingDayRecord(
     ActiveTrade? ActiveTrade,
     int ExecutedTradeCount)
 {
+    public IReadOnlyList<string> HandledShadowDecisionIds { get; init; } = [];
+
     public static TradingDayRecord StartNew(TradingDayPlan plan)
         => new(plan.TradingDate, plan, [], null, null, null, 0);
 
@@ -37,6 +39,12 @@ public sealed record TradingDayRecord(
             HandledEventIds = HandledEventIds.Append(handledEventId).Distinct(StringComparer.Ordinal).ToList(),
             PendingReview = null,
             PendingTrade = null,
+        };
+
+    public TradingDayRecord MarkShadowDecisionHandled(string decisionId)
+        => this with
+        {
+            HandledShadowDecisionIds = HandledShadowDecisionIds.Append(decisionId).Distinct(StringComparer.Ordinal).ToList(),
         };
 
     public TradingDayRecord ApplyExecution(ActiveTrade? activeTrade, ApprovedTrade? pendingTrade, int executedTradeCount)

@@ -240,6 +240,7 @@ Starts the background automation schedule (TickerQ cron jobs).
 * **Command:** `automation intraday scan` (Runs a full 15-minute scan cycle once).
 * `--date <YYYY-MM-DD>`, `--at <UTC-ISO>`.
 * A full scan lazily creates the daily plan if it is missing for the target date.
+* The scan writes a decision audit containing phase-one shadow decisions. With `Automation:Execution:Mode` set to `Disabled`, candidates are analyzed and audited but cannot be approved. With `Shadow`, allowlisted market-entry candidates can produce execution-ready intents, but no IG order is submitted.
 
 
 * **Command:** `automation intraday prepare` (Prepares charts and JSON payloads without calling OpenAI).

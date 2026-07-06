@@ -1,0 +1,62 @@
+using FluentAssertions;
+using Trading.Abstractions;
+using Trading.Automation.Configuration;
+using Trading.Strategy.Shared;
+
+public sealed class ExecutionOptionsTests
+{
+    [Fact]
+    public void CreateShadowDecisionPolicy_WithDefaults_ShouldFailClosed()
+    {
+        var options = new ExecutionOptions();
+
+        var policy = options.CreateShadowDecisionPolicy("Australia/Melbourne");
+
+        policy.Mode.Should().Be(TradingExecutionMode.Disabled);
+        policy.SupportedInstruments.Should().BeEmpty();
+        policy.SupportedEntryMethods.Should().ContainSingle().Which.Should().Be(TradeEntryMethod.Market);
+        policy.QuantityPolicy.Should().Be("BrokerMinimum");
+    }
+
+    [Fact]
+    public void CreateShadowDecisionPolicy_WithShadowOptions_ShouldMapAllowlistAndRules()
+    {
+        var options = new ExecutionOptions
+        {
+            Mode = TradingExecutionMode.Shadow,
+            Shadow = new ShadowExecutionOptions
+            {
+                SupportedInstruments = [" CC.D.TEST.IP "],
+                SupportedEntryMethods = [TradeEntryMethod.Market],
+                MinimumOpportunityScore = 75,
+                MinimumRewardRiskRatio = 2.5m,
+                MaxSpreadRiskRatio = 0.10m,
+                MaxPriceMovementRiskRatio = 0.15m,
+                FreshQuoteMaxAge = TimeSpan.FromMinutes(10),
+                BlockBeforeHighImpactEvent = TimeSpan.FromMinutes(45),
+                QuantityPolicy = "BrokerMinimum",
+            },
+        };
+
+        var policy = options.CreateShadowDecisionPolicy("Australia/Melbourne");
+
+        policy.Mode.Should().Be(TradingExecutionMode.Shadow);
+        policy.SupportedInstruments.Should().ContainSingle().Which.Should().Be(new InstrumentId("CC.D.TEST.IP"));
+        policy.MinimumOpportunityScore.Should().Be(75);
+        policy.MinimumRewardRiskRatio.Should().Be(2.5m);
+        policy.FreshQuoteMaxAge.Should().Be(TimeSpan.FromMinutes(10));
+    }
+
+    [Theory]
+    [InlineData(TradingExecutionMode.Demo)]
+    [InlineData(TradingExecutionMode.Live)]
+    public void CreateShadowDecisionPolicy_WithWriteMode_ShouldFailForPhaseOne(TradingExecutionMode mode)
+    {
+        var options = new ExecutionOptions { Mode = mode };
+
+        var action = () => options.CreateShadowDecisionPolicy("Australia/Melbourne");
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Phase one supports only Disabled and Shadow*");
+    }
+}
