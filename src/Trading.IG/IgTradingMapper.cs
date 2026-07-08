@@ -82,43 +82,6 @@ internal static class IgTradingMapper
             IgTradingConversions.ParseDate(transaction.DateUtc ?? transaction.Date));
     }
 
-    public static OrderSummary? CorrelateFromSubmission(
-        OrderSubmissionRecord submission,
-        IReadOnlyList<ActivityItem> activities)
-    {
-        if (submission.Kind != OrderSubmissionKind.Close || string.IsNullOrWhiteSpace(submission.RelatedDealId))
-        {
-            return null;
-        }
-
-        var match = activities
-            .Where(activity => string.Equals(
-                activity.Details?.Actions?.FirstOrDefault()?.AffectedDealId,
-                submission.RelatedDealId,
-                StringComparison.OrdinalIgnoreCase))
-            .Where(activity => activity.Details?.Size == submission.Size)
-            .Where(activity => activity.Details?.Direction is not null
-                && IgTradingConversions.ParseDirection(activity.Details.Direction) == submission.Direction)
-            .Where(activity =>
-            {
-                var timestamp = IgTradingConversions.ParseDate(activity.DateUtc ?? activity.Date);
-                return timestamp >= submission.SubmittedAtUtc.AddDays(-1)
-                    && timestamp <= submission.SubmittedAtUtc.AddDays(1);
-            })
-            .OrderBy(activity => Math.Abs((IgTradingConversions.ParseDate(activity.DateUtc ?? activity.Date) - submission.SubmittedAtUtc).Ticks))
-            .FirstOrDefault();
-
-        if (match is null)
-        {
-            return null;
-        }
-
-        return MapActivity(match) with
-        {
-            DealReference = submission.DealReference,
-        };
-    }
-
     public static MarketSearchResult MapMarketSearchResult(MarketSearchItem source)
     {
         return new MarketSearchResult(

@@ -10,6 +10,7 @@ using Trading.AI.Prompts.IntradayOpportunityReview;
 using Trading.Abstractions;
 using Trading.Automation.Configuration;
 using Trading.Charting;
+using Trading.Execution;
 using Trading.Strategy.Inputs;
 using Trading.Strategy.Persistence;
 using Trading.Strategy.Shared;
@@ -27,6 +28,7 @@ public sealed class IntradayOpportunityScanService
     private readonly DecisionAuditWriter _decisionAuditWriter;
     private readonly DailyPlanEnsureService _dailyPlanEnsureService;
     private readonly ITradingDayWorkflow _workflow;
+    private readonly ExecutionBoundaryService _executionBoundaryService;
     private readonly AutomationOptions _automationOptions;
     private readonly IReadOnlyDictionary<string, string> _instrumentNames;
     private readonly ILogger<IntradayOpportunityScanService> _logger;
@@ -40,6 +42,7 @@ public sealed class IntradayOpportunityScanService
         DecisionAuditWriter decisionAuditWriter,
         DailyPlanEnsureService dailyPlanEnsureService,
         ITradingDayWorkflow workflow,
+        ExecutionBoundaryService executionBoundaryService,
         IOptions<AutomationOptions> automationOptions,
         IOptions<DailyBriefingOptions> dailyBriefingOptions,
         ILogger<IntradayOpportunityScanService> logger)
@@ -52,6 +55,7 @@ public sealed class IntradayOpportunityScanService
         _decisionAuditWriter = decisionAuditWriter;
         _dailyPlanEnsureService = dailyPlanEnsureService;
         _workflow = workflow;
+        _executionBoundaryService = executionBoundaryService;
         _automationOptions = automationOptions.Value;
         _instrumentNames = dailyBriefingOptions.Value.TrackedMarkets.ToDictionary(
             market => market.InstrumentId,
@@ -163,6 +167,19 @@ public sealed class IntradayOpportunityScanService
             workflowResult.CandidateOpportunities.Count,
             workflowResult.Outcome);
 
+        ExecutionBoundaryRecord? executionBoundaryRecord = null;
+        if (workflowResult.SelectedShadowIntent is { } selectedIntent)
+        {
+            var reservation = await _executionBoundaryService.ReserveAsync(selectedIntent, cancellationToken);
+            executionBoundaryRecord = reservation.Record;
+            _logger.LogInformation(
+                "Reserved execution boundary for decision {DecisionId}. Created: {Created}. State: {State}. Deal reference: {DealReference}.",
+                executionBoundaryRecord.DecisionId,
+                reservation.Created,
+                executionBoundaryRecord.State,
+                executionBoundaryRecord.DealReference);
+        }
+
         var artifactReferences = execution.AttachmentArtifactPaths
             .Select(ToArtifactReference)
             .ToArray();
@@ -174,12 +191,22 @@ public sealed class IntradayOpportunityScanService
             prepared,
             executionArtifacts,
             workflowResult,
+            executionBoundaryRecord is null ? null : ExecutionBoundarySnapshot.From(executionBoundaryRecord),
             cancellationToken);
+        if (executionBoundaryRecord is not null)
+        {
+            executionBoundaryRecord = await _executionBoundaryService.AttachDecisionAuditArtifactAsync(
+                executionBoundaryRecord.DecisionId,
+                decisionAuditArtifact.Path,
+                cancellationToken) ?? executionBoundaryRecord;
+        }
+
         var result = new IntradayOpportunitySubmitResult(
             prepared,
             executionArtifacts with { DecisionAuditArtifact = decisionAuditArtifact },
             batch,
-            workflowResult);
+            workflowResult,
+            executionBoundaryRecord is null ? null : ExecutionBoundarySnapshot.From(executionBoundaryRecord));
 
         _logger.LogInformation(
             "Submitted intraday opportunity review for {TradingDate}. Envelope: {EnvelopePath}. Extracted JSON: {StructuredPath}. Decision audit: {DecisionAuditPath}.",

@@ -12,17 +12,14 @@ namespace Trading.IG;
 public sealed class IgTradingGateway : ITradingGateway
 {
     private readonly IIgTradingApi _igTradingApi;
-    private readonly IOrderReferenceJournal _orderReferenceJournal;
     private readonly IgOrderStatusResolver _orderStatusResolver;
 
     public IgTradingGateway(
         IIgTradingApi igTradingApi,
-        IOrderReferenceJournal orderReferenceJournal,
         ILogger<IgTradingGateway> logger)
     {
         _igTradingApi = igTradingApi;
-        _orderReferenceJournal = orderReferenceJournal;
-        _orderStatusResolver = new IgOrderStatusResolver(igTradingApi, orderReferenceJournal, logger);
+        _orderStatusResolver = new IgOrderStatusResolver(igTradingApi, logger);
     }
 
     public async Task<ITradingSession> AuthenticateAsync(CancellationToken cancellationToken = default)
@@ -42,6 +39,8 @@ public sealed class IgTradingGateway : ITradingGateway
             throw new ArgumentOutOfRangeException(nameof(request.Size), "Order size must be greater than zero.");
         }
 
+        var dealReference = ResolveDealReference(request.DealReference, "SPIKE");
+
         return await ExecuteTranslatedAsync(
             async () =>
         {
@@ -49,7 +48,6 @@ public sealed class IgTradingGateway : ITradingGateway
             IgTradingConversions.EnsureMarketIsTradable(market);
 
             var currencyCode = IgTradingConversions.ResolveCurrencyCode(market);
-            var dealReference = IgTradingConversions.CreateDealReference("SPIKE");
 
             await _igTradingApi.CreatePositionAsync(
                 new CreatePositionRequest(
@@ -63,17 +61,6 @@ public sealed class IgTradingGateway : ITradingGateway
                     ForceOpen: true,
                     GuaranteedStop: false,
                     dealReference),
-                cancellationToken);
-
-            await _orderReferenceJournal.SaveAsync(
-                new OrderSubmissionRecord(
-                    dealReference,
-                    OrderSubmissionKind.Open,
-                    DateTimeOffset.UtcNow,
-                    request.Instrument,
-                    request.Direction,
-                    request.Size,
-                    null),
                 cancellationToken);
 
             var summary = await _orderStatusResolver.GetOrderStatusAsync(dealReference, cancellationToken);
@@ -115,17 +102,6 @@ public sealed class IgTradingGateway : ITradingGateway
                     IgTradingConversions.ToIgGoodTillDate(request.GoodTillDateUtc)),
                 cancellationToken);
 
-            await _orderReferenceJournal.SaveAsync(
-                new OrderSubmissionRecord(
-                    response.DealReference,
-                    OrderSubmissionKind.WorkingOrderCreate,
-                    DateTimeOffset.UtcNow,
-                    request.Instrument,
-                    request.Direction,
-                    request.Size,
-                    null),
-                cancellationToken);
-
             return new WorkingOrderResult(response.DealReference, null, OrderStatus.Accepted, "Working order submitted.", DateTimeOffset.UtcNow);
         });
     }
@@ -138,6 +114,8 @@ public sealed class IgTradingGateway : ITradingGateway
         {
             throw new ArgumentException("DealId is required.", nameof(request.DealId));
         }
+
+        var dealReference = ResolveDealReference(request.DealReference, "CLOSE");
 
         return await ExecuteTranslatedAsync(
             async () =>
@@ -157,7 +135,6 @@ public sealed class IgTradingGateway : ITradingGateway
                 throw new TradingGatewayException(TradingErrorCode.InvalidRequest, "Close size must be greater than zero and not exceed current position size.");
             }
 
-            var dealReference = IgTradingConversions.CreateDealReference("CLOSE");
             await _igTradingApi.ClosePositionAsync(
                 new SdkClosePositionRequest(
                     request.DealId,
@@ -166,17 +143,6 @@ public sealed class IgTradingGateway : ITradingGateway
                     "MARKET",
                     "FILL_OR_KILL",
                     dealReference),
-                cancellationToken);
-
-            await _orderReferenceJournal.SaveAsync(
-                new OrderSubmissionRecord(
-                    dealReference,
-                    OrderSubmissionKind.Close,
-                    DateTimeOffset.UtcNow,
-                    new InstrumentId(position.Market.Epic),
-                    IgTradingConversions.ParseDirection(IgTradingConversions.ToOppositeDirection(position.Position.Direction)),
-                    closeSize,
-                    request.DealId),
                 cancellationToken);
 
             var status = await _orderStatusResolver.GetOrderStatusAsync(dealReference, cancellationToken);
@@ -212,17 +178,6 @@ public sealed class IgTradingGateway : ITradingGateway
                     request.TrailingStopDistance is not null || existing.Position.TrailingStopDistance is not null,
                     request.TrailingStopDistance ?? existing.Position.TrailingStopDistance,
                     request.TrailingStopIncrement ?? existing.Position.TrailingStopIncrement),
-                cancellationToken);
-
-            await _orderReferenceJournal.SaveAsync(
-                new OrderSubmissionRecord(
-                    response.DealReference,
-                    OrderSubmissionKind.PositionUpdate,
-                    DateTimeOffset.UtcNow,
-                    new InstrumentId(existing.Market.Epic),
-                    IgTradingConversions.ParseDirection(existing.Position.Direction),
-                    existing.Position.Size,
-                    request.DealId),
                 cancellationToken);
 
             var status = await _orderStatusResolver.GetOrderStatusAsync(response.DealReference, cancellationToken);
@@ -265,17 +220,6 @@ public sealed class IgTradingGateway : ITradingGateway
                     IgTradingConversions.ToIgGoodTillDate(request.GoodTillDateUtc ?? IgTradingConversions.ParseNullableDate(workingOrder.WorkingOrderData.GoodTillDateIso ?? workingOrder.WorkingOrderData.GoodTillDate))),
                 cancellationToken);
 
-            await _orderReferenceJournal.SaveAsync(
-                new OrderSubmissionRecord(
-                    response.DealReference,
-                    OrderSubmissionKind.WorkingOrderUpdate,
-                    DateTimeOffset.UtcNow,
-                    new InstrumentId(workingOrder.MarketData.Epic),
-                    IgTradingConversions.ParseDirection(workingOrder.WorkingOrderData.Direction),
-                    workingOrder.WorkingOrderData.OrderSize,
-                    request.DealId),
-                cancellationToken);
-
             return new WorkingOrderResult(response.DealReference, request.DealId, OrderStatus.Accepted, "Working order updated.", DateTimeOffset.UtcNow);
         });
     }
@@ -293,17 +237,6 @@ public sealed class IgTradingGateway : ITradingGateway
             async () =>
         {
             var response = await _igTradingApi.DeleteWorkingOrderAsync(dealId, cancellationToken);
-
-            await _orderReferenceJournal.SaveAsync(
-                new OrderSubmissionRecord(
-                    response.DealReference,
-                    OrderSubmissionKind.WorkingOrderCancel,
-                    DateTimeOffset.UtcNow,
-                    null,
-                    TradeDirection.Buy,
-                    0m,
-                    dealId),
-                cancellationToken);
 
             return new WorkingOrderResult(response.DealReference, dealId, OrderStatus.Accepted, "Working order cancelled.", DateTimeOffset.UtcNow);
         });
@@ -443,6 +376,23 @@ public sealed class IgTradingGateway : ITradingGateway
         {
             throw TranslateException(exception);
         }
+    }
+
+    private static string ResolveDealReference(string? requestedDealReference, string prefix)
+    {
+        if (string.IsNullOrWhiteSpace(requestedDealReference))
+        {
+            return IgTradingConversions.CreateDealReference(prefix);
+        }
+
+        if (requestedDealReference.Length > 30
+            || requestedDealReference.Any(character => !char.IsAsciiLetterOrDigit(character))
+            || requestedDealReference.Any(char.IsLower))
+        {
+            throw new ArgumentException("Deal reference must contain 1-30 uppercase ASCII letters or digits.", nameof(requestedDealReference));
+        }
+
+        return requestedDealReference;
     }
 
     private static TradingErrorCode MapErrorCode(string? errorCode)

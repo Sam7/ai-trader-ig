@@ -9,6 +9,7 @@
     <Project Path="src/Trading.Automation/Trading.Automation.csproj" />
     <Project Path="src/Trading.Charting/Trading.Charting.csproj" />
     <Project Path="src/Trading.Cli/Trading.Cli.csproj" />
+    <Project Path="src/Trading.Execution/Trading.Execution.csproj" />
     <Project Path="src/Trading.IG/Trading.IG.csproj" />
     <Project Path="src/Trading.MarketData/Trading.MarketData.csproj" />
     <Project Path="src/Trading.Strategy/Trading.Strategy.csproj" />
@@ -17,6 +18,7 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Trading.Cli.Tests/Trading.Cli.Tests.csproj" />
+    <Project Path="tests/Trading.Execution.Tests/Trading.Execution.Tests.csproj" />
     <Project Path="tests/Ig.Trading.Sdk.Tests/Ig.Trading.Sdk.Tests.csproj" />
     <Project Path="tests/Trading.Abstractions.Tests/Trading.Abstractions.Tests.csproj" />
     <Project Path="tests/Trading.AI.Tests/Trading.AI.Tests.csproj" />

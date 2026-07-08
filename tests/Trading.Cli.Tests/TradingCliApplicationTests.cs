@@ -5,6 +5,7 @@ using Spectre.Console.Testing;
 using Trading.Abstractions;
 using Trading.Automation.Execution;
 using Trading.Charting;
+using Trading.Execution;
 using Trading.MarketData;
 
 public sealed class TradingCliApplicationTests
@@ -28,27 +29,31 @@ public sealed class TradingCliApplicationTests
     public async Task RunAsync_WithTradeBuyCommand_ShouldAuthenticatePlaceOrderAndRenderResult()
     {
         var console = CreateConsole();
-        var gateway = new FakeTradingGateway
+        var gateway = new FakeTradingGateway();
+        var execution = new FakeExecutionSubmissionService
         {
-            PlaceMarketOrderResult = new PlaceOrderResult(
+            MarketOrderResult = CreateSubmissionResult(
+                "manual-buy-1",
+                ExecutionOperationKind.MarketOpen,
                 "ref-123",
                 "deal-456",
                 OrderStatus.Accepted,
-                "filled",
-                DateTimeOffset.Parse("2026-03-10T10:15:00Z"))
+                "filled")
         };
 
-        var application = CreateApplication(gateway, console);
+        var application = CreateApplication(gateway, new FakePriceChartRenderer(), console, executionSubmissionService: execution);
 
-        var exitCode = await application.RunAsync(["trades", "buy", "--instrument", "IX.D.SPTRD.DAILY.IP", "--size", "1"]);
+        var exitCode = await application.RunAsync(["trades", "buy", "--instrument", "IX.D.SPTRD.DAILY.IP", "--size", "1", "--operation-id", "manual-buy-1"]);
 
         exitCode.Should().Be(0);
         gateway.AuthenticateCalls.Should().Be(1);
-        gateway.PlaceMarketOrderRequests.Should().ContainSingle();
-        gateway.PlaceMarketOrderRequests[0].Instrument.Value.Should().Be("IX.D.SPTRD.DAILY.IP");
-        gateway.PlaceMarketOrderRequests[0].Direction.Should().Be(TradeDirection.Buy);
-        gateway.PlaceMarketOrderRequests[0].Size.Should().Be(1);
+        execution.MarketOrderRequests.Should().ContainSingle();
+        execution.MarketOrderRequests[0].OperationId.Should().Be("manual-buy-1");
+        execution.MarketOrderRequests[0].Request.Instrument.Value.Should().Be("IX.D.SPTRD.DAILY.IP");
+        execution.MarketOrderRequests[0].Request.Direction.Should().Be(TradeDirection.Buy);
+        execution.MarketOrderRequests[0].Request.Size.Should().Be(1);
         console.Output.Should().Contain("Buy Submitted");
+        console.Output.Should().Contain("manual-buy-1");
         console.Output.Should().Contain("ref-123");
         console.Output.Should().Contain("deal-456");
     }
@@ -805,7 +810,8 @@ public sealed class TradingCliApplicationTests
         TestConsole console,
         FakeAutomationRuntime? automationRuntime = null,
         FakeMarketDataCollector? marketDataCollector = null,
-        FakeDecisionAuditEvaluationService? decisionAuditEvaluationService = null)
+        FakeDecisionAuditEvaluationService? decisionAuditEvaluationService = null,
+        FakeExecutionSubmissionService? executionSubmissionService = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton<ITradingGateway>(gateway);
@@ -814,6 +820,7 @@ public sealed class TradingCliApplicationTests
         services.AddSingleton<IAutomationRuntime>(automationRuntime ?? new FakeAutomationRuntime());
         services.AddSingleton<IMarketDataCollector>(marketDataCollector ?? new FakeMarketDataCollector());
         services.AddSingleton<IDecisionAuditEvaluationService>(decisionAuditEvaluationService ?? new FakeDecisionAuditEvaluationService());
+        services.AddSingleton<IExecutionSubmissionService>(executionSubmissionService ?? new FakeExecutionSubmissionService());
         services.AddTradingCli();
 
         return new TradingCliApplication(services, console);
@@ -826,6 +833,148 @@ public sealed class TradingCliApplicationTests
             EmitAnsiSequences = false,
         };
     }
+
+    private static ExecutionSubmissionResult CreateSubmissionResult(
+        string operationId,
+        ExecutionOperationKind kind,
+        string dealReference,
+        string? dealId,
+        OrderStatus status,
+        string? message)
+    {
+        var timestamp = DateTimeOffset.Parse("2026-03-10T10:15:00Z");
+        var state = status switch
+        {
+            OrderStatus.Rejected => ExecutionBoundaryState.BrokerRejected,
+            OrderStatus.Closed => ExecutionBoundaryState.Closed,
+            OrderStatus.Accepted or OrderStatus.Open when !string.IsNullOrWhiteSpace(dealId) => ExecutionBoundaryState.Confirmed,
+            _ => ExecutionBoundaryState.Submitted,
+        };
+        var record = new ExecutionOperationRecord(
+            operationId,
+            kind,
+            ExecutionOperationSource.ManualCli,
+            state,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            null,
+            dealReference,
+            dealId,
+            status,
+            timestamp,
+            timestamp,
+            timestamp,
+            state == ExecutionBoundaryState.Confirmed ? timestamp : null,
+            state == ExecutionBoundaryState.Closed ? timestamp : null,
+            1,
+            message);
+
+        return new ExecutionSubmissionResult(record, dealReference, dealId, status, message, timestamp);
+    }
+
+    private sealed class FakeExecutionSubmissionService : IExecutionSubmissionService
+    {
+        public List<MarketOrderExecutionRequest> MarketOrderRequests { get; } = [];
+
+        public ExecutionSubmissionResult? MarketOrderResult { get; init; }
+
+        public Task<ExecutionSubmissionResult> SubmitMarketOrderAsync(
+            string operationId,
+            ExecutionOperationSource source,
+            PlaceOrderRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            MarketOrderRequests.Add(new MarketOrderExecutionRequest(operationId, source, request));
+            return Task.FromResult(MarketOrderResult ?? CreateSubmissionResult(
+                operationId,
+                ExecutionOperationKind.MarketOpen,
+                "ref-default",
+                "deal-default",
+                OrderStatus.Accepted,
+                null));
+        }
+
+        public Task<ExecutionSubmissionResult> SubmitClosePositionAsync(
+            string operationId,
+            ExecutionOperationSource source,
+            ClosePositionRequest request,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(CreateSubmissionResult(
+                operationId,
+                ExecutionOperationKind.PositionClose,
+                "close-ref",
+                request.DealId,
+                OrderStatus.Accepted,
+                null));
+
+        public Task<ExecutionSubmissionResult> SubmitUpdatePositionAsync(
+            string operationId,
+            ExecutionOperationSource source,
+            UpdatePositionRequest request,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(CreateSubmissionResult(
+                operationId,
+                ExecutionOperationKind.PositionUpdate,
+                "update-ref",
+                request.DealId,
+                OrderStatus.Accepted,
+                null));
+
+        public Task<ExecutionSubmissionResult> SubmitCreateWorkingOrderAsync(
+            string operationId,
+            ExecutionOperationSource source,
+            CreateWorkingOrderRequest request,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(CreateSubmissionResult(
+                operationId,
+                ExecutionOperationKind.WorkingOrderCreate,
+                "working-ref",
+                "working-deal",
+                OrderStatus.Accepted,
+                null));
+
+        public Task<ExecutionSubmissionResult> SubmitUpdateWorkingOrderAsync(
+            string operationId,
+            ExecutionOperationSource source,
+            UpdateWorkingOrderRequest request,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(CreateSubmissionResult(
+                operationId,
+                ExecutionOperationKind.WorkingOrderUpdate,
+                "working-update-ref",
+                request.DealId,
+                OrderStatus.Accepted,
+                null));
+
+        public Task<ExecutionSubmissionResult> SubmitCancelWorkingOrderAsync(
+            string operationId,
+            ExecutionOperationSource source,
+            string dealId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult(CreateSubmissionResult(
+                operationId,
+                ExecutionOperationKind.WorkingOrderCancel,
+                "working-cancel-ref",
+                dealId,
+                OrderStatus.Accepted,
+                null));
+
+        public Task<ExecutionOperationRecord?> ReconcileAsync(
+            string operationId,
+            CancellationToken cancellationToken = default)
+            => Task.FromResult<ExecutionOperationRecord?>(null);
+    }
+
+    private sealed record MarketOrderExecutionRequest(
+        string OperationId,
+        ExecutionOperationSource Source,
+        PlaceOrderRequest Request);
 
     private sealed class FakeTradingGateway : ITradingGateway
     {

@@ -5,6 +5,7 @@ using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
 using Trading.Automation.MarketData;
 using Trading.Automation.Scheduling;
+using Trading.Execution;
 using Trading.MarketData.DependencyInjection;
 using Trading.Strategy.DependencyInjection;
 using Trading.Strategy.Inputs;
@@ -35,6 +36,16 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IRiskContextSource, PassiveRiskContextSource>();
         services.AddSingleton<ITradeSetupPlanner, NoOpTradeSetupPlanner>();
         services.AddSingleton<ITradeApprover, NoOpTradeApprover>();
+        services.AddSingleton<IExecutionClock, SystemExecutionClock>();
+        services.AddSingleton<IExecutionDealReferenceFactory, ExecutionDealReferenceFactory>();
+        services.AddSingleton<IExecutionBoundaryStore>(sp =>
+        {
+            var options = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<AutomationOptions>>().Value;
+            return new SqliteExecutionBoundaryStore(options.Execution.StorePath);
+        });
+        services.AddSingleton<ExecutionBoundaryService>();
+        services.AddSingleton<ExecutionSubmissionService>();
+        services.AddSingleton<IExecutionSubmissionService>(sp => sp.GetRequiredService<ExecutionSubmissionService>());
 
         services.AddTransient<DailyBriefingResearchService>();
         services.AddTransient<DailyBriefingPlanService>();

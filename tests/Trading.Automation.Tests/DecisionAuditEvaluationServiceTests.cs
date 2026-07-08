@@ -336,6 +336,7 @@ public sealed class DecisionAuditEvaluationServiceTests
             TradingExecutionMode.Disabled,
             [],
             null,
+            null,
             new IntradayCandidateDecisionSummary(candidates.Count, 0, candidates.Count, 0, 0),
             [],
             [],

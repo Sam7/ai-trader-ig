@@ -2,6 +2,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Options;
 using Trading.AI.Configuration;
 using Trading.Abstractions;
+using Trading.Execution;
 using Trading.Strategy.Shared;
 
 namespace Trading.Automation.Execution;
@@ -15,13 +16,21 @@ public sealed class DecisionAuditWriter
         _options = options.Value;
     }
 
-    public async Task<ArtifactReference> WriteInitialAsync(
+    public Task<ArtifactReference> WriteInitialAsync(
         IntradayOpportunityPreparationDocument prepared,
         IntradayOpportunityExecutionArtifacts executionArtifacts,
         IntradayOpportunityReviewResult workflowResult,
         CancellationToken cancellationToken = default)
+        => WriteInitialAsync(prepared, executionArtifacts, workflowResult, null, cancellationToken);
+
+    public async Task<ArtifactReference> WriteInitialAsync(
+        IntradayOpportunityPreparationDocument prepared,
+        IntradayOpportunityExecutionArtifacts executionArtifacts,
+        IntradayOpportunityReviewResult workflowResult,
+        ExecutionBoundarySnapshot? executionBoundary = null,
+        CancellationToken cancellationToken = default)
     {
-        var record = CreateInitialRecord(prepared, executionArtifacts, workflowResult);
+        var record = CreateInitialRecord(prepared, executionArtifacts, workflowResult, executionBoundary);
         var path = BuildAuditPath(prepared.TradingDate, prepared.RequestedAtUtc);
         await SaveAsync(path, record, cancellationToken);
         return ToArtifactReference(path);
@@ -64,7 +73,8 @@ public sealed class DecisionAuditWriter
     private DecisionAuditRecord CreateInitialRecord(
         IntradayOpportunityPreparationDocument prepared,
         IntradayOpportunityExecutionArtifacts executionArtifacts,
-        IntradayOpportunityReviewResult workflowResult)
+        IntradayOpportunityReviewResult workflowResult,
+        ExecutionBoundarySnapshot? executionBoundary)
     {
         var assessments = workflowResult.MarketAssessments
             .Select(ToAuditAssessment)
@@ -96,6 +106,7 @@ public sealed class DecisionAuditWriter
             workflowResult.ExecutionMode,
             workflowResult.CandidateDecisions,
             workflowResult.SelectedShadowIntent,
+            executionBoundary,
             workflowResult.DecisionSummary,
             candidates
                 .Select(candidate => new PaperTradeOutcome(

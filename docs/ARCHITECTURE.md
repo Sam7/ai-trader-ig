@@ -27,10 +27,11 @@ The solution is intentionally split into distinct layers. This separation ensure
 | --- | --- | --- |
 | **`Trading.Abstractions`** | Defines the domain language (models, enums, `ITradingGateway`). | **Never** include transport, HTTP, or broker-specific terminology (e.g., IG "Epics") in the contracts. |
 | **`Trading.Strategy`** | Owns the business workflow: daily planning, intraday assessments, risk gating, and execution intent. | **Never** tie this layer to a specific LLM implementation or a specific broker adapter. |
+| **`Trading.Execution`** | Owns durable execution idempotency: operation reservations, deal references, attempts, broker outcomes, and reconciliation state. | **Never** put strategy scoring, IG DTOs, market-data persistence, or CLI parsing concerns here. |
 | **`Trading.AI`** | Manages LLM prompts, json extraction, and observability artifacts. | **Never** let raw LLM responses leak into the strategy layer without strict JSON validation/mapping. |
 | **`Trading.MarketData`** | Handles SQLite persistence, gap-finding, and historical backfills for price data. | **Never** allow strategy logic to bypass this layer to fetch raw prices directly. |
 | **`Ig.Trading.Sdk`** | A Refit-based SDK for IG REST and streaming. Handles auth, session tokens, and raw DTOs. | **Never** couple this to the rest of the solution. It must remain extractable as a standalone OSS library. |
-| **`Trading.IG`** | The Gateway Adapter. Maps abstraction requests into IG SDK calls and translates errors. | **Never** build a "second SDK" here. It must stay thin and focused solely on mapping and orchestration. |
+| **`Trading.IG`** | The Gateway Adapter. Maps abstraction requests into IG SDK calls and translates errors. | **Never** build a "second SDK" or durable journal here. It must stay thin and focused solely on broker mapping and status reads. |
 | **`Trading.Charting`** | Renders broker-neutral `PriceSeries` into PNG images using ScottPlot. | **Never** bleed ScottPlot-specific drawing logic into the CLI, Strategy, or AI layers. |
 | **`Trading.Cli` / `Trading.Worker**` | Outermost shells. Load configuration, wire Dependency Injection, and trigger flows. | **Never** write business logic or branching trading rules in the CLI or Worker. |
 
@@ -99,18 +100,20 @@ To understand the architecture, you must understand how data flows through the b
 
 ### Flow A: The External Call (e.g., Placing a Trade)
 
-1. **Invocation:** The `Trading.Cli` or `Trading.Worker` requests an action via the `ITradingGateway` interface using domain models.
-2. **Adapter Mapping:** `Trading.IG` intercepts the call, validates it, and maps the broker-neutral request into an IG-specific DTO.
-3. **Transport:** `Ig.Trading.Sdk` executes the HTTP call, handling `CST` and `X-SECURITY-TOKEN` headers automatically.
-4. **Response & Translation:** The SDK returns a raw IG response or throws an `IgApiException`. `Trading.IG` maps the successful response back to a broker-neutral result, or translates the API exception into a `TradingGatewayException`.
+1. **Invocation:** The `Trading.Cli` or `Trading.Worker` asks `Trading.Execution` to perform a broker mutation with a durable operation id. Read-only broker calls can still go directly through `ITradingGateway`.
+2. **Reservation:** `Trading.Execution` reserves the operation in `Logs/Execution/execution-boundary.sqlite`, assigns or captures the deal reference, and takes a submission lease before any broker write.
+3. **Adapter Mapping:** `Trading.IG` receives the broker-neutral request through `ITradingGateway`, validates it, and maps it into an IG-specific DTO without writing any durable state.
+4. **Transport:** `Ig.Trading.Sdk` executes the HTTP call, handling `CST` and `X-SECURITY-TOKEN` headers automatically.
+5. **Completion:** `Trading.Execution` records the attempt outcome, broker status, deal id, returned deal reference, and any uncertain failure state before returning to the caller.
 
 ---
 
 ## 6. State Management Rules
 
-* **Trading Day State is Volatile:** The daily plan and current execution state (pending trades, active trades) are stored in memory via `InMemoryTradingDayStore`. If the worker restarts, the next full intraday scan lazily recreates today's plan before analysis continues. Do not attempt to persist this to a database without an architectural review.
+* **Trading Day State is Volatile:** The daily plan and strategy-level pending/active trade state remain in memory via `InMemoryTradingDayStore`. If the worker restarts, the next full intraday scan lazily recreates today's plan before analysis continues. Do not persist the full trading-day store without an architectural review.
+* **Execution Boundary State is Durable:** Manual and automated broker mutations are reserved in `Logs/Execution/execution-boundary.sqlite`. This store is the single source of truth for operation ids, deal references, attempts, broker outcomes, and reconciliation state. Automated decisions remain fail-closed: an uncertain submitted operation must not be retried blindly.
 * **Market Data is Durable:** Price bars, gap tracking, and stream accumulation are strictly persisted to `ig-market-data.sqlite` using Write-Ahead Logging (WAL).
-* **Decision Audits are Immutable:** Every LLM prompt, context, chart, extracted JSON, shadow decision, and selected execution-ready intent must be saved to disk under the `Logs/Observability` folder so each automated trading decision can be reconstructed.
+* **Decision Audits are Immutable:** Every LLM prompt, context, chart, extracted JSON, shadow decision, selected execution-ready intent, and execution-boundary snapshot must be saved to disk under the `Logs/Observability` folder so each automated trading decision can be reconstructed.
 
 ---
 
@@ -123,6 +126,9 @@ If you see any of the following happening in a Pull Request or during an AI code
 
 > **Red Flag 2: "The Fat Adapter"**
 > Adding HTTP serialization, JSON parsing, or API key management directly inside `Trading.IG`. Those concerns belong strictly in `Ig.Trading.Sdk`.
+
+> **Red Flag 2b: "Gateway Journaling"**
+> Adding durable execution tracking, file journals, SQLite writes, or idempotency decisions inside `Trading.IG`. Those concerns belong strictly in `Trading.Execution`.
 
 > **Red Flag 3: "Naked Broker Errors"**
 > Catching a generic `Exception` or `IgApiException` in the CLI and printing it to the user. All broker errors must be caught in `Trading.IG` and wrapped in a `TradingGatewayException` with a standardized `TradingErrorCode`.

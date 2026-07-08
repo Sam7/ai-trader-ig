@@ -8,6 +8,8 @@ public sealed class ExecutionOptions
 {
     public TradingExecutionMode Mode { get; init; } = TradingExecutionMode.Disabled;
 
+    public string StorePath { get; init; } = Path.Combine("Logs", "Execution", "execution-boundary.sqlite");
+
     public ShadowExecutionOptions Shadow { get; init; } = new();
 
     public ShadowDecisionPolicy CreateShadowDecisionPolicy(string tradingTimezone)

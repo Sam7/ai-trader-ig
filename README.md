@@ -72,6 +72,7 @@ The solution strictly enforces separation of concerns to keep the business logic
 * **`Ig.Trading.Sdk`**: An isolated, Refit-based SDK for IG's REST API. Manages session tokens (`CST`, `X-SECURITY-TOKEN`), handles RSA encrypted passwords, and maps DTOs.
 * **`Trading.IG`**: The Adapter. Implements `ITradingGateway` using the SDK, translates IG HTTP errors into domain `TradingGatewayException`s, and orchestrates order status lookups.
 * **`Trading.Strategy`**: The workflow orchestrator. Models the daily briefing, intraday opportunity reviews, deterministic shadow decisions, and broker-neutral execution-ready intents.
+* **`Trading.Execution`**: The durable execution boundary. Tracks manual and automated broker mutations, assigns broker-safe deal references, records submission attempts, and prevents duplicate submissions when a stable operation id is provided.
 * **`Trading.AI`**: The LLM interaction layer. Manages prompts via `PromptRegistry` and enforces strict JSON schema output via `Microsoft.Extensions.AI`.
 * **`Trading.MarketData`**: Manages price data ingestion, historical backfilling, SQLite persistence, and GCS-backed market-data snapshots.
 * **`Trading.Charting`**: Generates broker-neutral price chart images (PNG) using `ScottPlot`.
@@ -92,6 +93,7 @@ Market data is the lifeblood of the charting and AI analysis workflows. It is ha
 * **Cloud Snapshots**: The production worker can publish a validated SQLite snapshot to GCS every five minutes using the Google Cloud Storage .NET client. Local development can mirror that snapshot with Application Default Credentials, validate it, and transactionally import final market-data bars without replacing an active SQLite file.
 * **Mirror Mode**: When `MarketData:CloudSnapshot:Mirror:Enabled` is `true`, automatic IG historical REST backfill is disabled. Local workflows read the mirrored data from the normal `MarketDataService` path. Explicit REST backfill remains available through the `marketdata backfill` CLI command.
 * **State Separation**: Cloud snapshots import only `instruments` and final `price_bars`. Local `market_data_health`, `market_data_coverage`, observability, workflow, and transient state remain local so the production database does not overwrite local operational state.
+* **Execution Boundary Storage**: Broker mutation idempotency lives in a separate SQLite file, `Logs/Execution/execution-boundary.sqlite`, not in the market-data database. It stores durable operation reservations, deal references, submission attempts, broker outcomes, and reconciliation state for manual CLI and automated execution paths.
 * **Aggregation**: `PriceBarAggregator` allows the base 5-minute canonical data to be rolled up dynamically into 10-minute or 1-hour candles for the AI charts.
 
 ### 3.1 Local Cloud Mirror Setup
@@ -158,6 +160,7 @@ The trading strategy is executed in two main automated phases, orchestrated by `
 * **Attention Filter**: Quickly filters out noise (e.g., spread too wide, or no price volatility) without calling OpenAI.
 * **AI Review**: Uses `IntradayOpportunityReviewer` to analyze ScottPlot PNG charts and the Daily Plan to find entry, stop, and target prices.
 * **Shadow Decisions**: The system independently validates AI candidates, recalculates reward/risk, checks configured phase-one execution rules, and records whether each candidate would be rejected, unsupported, already processed, or approved as a shadow execution intent. Shadow mode never writes to IG.
+* **Execution Boundary**: When shadow mode selects an execution-ready intent, the automation reserves a durable execution record and broker-safe deal reference before any future broker write path can run. Manual CLI broker mutations use the same execution store and can be deduped with `--operation-id`.
 
 
 
@@ -172,6 +175,7 @@ If the LLM misbehaves, you edit the embedded Markdown files located at `Trading.
 * **Observability Dumps**: The system drops everything into the `Logs/Observability/<Date>` directory. You will find the exact rendered text prompts, the PNG charts sent to the vision model, raw OpenAI responses, and extracted JSONs.
 * **CLI Evidence Root**: `automation run --root <PATH>` overrides the prompt/evidence root for that run. Use this to keep long-run evidence in a dedicated subfolder.
 * **Decision Audits**: AI trade setups are saved as `DecisionAuditRecord`s with prompt references, paper-evaluation fields, and phase-one shadow decision evidence. The audit records show rejected/unsupported/duplicate candidates, any selected execution-ready intent, and later paper-trading outcomes.
+* **Execution Boundary Evidence**: Decision audits also include the reserved execution-boundary state and deterministic deal reference when an automated intent is selected. Manual submissions render their operation id, ledger state, attempt count, and broker reference in CLI output.
 
 ---
 

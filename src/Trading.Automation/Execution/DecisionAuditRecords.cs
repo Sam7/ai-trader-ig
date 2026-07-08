@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Trading.Abstractions;
+using Trading.Execution;
 using Trading.Strategy.Shared;
 
 namespace Trading.Automation.Execution;
@@ -45,6 +46,7 @@ public sealed record DecisionAuditRecord(
     TradingExecutionMode ExecutionMode,
     IReadOnlyList<IntradayCandidateDecision> ShadowDecisions,
     ExecutionReadyTradeIntent? SelectedShadowIntent,
+    ExecutionBoundarySnapshot? ExecutionBoundary,
     IntradayCandidateDecisionSummary DecisionSummary,
     IReadOnlyList<PaperTradeOutcome> PaperOutcomes,
     IReadOnlyList<PaperMarketAssessmentOutcome> MarketAssessmentOutcomes,

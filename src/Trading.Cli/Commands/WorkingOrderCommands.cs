@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Trading.Abstractions;
+using Trading.Execution;
 
 [Description("List open working orders.")]
 public sealed class ListWorkingOrdersCommand : AsyncCommand<EmptyCommandSettings>
@@ -28,18 +29,25 @@ public sealed class ListWorkingOrdersCommand : AsyncCommand<EmptyCommandSettings
 public sealed class CreateWorkingOrderCommand : AsyncCommand<CreateWorkingOrderSettings>
 {
     private readonly ITradingGateway _gateway;
+    private readonly IExecutionSubmissionService _executionSubmissionService;
     private readonly TradingCliRenderer _renderer;
 
-    public CreateWorkingOrderCommand(ITradingGateway gateway, TradingCliRenderer renderer)
+    public CreateWorkingOrderCommand(
+        ITradingGateway gateway,
+        IExecutionSubmissionService executionSubmissionService,
+        TradingCliRenderer renderer)
     {
         _gateway = gateway;
+        _executionSubmissionService = executionSubmissionService;
         _renderer = renderer;
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, CreateWorkingOrderSettings settings, CancellationToken cancellationToken)
     {
         await _gateway.AuthenticateAsync(cancellationToken);
-        var result = await _gateway.PlaceWorkingOrderAsync(
+        var result = await _executionSubmissionService.SubmitCreateWorkingOrderAsync(
+            CliExecutionOperationIds.Resolve(settings.OperationId),
+            ExecutionOperationSource.ManualCli,
             new CreateWorkingOrderRequest(
                 new InstrumentId(settings.Instrument),
                 CliParsing.ParseDirection(settings.Direction),
@@ -50,13 +58,7 @@ public sealed class CreateWorkingOrderCommand : AsyncCommand<CreateWorkingOrderS
                 settings.GoodTillDate),
             cancellationToken);
 
-        _renderer.WriteSubmission(
-            "Working Order Created",
-            result.DealReference,
-            result.DealId,
-            result.Status,
-            result.Message,
-            result.TimestampUtc);
+        _renderer.WriteExecutionSubmission("Working Order Created", result);
 
         return 0;
     }
@@ -66,18 +68,25 @@ public sealed class CreateWorkingOrderCommand : AsyncCommand<CreateWorkingOrderS
 public sealed class UpdateWorkingOrderCommand : AsyncCommand<UpdateWorkingOrderSettings>
 {
     private readonly ITradingGateway _gateway;
+    private readonly IExecutionSubmissionService _executionSubmissionService;
     private readonly TradingCliRenderer _renderer;
 
-    public UpdateWorkingOrderCommand(ITradingGateway gateway, TradingCliRenderer renderer)
+    public UpdateWorkingOrderCommand(
+        ITradingGateway gateway,
+        IExecutionSubmissionService executionSubmissionService,
+        TradingCliRenderer renderer)
     {
         _gateway = gateway;
+        _executionSubmissionService = executionSubmissionService;
         _renderer = renderer;
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, UpdateWorkingOrderSettings settings, CancellationToken cancellationToken)
     {
         await _gateway.AuthenticateAsync(cancellationToken);
-        var result = await _gateway.UpdateWorkingOrderAsync(
+        var result = await _executionSubmissionService.SubmitUpdateWorkingOrderAsync(
+            CliExecutionOperationIds.Resolve(settings.OperationId),
+            ExecutionOperationSource.ManualCli,
             new UpdateWorkingOrderRequest(
                 settings.DealId,
                 settings.Level,
@@ -86,13 +95,7 @@ public sealed class UpdateWorkingOrderCommand : AsyncCommand<UpdateWorkingOrderS
                 settings.GoodTillDate),
             cancellationToken);
 
-        _renderer.WriteSubmission(
-            "Working Order Updated",
-            result.DealReference,
-            result.DealId,
-            result.Status,
-            result.Message,
-            result.TimestampUtc);
+        _renderer.WriteExecutionSubmission("Working Order Updated", result);
 
         return 0;
     }
@@ -102,25 +105,28 @@ public sealed class UpdateWorkingOrderCommand : AsyncCommand<UpdateWorkingOrderS
 public sealed class CancelWorkingOrderCommand : AsyncCommand<CancelWorkingOrderSettings>
 {
     private readonly ITradingGateway _gateway;
+    private readonly IExecutionSubmissionService _executionSubmissionService;
     private readonly TradingCliRenderer _renderer;
 
-    public CancelWorkingOrderCommand(ITradingGateway gateway, TradingCliRenderer renderer)
+    public CancelWorkingOrderCommand(
+        ITradingGateway gateway,
+        IExecutionSubmissionService executionSubmissionService,
+        TradingCliRenderer renderer)
     {
         _gateway = gateway;
+        _executionSubmissionService = executionSubmissionService;
         _renderer = renderer;
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, CancelWorkingOrderSettings settings, CancellationToken cancellationToken)
     {
         await _gateway.AuthenticateAsync(cancellationToken);
-        var result = await _gateway.CancelWorkingOrderAsync(settings.DealId, cancellationToken);
-        _renderer.WriteSubmission(
-            "Working Order Cancelled",
-            result.DealReference,
-            result.DealId,
-            result.Status,
-            result.Message,
-            result.TimestampUtc);
+        var result = await _executionSubmissionService.SubmitCancelWorkingOrderAsync(
+            CliExecutionOperationIds.Resolve(settings.OperationId),
+            ExecutionOperationSource.ManualCli,
+            settings.DealId,
+            cancellationToken);
+        _renderer.WriteExecutionSubmission("Working Order Cancelled", result);
 
         return 0;
     }
@@ -149,6 +155,9 @@ public sealed class CreateWorkingOrderSettings : CommandSettings
     [CommandOption("--good-till-date <ISO-8601>")]
     public DateTimeOffset? GoodTillDate { get; init; }
 
+    [CommandOption("--operation-id <ID>")]
+    public string? OperationId { get; init; }
+
     public override ValidationResult Validate()
     {
         if (string.IsNullOrWhiteSpace(Instrument))
@@ -176,6 +185,11 @@ public sealed class CreateWorkingOrderSettings : CommandSettings
             return ValidationResult.Error("Option --level must be greater than zero.");
         }
 
+        if (OperationId is not null && string.IsNullOrWhiteSpace(OperationId))
+        {
+            return ValidationResult.Error("Option --operation-id cannot be blank.");
+        }
+
         return TimeInForce is null || CliParsing.IsValidTimeInForce(TimeInForce)
             ? ValidationResult.Success()
             : ValidationResult.Error("Option --time-in-force must be gtc or gtd.");
@@ -199,6 +213,9 @@ public sealed class UpdateWorkingOrderSettings : CommandSettings
     [CommandOption("--good-till-date <ISO-8601>")]
     public DateTimeOffset? GoodTillDate { get; init; }
 
+    [CommandOption("--operation-id <ID>")]
+    public string? OperationId { get; init; }
+
     public override ValidationResult Validate()
     {
         if (string.IsNullOrWhiteSpace(DealId))
@@ -221,6 +238,11 @@ public sealed class UpdateWorkingOrderSettings : CommandSettings
             return ValidationResult.Error("Option --time-in-force must be gtc or gtd.");
         }
 
+        if (OperationId is not null && string.IsNullOrWhiteSpace(OperationId))
+        {
+            return ValidationResult.Error("Option --operation-id cannot be blank.");
+        }
+
         return ValidationResult.Success();
     }
 }
@@ -230,8 +252,18 @@ public sealed class CancelWorkingOrderSettings : CommandSettings
     [CommandOption("--deal-id <ID>")]
     public string DealId { get; init; } = string.Empty;
 
+    [CommandOption("--operation-id <ID>")]
+    public string? OperationId { get; init; }
+
     public override ValidationResult Validate()
     {
-        return CliParsing.Require(!string.IsNullOrWhiteSpace(DealId), "Missing required option --deal-id.");
+        if (string.IsNullOrWhiteSpace(DealId))
+        {
+            return ValidationResult.Error("Missing required option --deal-id.");
+        }
+
+        return OperationId is not null && string.IsNullOrWhiteSpace(OperationId)
+            ? ValidationResult.Error("Option --operation-id cannot be blank.")
+            : ValidationResult.Success();
     }
 }

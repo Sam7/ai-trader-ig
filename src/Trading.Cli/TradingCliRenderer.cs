@@ -2,6 +2,7 @@ using Spectre.Console;
 using Trading.AI.DailyBriefing;
 using Trading.Abstractions;
 using Trading.Automation.Execution;
+using Trading.Execution;
 using Trading.Strategy.Shared;
 
 public sealed class TradingCliRenderer
@@ -31,6 +32,21 @@ public sealed class TradingCliRenderer
             ("Status", status.ToString()),
             ("Message", message ?? "n/a"),
             ("Time", CliParsing.FormatDate(timestampUtc)));
+    }
+
+    public void WriteExecutionSubmission(string title, ExecutionSubmissionResult result)
+    {
+        WriteKeyValuePanel(
+            title,
+            ("Operation ID", result.Record.OperationId),
+            ("Operation Kind", result.Record.Kind.ToString()),
+            ("Ledger State", result.Record.State.ToString()),
+            ("Attempts", result.Record.AttemptCount.ToString()),
+            ("Reference", result.DealReference),
+            ("Deal ID", result.DealId ?? "n/a"),
+            ("Status", result.Status.ToString()),
+            ("Message", result.Message ?? "n/a"),
+            ("Time", CliParsing.FormatDate(result.TimestampUtc)));
     }
 
     public void WriteWorkingOrders(IReadOnlyList<WorkingOrderSummary> workingOrders)
@@ -427,6 +443,18 @@ public sealed class TradingCliRenderer
                 "Decision Audit",
                 ("Audit JSON", auditArtifact.Path),
                 ("Audit URI", auditArtifact.Uri));
+        }
+
+        if (result.ExecutionBoundary is { } executionBoundary)
+        {
+            WriteKeyValuePanel(
+                "Execution Boundary",
+                ("Decision ID", executionBoundary.DecisionId),
+                ("State", executionBoundary.State.ToString()),
+                ("Deal Reference", executionBoundary.DealReference),
+                ("Deal ID", executionBoundary.DealId ?? "n/a"),
+                ("Attempts", executionBoundary.AttemptCount.ToString()),
+                ("Last Error", executionBoundary.LastError ?? "n/a"));
         }
 
         if (result.ExecutionArtifacts.AttachmentArtifacts.Count > 0)

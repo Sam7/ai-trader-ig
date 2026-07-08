@@ -2,6 +2,7 @@ using System.ComponentModel;
 using Spectre.Console;
 using Spectre.Console.Cli;
 using Trading.Abstractions;
+using Trading.Execution;
 
 [Description("List open positions.")]
 public sealed class ListPositionsCommand : AsyncCommand<EmptyCommandSettings>
@@ -28,25 +29,28 @@ public sealed class ListPositionsCommand : AsyncCommand<EmptyCommandSettings>
 public sealed class ClosePositionCommand : AsyncCommand<ClosePositionSettings>
 {
     private readonly ITradingGateway _gateway;
+    private readonly IExecutionSubmissionService _executionSubmissionService;
     private readonly TradingCliRenderer _renderer;
 
-    public ClosePositionCommand(ITradingGateway gateway, TradingCliRenderer renderer)
+    public ClosePositionCommand(
+        ITradingGateway gateway,
+        IExecutionSubmissionService executionSubmissionService,
+        TradingCliRenderer renderer)
     {
         _gateway = gateway;
+        _executionSubmissionService = executionSubmissionService;
         _renderer = renderer;
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, ClosePositionSettings settings, CancellationToken cancellationToken)
     {
         await _gateway.AuthenticateAsync(cancellationToken);
-        var result = await _gateway.ClosePositionAsync(new ClosePositionRequest(settings.DealId, settings.Size), cancellationToken);
-        _renderer.WriteSubmission(
-            "Position Closed",
-            result.DealReference,
-            result.DealId,
-            result.Status,
-            result.Message,
-            result.TimestampUtc);
+        var result = await _executionSubmissionService.SubmitClosePositionAsync(
+            CliExecutionOperationIds.Resolve(settings.OperationId),
+            ExecutionOperationSource.ManualCli,
+            new ClosePositionRequest(settings.DealId, settings.Size),
+            cancellationToken);
+        _renderer.WriteExecutionSubmission("Position Closed", result);
 
         return 0;
     }
@@ -56,18 +60,25 @@ public sealed class ClosePositionCommand : AsyncCommand<ClosePositionSettings>
 public sealed class UpdatePositionCommand : AsyncCommand<UpdatePositionSettings>
 {
     private readonly ITradingGateway _gateway;
+    private readonly IExecutionSubmissionService _executionSubmissionService;
     private readonly TradingCliRenderer _renderer;
 
-    public UpdatePositionCommand(ITradingGateway gateway, TradingCliRenderer renderer)
+    public UpdatePositionCommand(
+        ITradingGateway gateway,
+        IExecutionSubmissionService executionSubmissionService,
+        TradingCliRenderer renderer)
     {
         _gateway = gateway;
+        _executionSubmissionService = executionSubmissionService;
         _renderer = renderer;
     }
 
     public override async Task<int> ExecuteAsync(CommandContext context, UpdatePositionSettings settings, CancellationToken cancellationToken)
     {
         await _gateway.AuthenticateAsync(cancellationToken);
-        var result = await _gateway.UpdatePositionAsync(
+        var result = await _executionSubmissionService.SubmitUpdatePositionAsync(
+            CliExecutionOperationIds.Resolve(settings.OperationId),
+            ExecutionOperationSource.ManualCli,
             new UpdatePositionRequest(
                 settings.DealId,
                 settings.StopLevel,
@@ -76,13 +87,7 @@ public sealed class UpdatePositionCommand : AsyncCommand<UpdatePositionSettings>
                 settings.TrailingStopIncrement),
             cancellationToken);
 
-        _renderer.WriteSubmission(
-            "Position Updated",
-            result.DealReference,
-            result.DealId,
-            result.Status,
-            result.Message,
-            result.TimestampUtc);
+        _renderer.WriteExecutionSubmission("Position Updated", result);
 
         return 0;
     }
@@ -96,11 +101,19 @@ public sealed class ClosePositionSettings : CommandSettings
     [CommandOption("-s|--size <SIZE>")]
     public decimal? Size { get; init; }
 
+    [CommandOption("--operation-id <ID>")]
+    public string? OperationId { get; init; }
+
     public override ValidationResult Validate()
     {
         if (string.IsNullOrWhiteSpace(DealId))
         {
             return ValidationResult.Error("Missing required option --deal-id.");
+        }
+
+        if (OperationId is not null && string.IsNullOrWhiteSpace(OperationId))
+        {
+            return ValidationResult.Error("Option --operation-id cannot be blank.");
         }
 
         return Size is null || Size > 0
@@ -126,11 +139,19 @@ public sealed class UpdatePositionSettings : CommandSettings
     [CommandOption("--trailing-stop-increment <INCREMENT>")]
     public decimal? TrailingStopIncrement { get; init; }
 
+    [CommandOption("--operation-id <ID>")]
+    public string? OperationId { get; init; }
+
     public override ValidationResult Validate()
     {
         if (string.IsNullOrWhiteSpace(DealId))
         {
             return ValidationResult.Error("Missing required option --deal-id.");
+        }
+
+        if (OperationId is not null && string.IsNullOrWhiteSpace(OperationId))
+        {
+            return ValidationResult.Error("Option --operation-id cannot be blank.");
         }
 
         if (StopLevel is null

@@ -5,6 +5,7 @@ using Trading.AI.Configuration;
 using Trading.AI.Prompts.IntradayOpportunityReview;
 using Trading.Abstractions;
 using Trading.Automation.Execution;
+using Trading.Execution;
 using Trading.Strategy.Shared;
 
 public sealed class DecisionAuditWriterTests
@@ -36,6 +37,15 @@ public sealed class DecisionAuditWriterTests
             await File.WriteAllTextAsync(extractedPath, "{}");
             var prepared = CreatePreparation(tempDirectory.FullName);
             var result = CreateReviewResult();
+            var executionBoundary = new ExecutionBoundarySnapshot(
+                "dec_test",
+                ExecutionBoundaryState.Reserved,
+                "ATOPEN123",
+                null,
+                0,
+                DateTimeOffset.Parse("2026-03-12T10:01:00Z"),
+                DateTimeOffset.Parse("2026-03-12T10:01:00Z"),
+                null);
 
             var artifact = await writer.WriteInitialAsync(
                 prepared,
@@ -44,6 +54,7 @@ public sealed class DecisionAuditWriterTests
                     ToArtifact(extractedPath),
                     []),
                 result,
+                executionBoundary,
                 CancellationToken.None);
 
             File.Exists(artifact.Path).Should().BeTrue();
@@ -61,6 +72,7 @@ public sealed class DecisionAuditWriterTests
             record.ShadowDecisions.Should().ContainSingle();
             record.ShadowDecisions[0].Reasons.Should().Contain(IntradayCandidateDecisionReason.ExecutionDisabled);
             record.SelectedShadowIntent.Should().BeNull();
+            record.ExecutionBoundary.Should().Be(executionBoundary);
             record.DecisionSummary.Rejected.Should().Be(1);
             record.PaperOutcomes.Should().ContainSingle();
             record.PaperOutcomes[0].Status.Should().Be(PaperTradeOutcomeStatus.DataInsufficient);

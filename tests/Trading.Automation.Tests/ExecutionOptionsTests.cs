@@ -16,6 +16,7 @@ public sealed class ExecutionOptionsTests
         policy.SupportedInstruments.Should().BeEmpty();
         policy.SupportedEntryMethods.Should().ContainSingle().Which.Should().Be(TradeEntryMethod.Market);
         policy.QuantityPolicy.Should().Be("BrokerMinimum");
+        options.StorePath.Should().Be(Path.Combine("Logs", "Execution", "execution-boundary.sqlite"));
     }
 
     [Fact]

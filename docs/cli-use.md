@@ -8,6 +8,8 @@ It covers the complete syntax, available branches, options, and practical exampl
 
 The `Trading.Cli` project provides a `Spectre.Console`-based command-line interface. It is designed for manual execution, local verification, and triggering isolated parts of the automation pipeline without booting the background worker.
 
+Manual broker mutations are recorded in the shared execution SQLite store configured by `Automation:Execution:StorePath` (default `Logs/Execution/execution-boundary.sqlite`). Mutating commands accept `--operation-id <ID>` as an optional idempotency key. Reusing the same operation id returns the existing durable operation state instead of submitting a duplicate broker mutation once the operation has already left the reservable state.
+
 **General Execution Syntax:**
 
 ```powershell
@@ -117,9 +119,10 @@ Places an immediate OTC market order.
 * **Options:**
 * `-i, --instrument <EPIC>` *(Required)*.
 * `-s, --size <SIZE>` *(Required)*: Order size.
+* `--operation-id <ID>`: Optional stable idempotency key for this manual submission.
 
 
-* **Example:** `... trades buy --instrument IX.D.SPTRD.DAILY.IP --size 1`
+* **Example:** `... trades buy --instrument IX.D.SPTRD.DAILY.IP --size 1 --operation-id manual-20260708-vix-open`
 
 ### 3.2 List & Manage Positions
 
@@ -127,12 +130,14 @@ Places an immediate OTC market order.
 * **Command:** `positions close` (Closes an open position)
 * `--deal-id <ID>` *(Required)*.
 * `-s, --size <SIZE>`: Optional partial close size.
+* `--operation-id <ID>`: Optional stable idempotency key.
 
 
 * **Command:** `positions update` (Amends stops and limits)
 * `--deal-id <ID>` *(Required)*.
 * `--stop-level <LEVEL>`, `--limit-level <LEVEL>`.
 * `--trailing-stop-distance <DISTANCE>`, `--trailing-stop-increment <INCREMENT>`.
+* `--operation-id <ID>`: Optional stable idempotency key.
 
 
 * **Example:** `... positions update --deal-id DIAAAAAAA --stop-level 1 --limit-level 100`
@@ -149,6 +154,7 @@ Entry orders (Limit/Stop) placed away from the current market price.
 * `-s, --size <SIZE>`, `-l, --level <LEVEL>` *(Required)*.
 * `--time-in-force <gtc|gtd>`: Good-till-cancelled or Good-till-date (Default: gtc).
 * `--good-till-date <ISO-8601>`.
+* `--operation-id <ID>`: Optional stable idempotency key for create, update, and cancel commands.
 
 
 
@@ -240,7 +246,8 @@ Starts the background automation schedule (TickerQ cron jobs).
 * **Command:** `automation intraday scan` (Runs a full 15-minute scan cycle once).
 * `--date <YYYY-MM-DD>`, `--at <UTC-ISO>`.
 * A full scan lazily creates the daily plan if it is missing for the target date.
-* The scan writes a decision audit containing phase-one shadow decisions. With `Automation:Execution:Mode` set to `Disabled`, candidates are analyzed and audited but cannot be approved. With `Shadow`, allowlisted market-entry candidates can produce execution-ready intents, but no IG order is submitted.
+* The scan writes a decision audit containing phase-one shadow decisions. With `Automation:Execution:Mode` set to `Disabled`, candidates are analyzed and audited but cannot be approved. With `Shadow`, allowlisted market-entry candidates can produce execution-ready intents and reserve durable execution-boundary records, but no IG order is submitted.
+* When a shadow intent is selected, CLI output includes an `Execution Boundary` panel with the reserved state, deterministic deal reference, and attempt count.
 
 
 * **Command:** `automation intraday prepare` (Prepares charts and JSON payloads without calling OpenAI).

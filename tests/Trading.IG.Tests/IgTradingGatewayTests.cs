@@ -102,6 +102,53 @@ public class IgTradingGatewayTests
     }
 
     [Fact]
+    public async Task PlaceMarketOrderAsync_WithSuppliedDealReference_ShouldSubmitThatReference()
+    {
+        CreatePositionRequest? capturedRequest = null;
+
+        var api = new FakeIgTradingApi
+        {
+            CreatePosition = request =>
+            {
+                capturedRequest = request;
+                return Task.FromResult(new CreatePositionResponse(request.DealReference));
+            },
+        };
+
+        var gateway = CreateGateway(api);
+
+        var result = await gateway.PlaceMarketOrderAsync(new PlaceOrderRequest(
+            new InstrumentId("IX.D.SPTRD.DAILY.IP"),
+            TradeDirection.Buy,
+            1m,
+            "ATOPEN123"));
+
+        result.DealReference.Should().Be("ATOPEN123");
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.DealReference.Should().Be("ATOPEN123");
+    }
+
+    [Theory]
+    [InlineData("contains-dash")]
+    [InlineData("lowercase")]
+    [InlineData("THISREFERENCEISFARLONGERTHANTHIRTYCHARS")]
+    public async Task PlaceMarketOrderAsync_WithInvalidSuppliedDealReference_ShouldThrow(string dealReference)
+    {
+        var gateway = CreateGateway(new FakeIgTradingApi
+        {
+            Market = _ => throw new InvalidOperationException("Market lookup should not happen for invalid deal references."),
+        });
+
+        var action = () => gateway.PlaceMarketOrderAsync(new PlaceOrderRequest(
+            new InstrumentId("IX.D.SPTRD.DAILY.IP"),
+            TradeDirection.Buy,
+            1m,
+            dealReference));
+
+        await action.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
     public async Task GetOrderStatusAsync_ShouldUseActivityDetailsDealReferenceForClosedPositions()
     {
         var api = new FakeIgTradingApi
@@ -169,52 +216,6 @@ public class IgTradingGatewayTests
         status.Should().NotBeNull();
         status!.Status.Should().Be(OrderStatus.Closed);
         status.DealId.Should().Be("DIAAAAWTY7AF8AV");
-    }
-
-    [Fact]
-    public async Task GetOrderStatusAsync_ShouldUseJournalToCorrelateCloseSubmission()
-    {
-        var api = new FakeIgTradingApi
-        {
-            Activity = (_, _, _) => Task.FromResult(new ActivityResponse(
-            [
-                new ActivityItem(
-                    null,
-                    DateTimeOffset.UtcNow.ToString("O"),
-                    new ActivityDetails(
-                        "BROKERREF123",
-                        [new ActivityAction("POSITION_CLOSED", "OPENDEAL1")],
-                        null,
-                        "SELL",
-                        2m,
-                        23.49m,
-                        "AUD"),
-                    "ACCEPTED",
-                    "Position/s closed",
-                    "DIAAAAWBROKER1",
-                    "CC.D.VIX.UMA.IP",
-                    null)
-            ])),
-        };
-
-        var journal = new FakeOrderReferenceJournal();
-        await journal.SaveAsync(new OrderSubmissionRecord(
-            "CLOSESUBMITTED1",
-            OrderSubmissionKind.Close,
-            DateTimeOffset.UtcNow,
-            new InstrumentId("CC.D.VIX.UMA.IP"),
-            TradeDirection.Sell,
-            2m,
-            "OPENDEAL1"));
-
-        var gateway = CreateGateway(api, journal);
-
-        var status = await gateway.GetOrderStatusAsync("CLOSESUBMITTED1");
-
-        status.Should().NotBeNull();
-        status!.Status.Should().Be(OrderStatus.Closed);
-        status.DealReference.Should().Be("CLOSESUBMITTED1");
-        status.DealId.Should().Be("DIAAAAWBROKER1");
     }
 
     [Fact]
@@ -524,6 +525,34 @@ public class IgTradingGatewayTests
     }
 
     [Fact]
+    public async Task ClosePositionAsync_WithSuppliedDealReference_ShouldSubmitThatReference()
+    {
+        Ig.Trading.Sdk.Models.ClosePositionRequest? capturedRequest = null;
+        var api = new FakeIgTradingApi
+        {
+            OpenPositions = _ => Task.FromResult(new PositionsResponse(
+            [
+                new PositionEnvelope(
+                    new PositionData("P1", "BUY", 2m, "USD", 12m, DateTimeOffset.UtcNow.ToString("O"), 15m, 10m, null, null),
+                    new PositionMarketData("IX.D.SPTRD.DAILY.IP", "DFB"))
+            ])),
+            ClosePosition = request =>
+            {
+                capturedRequest = request;
+                return Task.FromResult(new ClosePositionResponse(request.DealReference));
+            },
+        };
+
+        var gateway = CreateGateway(api);
+
+        var result = await gateway.ClosePositionAsync(new Trading.Abstractions.ClosePositionRequest("P1", 1m, "ATCLOSE123"));
+
+        result.DealReference.Should().Be("ATCLOSE123");
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.DealReference.Should().Be("ATCLOSE123");
+    }
+
+    [Fact]
     public async Task GetOrderStatusAsync_WithInvalidTransactionSize_ShouldThrowBrokerError()
     {
         var api = new FakeIgTradingApi
@@ -652,8 +681,8 @@ public class IgTradingGatewayTests
         result.Status.Should().Be(OrderStatus.Accepted);
     }
 
-    private static IgTradingGateway CreateGateway(IIgTradingApi api, IOrderReferenceJournal? journal = null)
-        => new(api, journal ?? new NullOrderReferenceJournal(), NullLogger<IgTradingGateway>.Instance);
+    private static IgTradingGateway CreateGateway(IIgTradingApi api)
+        => new(api, NullLogger<IgTradingGateway>.Instance);
 
     private sealed class FakeIgTradingApi : IIgTradingApi
     {
@@ -749,17 +778,4 @@ public class IgTradingGatewayTests
         public Task<AccountsResponse> GetAccountsAsync(CancellationToken cancellationToken = default) => Accounts(cancellationToken);
     }
 
-    private sealed class FakeOrderReferenceJournal : IOrderReferenceJournal
-    {
-        private readonly Dictionary<string, OrderSubmissionRecord> _records = [];
-
-        public Task SaveAsync(OrderSubmissionRecord record, CancellationToken cancellationToken = default)
-        {
-            _records[record.DealReference] = record;
-            return Task.CompletedTask;
-        }
-
-        public Task<OrderSubmissionRecord?> GetAsync(string dealReference, CancellationToken cancellationToken = default)
-            => Task.FromResult(_records.GetValueOrDefault(dealReference));
-    }
 }

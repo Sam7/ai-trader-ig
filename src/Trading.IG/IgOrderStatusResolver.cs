@@ -8,16 +8,13 @@ namespace Trading.IG;
 internal sealed class IgOrderStatusResolver
 {
     private readonly IIgTradingApi _igTradingApi;
-    private readonly IOrderReferenceJournal _orderReferenceJournal;
     private readonly ILogger _logger;
 
     public IgOrderStatusResolver(
         IIgTradingApi igTradingApi,
-        IOrderReferenceJournal orderReferenceJournal,
         ILogger logger)
     {
         _igTradingApi = igTradingApi;
-        _orderReferenceJournal = orderReferenceJournal;
         _logger = logger;
     }
 
@@ -54,16 +51,6 @@ internal sealed class IgOrderStatusResolver
             if (transactionMatch is not null)
             {
                 return IgTradingMapper.MapTransaction(transactionMatch, dealReference);
-            }
-
-            var submission = await _orderReferenceJournal.GetAsync(dealReference, cancellationToken);
-            if (submission is not null)
-            {
-                var correlatedStatus = IgTradingMapper.CorrelateFromSubmission(submission, activities.Activities ?? []);
-                if (correlatedStatus is not null)
-                {
-                    return correlatedStatus;
-                }
             }
 
             _logger.LogInformation("No confirm/activity found for deal reference {DealReference}; returning pending.", dealReference);
