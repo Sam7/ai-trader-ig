@@ -90,15 +90,6 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
         return await ReadOperationRecordAsync(connection, null, operationId, cancellationToken);
     }
 
-    public async Task<ExecutionOperationRecord?> GetOperationByDealReferenceAsync(
-        string dealReference,
-        CancellationToken cancellationToken = default)
-    {
-        await EnsureInitializedAsync(cancellationToken);
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        return await ReadOperationRecordByDealReferenceAsync(connection, null, dealReference, cancellationToken);
-    }
-
     public async Task<ExecutionOperationSubmissionLease?> TryBeginOperationSubmissionAsync(
         string operationId,
         DateTimeOffset startedAtUtc,
@@ -462,18 +453,6 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
         await using var command = CreateReadOperationCommand(connection, transaction);
         command.CommandText += " WHERE decision_id = $value LIMIT 1;";
         command.Parameters.AddWithValue("$value", operationId);
-        return await ReadSingleOperationRecordAsync(command, cancellationToken);
-    }
-
-    private static async Task<ExecutionOperationRecord?> ReadOperationRecordByDealReferenceAsync(
-        SqliteConnection connection,
-        SqliteTransaction? transaction,
-        string dealReference,
-        CancellationToken cancellationToken)
-    {
-        await using var command = CreateReadOperationCommand(connection, transaction);
-        command.CommandText += " WHERE deal_reference = $value LIMIT 1;";
-        command.Parameters.AddWithValue("$value", dealReference);
         return await ReadSingleOperationRecordAsync(command, cancellationToken);
     }
 

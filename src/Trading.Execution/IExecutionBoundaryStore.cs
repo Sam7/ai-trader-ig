@@ -14,10 +14,6 @@ public interface IExecutionBoundaryStore
         string operationId,
         CancellationToken cancellationToken = default);
 
-    Task<ExecutionOperationRecord?> GetOperationByDealReferenceAsync(
-        string dealReference,
-        CancellationToken cancellationToken = default);
-
     Task<ExecutionOperationSubmissionLease?> TryBeginOperationSubmissionAsync(
         string operationId,
         DateTimeOffset startedAtUtc,

@@ -40,9 +40,6 @@ public interface IExecutionSubmissionService
         string dealId,
         CancellationToken cancellationToken = default);
 
-    Task<ExecutionOperationRecord?> ReconcileAsync(
-        string operationId,
-        CancellationToken cancellationToken = default);
 }
 
 public sealed class ExecutionSubmissionService : IExecutionSubmissionService
@@ -176,35 +173,6 @@ public sealed class ExecutionSubmissionService : IExecutionSubmissionService
                 return FromWorkingOrderResult(result);
             },
             cancellationToken);
-
-    public async Task<ExecutionOperationRecord?> ReconcileAsync(
-        string operationId,
-        CancellationToken cancellationToken = default)
-    {
-        var record = await _store.GetOperationAsync(operationId, cancellationToken);
-        if (record is null)
-        {
-            return null;
-        }
-
-        if (record.State is ExecutionBoundaryState.Reserved or ExecutionBoundaryState.FailedBeforeSubmission)
-        {
-            return record;
-        }
-
-        var status = await _gateway.GetOrderStatusAsync(record.DealReference, cancellationToken);
-        return await _store.CompleteOperationAttemptAsync(
-            new ExecutionOperationAttemptCompletion(
-                record.OperationId,
-                Math.Max(1, record.AttemptCount),
-                ResolveState(status?.Status ?? OrderStatus.Unknown, status?.DealId),
-                _clock.UtcNow,
-                status?.DealReference,
-                status?.DealId,
-                status?.Status,
-                ErrorMessage: status?.Message),
-            cancellationToken);
-    }
 
     private async Task<ExecutionSubmissionResult> SubmitOnceAsync(
         ExecutionOperationRequest request,

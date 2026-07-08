@@ -965,10 +965,6 @@ public sealed class TradingCliApplicationTests
                 OrderStatus.Accepted,
                 null));
 
-        public Task<ExecutionOperationRecord?> ReconcileAsync(
-            string operationId,
-            CancellationToken cancellationToken = default)
-            => Task.FromResult<ExecutionOperationRecord?>(null);
     }
 
     private sealed record MarketOrderExecutionRequest(
