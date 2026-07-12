@@ -61,8 +61,10 @@ public sealed class IntradayOpportunityScanServiceTests
             preparationWriter: null!,
             decisionAuditWriter: null!,
             ensureService,
+            new IntradayOpportunityScanGate(),
             workflow: null!,
             executionBoundaryService: null!,
+            demoCanaryExecutionService: null!,
             Options.Create(new AutomationOptions()),
             Options.Create(new DailyBriefingOptions()),
             NullLogger<IntradayOpportunityScanService>.Instance);

@@ -142,7 +142,8 @@ public sealed class DecisionAuditWriter
                     0,
                     "Assessment follow-through has not been evaluated against post-signal market data yet."))
                 .ToArray(),
-            DecisionBiasSummary.From(assessments, candidates));
+            DecisionBiasSummary.From(assessments, candidates),
+            null);
     }
 
     private string BuildAuditPath(DateOnly tradingDate, DateTimeOffset requestedAtUtc)

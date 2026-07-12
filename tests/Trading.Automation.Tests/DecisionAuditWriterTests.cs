@@ -73,6 +73,7 @@ public sealed class DecisionAuditWriterTests
             record.ShadowDecisions[0].Reasons.Should().Contain(IntradayCandidateDecisionReason.ExecutionDisabled);
             record.SelectedShadowIntent.Should().BeNull();
             record.ExecutionBoundary.Should().Be(executionBoundary);
+            record.DemoExecution.Should().BeNull();
             record.DecisionSummary.Rejected.Should().Be(1);
             record.PaperOutcomes.Should().ContainSingle();
             record.PaperOutcomes[0].Status.Should().Be(PaperTradeOutcomeStatus.DataInsufficient);
@@ -142,6 +143,7 @@ public sealed class DecisionAuditWriterTests
             record.AuditId.Should().Be("2026-03-12/100000000-decision-audit");
             record.ExecutionMode.Should().Be(TradingExecutionMode.Disabled);
             record.ShadowDecisions.Should().BeEmpty();
+            record.DemoExecution.Should().BeNull();
             record.DecisionSummary.Considered.Should().Be(0);
         }
         finally

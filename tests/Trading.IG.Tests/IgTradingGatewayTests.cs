@@ -102,6 +102,35 @@ public class IgTradingGatewayTests
     }
 
     [Fact]
+    public async Task PlaceMarketOrderAsync_WithProtection_ShouldSubmitStopAndLimit()
+    {
+        CreatePositionRequest? capturedRequest = null;
+
+        var api = new FakeIgTradingApi
+        {
+            CreatePosition = request =>
+            {
+                capturedRequest = request;
+                return Task.FromResult(new CreatePositionResponse(request.DealReference));
+            },
+        };
+
+        var gateway = CreateGateway(api);
+
+        await gateway.PlaceMarketOrderAsync(new PlaceOrderRequest(
+            new InstrumentId("IX.D.SPTRD.DAILY.IP"),
+            TradeDirection.Buy,
+            1m,
+            "ATOPEN123",
+            95m,
+            110m));
+
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.StopLevel.Should().Be(95m);
+        capturedRequest.LimitLevel.Should().Be(110m);
+    }
+
+    [Fact]
     public async Task PlaceMarketOrderAsync_WithSuppliedDealReference_ShouldSubmitThatReference()
     {
         CreatePositionRequest? capturedRequest = null;
@@ -146,6 +175,25 @@ public class IgTradingGatewayTests
             dealReference));
 
         await action.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [Fact]
+    public async Task PlaceMarketOrderAsync_WithPartialProtection_ShouldThrow()
+    {
+        var gateway = CreateGateway(new FakeIgTradingApi
+        {
+            Market = _ => throw new InvalidOperationException("Market lookup should not happen for invalid protection."),
+        });
+
+        var action = () => gateway.PlaceMarketOrderAsync(new PlaceOrderRequest(
+            new InstrumentId("IX.D.SPTRD.DAILY.IP"),
+            TradeDirection.Buy,
+            1m,
+            "ATOPEN123",
+            95m));
+
+        await action.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*both be supplied or both be omitted*");
     }
 
     [Fact]

@@ -65,10 +65,17 @@ public sealed class IntradayOpportunityReviewService
 
         if (decisionReview.SelectedShadowIntent is null)
         {
+            if (decisionReview.ExecutionMode == TradingExecutionMode.Demo)
+            {
+                return "Validated intraday opportunity batch. No candidate was approved for demo canary execution.";
+            }
+
             return "Validated intraday opportunity batch. No candidate was approved for shadow execution.";
         }
 
-        return $"Validated intraday opportunity batch. Selected shadow intent {decisionReview.SelectedShadowIntent.DecisionId}.";
+        return decisionReview.ExecutionMode == TradingExecutionMode.Demo
+            ? $"Validated intraday opportunity batch. Selected demo canary intent {decisionReview.SelectedShadowIntent.DecisionId}."
+            : $"Validated intraday opportunity batch. Selected shadow intent {decisionReview.SelectedShadowIntent.DecisionId}.";
     }
 
     private sealed class InstrumentIdComparer : IEqualityComparer<InstrumentId>

@@ -118,7 +118,7 @@ public sealed class IntradayCandidateDecisionService
                 "Execution mode is Disabled; no candidate can be approved for shadow execution.");
         }
 
-        if (_policy.Mode != TradingExecutionMode.Shadow)
+        if (_policy.Mode is not (TradingExecutionMode.Shadow or TradingExecutionMode.Demo))
         {
             return CreateRejectedDecision(
                 candidate,
@@ -128,7 +128,7 @@ public sealed class IntradayCandidateDecisionService
                 recalculatedRewardRisk,
                 spreadRiskRatio,
                 priceMovementRiskRatio,
-                "Phase one can evaluate only Disabled and Shadow execution modes.");
+                "The current execution mode does not permit deterministic candidate approval.");
         }
 
         if (!watchedMarkets.ContainsKey(candidate.Instrument.Value))

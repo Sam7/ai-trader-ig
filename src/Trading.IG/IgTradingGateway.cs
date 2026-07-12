@@ -39,6 +39,11 @@ public sealed class IgTradingGateway : ITradingGateway
             throw new ArgumentOutOfRangeException(nameof(request.Size), "Order size must be greater than zero.");
         }
 
+        if (request.StopLevel is null ^ request.LimitLevel is null)
+        {
+            throw new ArgumentException("StopLevel and LimitLevel must either both be supplied or both be omitted.", nameof(request));
+        }
+
         var dealReference = ResolveDealReference(request.DealReference, "SPIKE");
 
         return await ExecuteTranslatedAsync(
@@ -60,7 +65,9 @@ public sealed class IgTradingGateway : ITradingGateway
                     "FILL_OR_KILL",
                     ForceOpen: true,
                     GuaranteedStop: false,
-                    dealReference),
+                    dealReference,
+                    StopLevel: request.StopLevel,
+                    LimitLevel: request.LimitLevel),
                 cancellationToken);
 
             var summary = await _orderStatusResolver.GetOrderStatusAsync(dealReference, cancellationToken);

@@ -50,7 +50,31 @@ public sealed record DecisionAuditRecord(
     IntradayCandidateDecisionSummary DecisionSummary,
     IReadOnlyList<PaperTradeOutcome> PaperOutcomes,
     IReadOnlyList<PaperMarketAssessmentOutcome> MarketAssessmentOutcomes,
-    DecisionBiasSummary BiasSummary);
+    DecisionBiasSummary BiasSummary,
+    DemoCanaryExecutionSnapshot? DemoExecution = null);
+
+public sealed record DemoCanaryExecutionSnapshot(
+    string DecisionId,
+    string OperationId,
+    TradingExecutionMode ExecutionMode,
+    string ApprovedBaseUrl,
+    string ApprovedAccountId,
+    string SessionAccountId,
+    InstrumentId Instrument,
+    string InstrumentName,
+    decimal Size,
+    decimal StopLevel,
+    decimal LimitLevel,
+    string DealReference,
+    string? DealId,
+    ExecutionBoundaryState BoundaryState,
+    OrderStatus SubmissionStatus,
+    OrderStatus? ConfirmationStatus,
+    bool ProtectionVerified,
+    bool ProtectionAmended,
+    DateTimeOffset SubmittedAtUtc,
+    DateTimeOffset? CompletedAtUtc,
+    string Outcome);
 
 public sealed record PromptAuditReference(
     ArtifactReference PreparedArtifact,

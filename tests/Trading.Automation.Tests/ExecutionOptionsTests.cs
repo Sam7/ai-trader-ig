@@ -48,16 +48,32 @@ public sealed class ExecutionOptionsTests
         policy.FreshQuoteMaxAge.Should().Be(TimeSpan.FromMinutes(10));
     }
 
-    [Theory]
-    [InlineData(TradingExecutionMode.Demo)]
-    [InlineData(TradingExecutionMode.Live)]
-    public void CreateShadowDecisionPolicy_WithWriteMode_ShouldFailForPhaseOne(TradingExecutionMode mode)
+    [Fact]
+    public void CreateShadowDecisionPolicy_WithDemoMode_ShouldAllowDemoCanarySelection()
     {
-        var options = new ExecutionOptions { Mode = mode };
+        var options = new ExecutionOptions
+        {
+            Mode = TradingExecutionMode.Demo,
+            Shadow = new ShadowExecutionOptions
+            {
+                SupportedInstruments = ["CC.D.TEST.IP"],
+                SupportedEntryMethods = [TradeEntryMethod.Market],
+            },
+        };
+
+        var policy = options.CreateShadowDecisionPolicy("Australia/Melbourne");
+
+        policy.Mode.Should().Be(TradingExecutionMode.Demo);
+    }
+
+    [Fact]
+    public void CreateShadowDecisionPolicy_WithLiveMode_ShouldFailClosed()
+    {
+        var options = new ExecutionOptions { Mode = TradingExecutionMode.Live };
 
         var action = () => options.CreateShadowDecisionPolicy("Australia/Melbourne");
 
         action.Should().Throw<InvalidOperationException>()
-            .WithMessage("*Phase one supports only Disabled and Shadow*");
+            .WithMessage("*Execution mode must be Disabled, Shadow, or Demo*");
     }
 }

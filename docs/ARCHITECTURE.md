@@ -27,9 +27,9 @@ The solution is intentionally split into distinct layers. This separation ensure
 | --- | --- | --- |
 | **`Trading.Abstractions`** | Defines the domain language (models, enums, `ITradingGateway`). | **Never** include transport, HTTP, or broker-specific terminology (e.g., IG "Epics") in the contracts. |
 | **`Trading.Strategy`** | Owns the business workflow: daily planning, intraday assessments, risk gating, and execution intent. | **Never** tie this layer to a specific LLM implementation or a specific broker adapter. |
-| **`Trading.Execution`** | Owns durable execution idempotency: operation reservations, deal references, attempts, broker outcomes, and reconciliation state. | **Never** put strategy scoring, IG DTOs, market-data persistence, or CLI parsing concerns here. |
+| **`Trading.Execution`** | Owns durable execution idempotency: operation reservations, stop/limit protection intent, deal references, attempts, broker outcomes, and reconciliation state. | **Never** put strategy scoring, IG DTOs, market-data persistence, or CLI parsing concerns here. |
 | **`Trading.AI`** | Manages LLM prompts, json extraction, and observability artifacts. | **Never** let raw LLM responses leak into the strategy layer without strict JSON validation/mapping. |
-| **`Trading.MarketData`** | Handles SQLite persistence, gap-finding, and historical backfills for price data. | **Never** allow strategy logic to bypass this layer to fetch raw prices directly. |
+| **`Trading.MarketData`** | Handles SQLite persistence, bounded stream ingestion, gap-finding, health state, and historical backfills for price data. | **Never** allow strategy logic to bypass this layer to fetch raw prices directly. |
 | **`Ig.Trading.Sdk`** | A Refit-based SDK for IG REST and streaming. Handles auth, session tokens, and raw DTOs. | **Never** couple this to the rest of the solution. It must remain extractable as a standalone OSS library. |
 | **`Trading.IG`** | The Gateway Adapter. Maps abstraction requests into IG SDK calls and translates errors. | **Never** build a "second SDK" or durable journal here. It must stay thin and focused solely on broker mapping and status reads. |
 | **`Trading.Charting`** | Renders broker-neutral `PriceSeries` into PNG images using ScottPlot. | **Never** bleed ScottPlot-specific drawing logic into the CLI, Strategy, or AI layers. |
@@ -88,6 +88,9 @@ Throughout the day, the system looks for actionable setups on the watched market
 **3. Shadow Execution Decision (The First Execution Bridge)**
 The AI proposes trades, but **the system makes the final deterministic phase-one decision** before any future broker execution path can use the candidate.
 
+**4. Demo Canary Execution**
+When the execution mode is `Demo`, the same deterministic intent can advance into one explicitly approved IG demo account and allowlisted instrument. The canary path still fail-closes on base URL mismatch, account mismatch, unresolved exposure, or missing stop/limit protection.
+
 * **Action:** The intraday opportunity workflow evaluates each AI candidate against `Automation:Execution` policy.
 * **Mechanism:** It validates watchlist membership, expiry, quote freshness, price geometry, independently recalculated reward/risk, spread/risk, execution price movement, score threshold, supported instrument, supported entry method, duplicate decisions, trading-date interpretation, and high-impact event windows.
 * **Intent:** If approved in `Shadow` mode, the system records an execution-ready intent with entry, stop, target, expiry, quantity policy, decision id, source audit id, rules, and context. It does not submit orders to IG in phase one.
@@ -111,9 +114,10 @@ To understand the architecture, you must understand how data flows through the b
 ## 6. State Management Rules
 
 * **Trading Day State is Volatile:** The daily plan and strategy-level pending/active trade state remain in memory via `InMemoryTradingDayStore`. If the worker restarts, the next full intraday scan lazily recreates today's plan before analysis continues. Do not persist the full trading-day store without an architectural review.
-* **Execution Boundary State is Durable:** Manual and automated broker mutations are reserved in `Logs/Execution/execution-boundary.sqlite`. This store is the single source of truth for operation ids, deal references, attempts, broker outcomes, and reconciliation state. Automated decisions remain fail-closed: an uncertain submitted operation must not be retried blindly.
-* **Market Data is Durable:** Price bars, gap tracking, and stream accumulation are strictly persisted to `ig-market-data.sqlite` using Write-Ahead Logging (WAL).
+* **Execution Boundary State is Durable:** Manual and automated broker mutations are reserved in `Logs/Execution/execution-boundary.sqlite`. This store is the single source of truth for operation ids, stop/limit protection intent, deal references, attempts, broker outcomes, and reconciliation state. Automated decisions remain fail-closed: an uncertain submitted operation must not be retried blindly.
+* **Market Data is Durable and Bounded:** Price bars, gap tracking, and stream accumulation are persisted to `ig-market-data.sqlite` using Write-Ahead Logging (WAL). Lightstreamer callbacks must enter a bounded dispatcher, forming candles may be coalesced, final candles must be preserved or force a loud failure, and SQLite writes should be batched rather than performed from unbounded callback tasks.
 * **Decision Audits are Immutable:** Every LLM prompt, context, chart, extracted JSON, shadow decision, selected execution-ready intent, and execution-boundary snapshot must be saved to disk under the `Logs/Observability` folder so each automated trading decision can be reconstructed.
+* **Worker Health is Operational State:** Process memory, GC state, market-data queue depth, and publisher freshness are outer-host diagnostics owned by automation/host services. The CLI may render them, but it must not compute health policy.
 
 ---
 

@@ -47,13 +47,13 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
             INSERT INTO execution_records (
                 decision_id, operation_kind, operation_source, state, source_decision_audit_id,
                 source_decision_audit_path, intent_json, trading_date, instrument_value, direction,
-                entry_method, size, related_deal_id, deal_reference, deal_id, broker_status, reserved_at_utc_ticks,
+                entry_method, size, stop_level, limit_level, related_deal_id, deal_reference, deal_id, broker_status, reserved_at_utc_ticks,
                 updated_at_utc_ticks, submitted_at_utc_ticks, confirmed_at_utc_ticks, closed_at_utc_ticks,
                 attempt_count, last_error)
             VALUES (
                 $decision_id, $operation_kind, $operation_source, $state, $source_decision_audit_id,
                 $source_decision_audit_path, $intent_json, $trading_date, $instrument_value, $direction,
-                $entry_method, $size, $related_deal_id, $deal_reference, NULL, NULL, $reserved_at_utc_ticks,
+                $entry_method, $size, $stop_level, $limit_level, $related_deal_id, $deal_reference, NULL, NULL, $reserved_at_utc_ticks,
                 $updated_at_utc_ticks, NULL, NULL, NULL, 0, NULL)
             ON CONFLICT(decision_id) DO NOTHING;
             """;
@@ -69,6 +69,8 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
         command.Parameters.AddWithValue("$direction", request.Direction is null ? 0 : (int)request.Direction.Value);
         command.Parameters.AddWithValue("$entry_method", request.EntryMethod is null ? -1 : (int)request.EntryMethod.Value);
         command.Parameters.AddWithValue("$size", request.Size is null ? DBNull.Value : request.Size.Value.ToString(CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$stop_level", request.StopLevel is null ? DBNull.Value : request.StopLevel.Value.ToString(CultureInfo.InvariantCulture));
+        command.Parameters.AddWithValue("$limit_level", request.LimitLevel is null ? DBNull.Value : request.LimitLevel.Value.ToString(CultureInfo.InvariantCulture));
         command.Parameters.AddWithValue("$related_deal_id", ToDbNullableText(request.RelatedDealId));
         command.Parameters.AddWithValue("$deal_reference", dealReference);
         command.Parameters.AddWithValue("$reserved_at_utc_ticks", reservedAtUtc.ToUniversalTime().UtcTicks);
@@ -88,6 +90,35 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
         await EnsureInitializedAsync(cancellationToken);
         await using var connection = await OpenConnectionAsync(cancellationToken);
         return await ReadOperationRecordAsync(connection, null, operationId, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ExecutionOperationRecord>> GetOperationsByTradingDateAsync(
+        DateOnly tradingDate,
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = CreateReadOperationCommand(connection, null);
+        command.CommandText += " WHERE trading_date = $trading_date ORDER BY updated_at_utc_ticks DESC, decision_id ASC;";
+        command.Parameters.AddWithValue("$trading_date", tradingDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        return await ReadOperationRecordsAsync(command, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ExecutionOperationRecord>> GetUnresolvedOperationsAsync(
+        CancellationToken cancellationToken = default)
+    {
+        await EnsureInitializedAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await using var command = CreateReadOperationCommand(connection, null);
+        var records = await ReadOperationRecordsAsync(command, cancellationToken);
+        return records.Where(record =>
+                record.State is ExecutionBoundaryState.Reserved
+                or ExecutionBoundaryState.Submitting
+                or ExecutionBoundaryState.Submitted
+                or ExecutionBoundaryState.OutcomeUncertain)
+            .OrderByDescending(record => record.UpdatedAtUtc)
+            .ThenBy(record => record.OperationId, StringComparer.Ordinal)
+            .ToArray();
     }
 
     public async Task<ExecutionOperationSubmissionLease?> TryBeginOperationSubmissionAsync(
@@ -258,7 +289,9 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
                 TradingDate: intent.TradingDate,
                 Instrument: intent.Instrument,
                 Direction: intent.Direction,
-                EntryMethod: intent.EntryMethod),
+                EntryMethod: intent.EntryMethod,
+                StopLevel: intent.StopLossPrice,
+                LimitLevel: intent.TakeProfitPrice),
             dealReference,
             reservedAtUtc,
             cancellationToken);
@@ -370,6 +403,8 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
                     direction INTEGER NOT NULL,
                     entry_method INTEGER NOT NULL,
                     size TEXT NULL,
+                    stop_level TEXT NULL,
+                    limit_level TEXT NULL,
                     related_deal_id TEXT NULL,
                     deal_reference TEXT NOT NULL UNIQUE,
                     deal_id TEXT NULL,
@@ -403,6 +438,8 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
             await EnsureColumnAsync(connection, "execution_records", "operation_kind", "operation_kind INTEGER NOT NULL DEFAULT 1", cancellationToken);
             await EnsureColumnAsync(connection, "execution_records", "operation_source", "operation_source INTEGER NOT NULL DEFAULT 1", cancellationToken);
             await EnsureColumnAsync(connection, "execution_records", "size", "size TEXT NULL", cancellationToken);
+            await EnsureColumnAsync(connection, "execution_records", "stop_level", "stop_level TEXT NULL", cancellationToken);
+            await EnsureColumnAsync(connection, "execution_records", "limit_level", "limit_level TEXT NULL", cancellationToken);
             await EnsureColumnAsync(connection, "execution_records", "related_deal_id", "related_deal_id TEXT NULL", cancellationToken);
             await EnsureColumnAsync(connection, "execution_records", "broker_status", "broker_status INTEGER NULL", cancellationToken);
 
@@ -456,6 +493,20 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
         return await ReadSingleOperationRecordAsync(command, cancellationToken);
     }
 
+    private static async Task<IReadOnlyList<ExecutionOperationRecord>> ReadOperationRecordsAsync(
+        SqliteCommand command,
+        CancellationToken cancellationToken)
+    {
+        var records = new List<ExecutionOperationRecord>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            records.Add(ReadOperationRecord(reader));
+        }
+
+        return records;
+    }
+
     private static SqliteCommand CreateReadOperationCommand(
         SqliteConnection connection,
         SqliteTransaction? transaction)
@@ -465,7 +516,7 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
         command.CommandText = """
             SELECT decision_id, operation_kind, operation_source, state, source_decision_audit_id,
                    source_decision_audit_path, intent_json, trading_date, instrument_value, direction,
-                   entry_method, size, related_deal_id, deal_reference, deal_id, broker_status,
+                   entry_method, size, stop_level, limit_level, related_deal_id, deal_reference, deal_id, broker_status,
                    reserved_at_utc_ticks, updated_at_utc_ticks, submitted_at_utc_ticks, confirmed_at_utc_ticks,
                    closed_at_utc_ticks, attempt_count, last_error
             FROM execution_records
@@ -483,6 +534,11 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
             return null;
         }
 
+        return ReadOperationRecord(reader);
+    }
+
+    private static ExecutionOperationRecord ReadOperationRecord(SqliteDataReader reader)
+    {
         var intentJson = reader.GetString(6);
         var intent = string.IsNullOrWhiteSpace(intentJson) || intentJson == "{}"
             ? null
@@ -501,17 +557,19 @@ public sealed class SqliteExecutionBoundaryStore : IExecutionBoundaryStore
             ReadNullableDirection(reader, 9),
             ReadNullableEntryMethod(reader, 10),
             ReadNullableDecimal(reader, 11),
-            ReadNullableText(reader, 12),
-            reader.GetString(13),
+            ReadNullableDecimal(reader, 12),
+            ReadNullableDecimal(reader, 13),
             ReadNullableText(reader, 14),
-            ReadNullableOrderStatus(reader, 15),
-            FromDbTicks(reader.GetInt64(16)),
-            FromDbTicks(reader.GetInt64(17)),
-            ReadNullableDateTimeOffset(reader, 18),
-            ReadNullableDateTimeOffset(reader, 19),
+            reader.GetString(15),
+            ReadNullableText(reader, 16),
+            ReadNullableOrderStatus(reader, 17),
+            FromDbTicks(reader.GetInt64(18)),
+            FromDbTicks(reader.GetInt64(19)),
             ReadNullableDateTimeOffset(reader, 20),
-            reader.GetInt32(21),
-            ReadNullableText(reader, 22));
+            ReadNullableDateTimeOffset(reader, 21),
+            ReadNullableDateTimeOffset(reader, 22),
+            reader.GetInt32(23),
+            ReadNullableText(reader, 24));
     }
 
     private static ExecutionBoundaryRecord ToBoundaryRecord(ExecutionOperationRecord operation)

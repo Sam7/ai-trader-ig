@@ -457,6 +457,28 @@ public sealed class TradingCliRenderer
                 ("Last Error", executionBoundary.LastError ?? "n/a"));
         }
 
+        if (result.DemoExecution is { } demoExecution)
+        {
+            WriteKeyValuePanel(
+                "Demo Canary Execution",
+                ("Decision ID", demoExecution.DecisionId),
+                ("Operation ID", demoExecution.OperationId),
+                ("Mode", demoExecution.ExecutionMode.ToString()),
+                ("Account", demoExecution.SessionAccountId),
+                ("Instrument", demoExecution.Instrument.Value),
+                ("Size", CliParsing.FormatDecimal(demoExecution.Size)),
+                ("Stop", CliParsing.FormatDecimal(demoExecution.StopLevel)),
+                ("Limit", CliParsing.FormatDecimal(demoExecution.LimitLevel)),
+                ("Deal Reference", demoExecution.DealReference),
+                ("Deal ID", demoExecution.DealId ?? "n/a"),
+                ("Boundary State", demoExecution.BoundaryState.ToString()),
+                ("Submission Status", demoExecution.SubmissionStatus.ToString()),
+                ("Confirmation Status", demoExecution.ConfirmationStatus?.ToString() ?? "n/a"),
+                ("Protection Verified", demoExecution.ProtectionVerified.ToString()),
+                ("Protection Amended", demoExecution.ProtectionAmended.ToString()),
+                ("Outcome", demoExecution.Outcome));
+        }
+
         if (result.ExecutionArtifacts.AttachmentArtifacts.Count > 0)
         {
             var attachments = CreateTable("Attachment Path", "Attachment URI");

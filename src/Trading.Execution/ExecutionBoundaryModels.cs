@@ -92,6 +92,8 @@ public sealed record ExecutionOperationRequest(
     TradeDirection? Direction = null,
     TradeEntryMethod? EntryMethod = null,
     decimal? Size = null,
+    decimal? StopLevel = null,
+    decimal? LimitLevel = null,
     string? RelatedDealId = null);
 
 public sealed record ExecutionOperationRecord(
@@ -107,6 +109,8 @@ public sealed record ExecutionOperationRecord(
     TradeDirection? Direction,
     TradeEntryMethod? EntryMethod,
     decimal? Size,
+    decimal? StopLevel,
+    decimal? LimitLevel,
     string? RelatedDealId,
     string DealReference,
     string? DealId,

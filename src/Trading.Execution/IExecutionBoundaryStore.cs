@@ -14,6 +14,13 @@ public interface IExecutionBoundaryStore
         string operationId,
         CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyList<ExecutionOperationRecord>> GetOperationsByTradingDateAsync(
+        DateOnly tradingDate,
+        CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyList<ExecutionOperationRecord>> GetUnresolvedOperationsAsync(
+        CancellationToken cancellationToken = default);
+
     Task<ExecutionOperationSubmissionLease?> TryBeginOperationSubmissionAsync(
         string operationId,
         DateTimeOffset startedAtUtc,

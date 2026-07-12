@@ -13,14 +13,23 @@ public sealed class ExecutionSubmissionServiceTests
         using var database = TestExecutionDatabase.Create();
         var gateway = new FakeTradingGateway();
         var service = CreateService(database.Path, gateway);
-        var request = new PlaceOrderRequest(new InstrumentId("CC.D.TEST.IP"), TradeDirection.Buy, 1m);
+        var request = new PlaceOrderRequest(
+            new InstrumentId("CC.D.TEST.IP"),
+            TradeDirection.Buy,
+            1m,
+            StopLevel: 95m,
+            LimitLevel: 110m);
 
         var first = await service.SubmitMarketOrderAsync("manual-open-1", ExecutionOperationSource.ManualCli, request);
         var second = await service.SubmitMarketOrderAsync("manual-open-1", ExecutionOperationSource.ManualCli, request);
 
         gateway.MarketOrderRequests.Should().ContainSingle();
         gateway.MarketOrderRequests[0].DealReference.Should().MatchRegex("^[A-Z0-9]{1,30}$");
+        gateway.MarketOrderRequests[0].StopLevel.Should().Be(95m);
+        gateway.MarketOrderRequests[0].LimitLevel.Should().Be(110m);
         first.Record.State.Should().Be(ExecutionBoundaryState.Confirmed);
+        first.Record.StopLevel.Should().Be(95m);
+        first.Record.LimitLevel.Should().Be(110m);
         second.Record.AttemptCount.Should().Be(1);
         second.Status.Should().Be(OrderStatus.Open);
         second.DealReference.Should().Be(first.DealReference);
@@ -32,7 +41,12 @@ public sealed class ExecutionSubmissionServiceTests
         using var database = TestExecutionDatabase.Create();
         var gateway = new FakeTradingGateway();
         var service = CreateService(database.Path, gateway);
-        var request = new PlaceOrderRequest(new InstrumentId("CC.D.TEST.IP"), TradeDirection.Buy, 1m);
+        var request = new PlaceOrderRequest(
+            new InstrumentId("CC.D.TEST.IP"),
+            TradeDirection.Buy,
+            1m,
+            StopLevel: 95m,
+            LimitLevel: 110m);
 
         await service.SubmitMarketOrderAsync("manual-open-1", ExecutionOperationSource.ManualCli, request);
         await service.SubmitMarketOrderAsync("manual-open-2", ExecutionOperationSource.ManualCli, request);

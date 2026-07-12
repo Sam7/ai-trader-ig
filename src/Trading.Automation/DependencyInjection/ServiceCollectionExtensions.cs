@@ -51,10 +51,12 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<ExecutionBoundaryService>();
         services.AddSingleton<ExecutionSubmissionService>();
         services.AddSingleton<IExecutionSubmissionService>(sp => sp.GetRequiredService<ExecutionSubmissionService>());
+        services.AddTransient<DemoCanaryExecutionService>();
 
         services.AddTransient<DailyBriefingResearchService>();
         services.AddTransient<DailyBriefingPlanService>();
         services.AddSingleton<DailyPlanEnsureService>();
+        services.AddSingleton<IntradayOpportunityScanGate>();
         services.AddSingleton<IntradayPriceSeriesCache>();
         services.AddSingleton<IntradayOpportunityPreparationWriter>();
         services.AddSingleton<DecisionAuditWriter>();

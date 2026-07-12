@@ -27,8 +27,10 @@ public sealed class IntradayOpportunityScanService
     private readonly IntradayOpportunityPreparationWriter _preparationWriter;
     private readonly DecisionAuditWriter _decisionAuditWriter;
     private readonly DailyPlanEnsureService _dailyPlanEnsureService;
+    private readonly IntradayOpportunityScanGate _scanGate;
     private readonly ITradingDayWorkflow _workflow;
     private readonly ExecutionBoundaryService _executionBoundaryService;
+    private readonly DemoCanaryExecutionService _demoCanaryExecutionService;
     private readonly AutomationOptions _automationOptions;
     private readonly IReadOnlyDictionary<string, string> _instrumentNames;
     private readonly ILogger<IntradayOpportunityScanService> _logger;
@@ -41,8 +43,10 @@ public sealed class IntradayOpportunityScanService
         IntradayOpportunityPreparationWriter preparationWriter,
         DecisionAuditWriter decisionAuditWriter,
         DailyPlanEnsureService dailyPlanEnsureService,
+        IntradayOpportunityScanGate scanGate,
         ITradingDayWorkflow workflow,
         ExecutionBoundaryService executionBoundaryService,
+        DemoCanaryExecutionService demoCanaryExecutionService,
         IOptions<AutomationOptions> automationOptions,
         IOptions<DailyBriefingOptions> dailyBriefingOptions,
         ILogger<IntradayOpportunityScanService> logger)
@@ -54,8 +58,10 @@ public sealed class IntradayOpportunityScanService
         _preparationWriter = preparationWriter;
         _decisionAuditWriter = decisionAuditWriter;
         _dailyPlanEnsureService = dailyPlanEnsureService;
+        _scanGate = scanGate;
         _workflow = workflow;
         _executionBoundaryService = executionBoundaryService;
+        _demoCanaryExecutionService = demoCanaryExecutionService;
         _automationOptions = automationOptions.Value;
         _instrumentNames = dailyBriefingOptions.Value.TrackedMarkets.ToDictionary(
             market => market.InstrumentId,
@@ -106,26 +112,41 @@ public sealed class IntradayOpportunityScanService
         DateTimeOffset requestedAtUtc,
         CancellationToken cancellationToken = default)
     {
-        try
+        if (!_scanGate.TryEnter())
         {
-            await _dailyPlanEnsureService.EnsureAsync(tradingDate, cancellationToken);
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            _logger.LogError(
-                exception,
-                "Skipping intraday opportunity scan for {TradingDate}: daily plan could not be created.",
+            _logger.LogWarning(
+                "Skipping intraday opportunity scan for {TradingDate}: a previous scan is still running.",
                 tradingDate);
             return null;
         }
 
-        var prepared = await PrepareAsync(tradingDate, requestedAtUtc, cancellationToken);
-        if (prepared is null)
+        try
         {
-            return null;
-        }
+            try
+            {
+                await _dailyPlanEnsureService.EnsureAsync(tradingDate, cancellationToken);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                _logger.LogError(
+                    exception,
+                    "Skipping intraday opportunity scan for {TradingDate}: daily plan could not be created.",
+                    tradingDate);
+                return null;
+            }
 
-        return await SubmitAsync(prepared, cancellationToken);
+            var prepared = await PrepareAsync(tradingDate, requestedAtUtc, cancellationToken);
+            if (prepared is null)
+            {
+                return null;
+            }
+
+            return await SubmitAsync(prepared, cancellationToken);
+        }
+        finally
+        {
+            _scanGate.Release();
+        }
     }
 
     private async Task<IntradayOpportunitySubmitResult> SubmitAsync(
@@ -207,6 +228,18 @@ public sealed class IntradayOpportunityScanService
             batch,
             workflowResult,
             executionBoundaryRecord is null ? null : ExecutionBoundarySnapshot.From(executionBoundaryRecord));
+
+        if (_automationOptions.Execution.Mode == TradingExecutionMode.Demo
+            && workflowResult.SelectedShadowIntent is not null
+            && decisionAuditArtifact is not null)
+        {
+            var demoExecution = await _demoCanaryExecutionService.ExecuteAsync(result, cancellationToken);
+            result = result with { DemoExecution = demoExecution };
+            _logger.LogInformation(
+                "Demo canary execution completed for decision {DecisionId}. Outcome: {Outcome}.",
+                demoExecution?.DecisionId ?? workflowResult.SelectedShadowIntent.DecisionId,
+                demoExecution?.Outcome ?? "n/a");
+        }
 
         _logger.LogInformation(
             "Submitted intraday opportunity review for {TradingDate}. Envelope: {EnvelopePath}. Extracted JSON: {StructuredPath}. Decision audit: {DecisionAuditPath}.",

@@ -73,7 +73,9 @@ public sealed class ExecutionSubmissionService : IExecutionSubmissionService
                 source,
                 Instrument: request.Instrument,
                 Direction: request.Direction,
-                Size: request.Size),
+                Size: request.Size,
+                StopLevel: request.StopLevel,
+                LimitLevel: request.LimitLevel),
             async (dealReference, token) =>
             {
                 var result = await _gateway.PlaceMarketOrderAsync(request with { DealReference = dealReference }, token);

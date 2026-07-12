@@ -8,4 +8,5 @@ public sealed record IntradayOpportunitySubmitResult(
     IntradayOpportunityExecutionArtifacts ExecutionArtifacts,
     IntradayOpportunityBatch Batch,
     IntradayOpportunityReviewResult WorkflowResult,
-    ExecutionBoundarySnapshot? ExecutionBoundary);
+    ExecutionBoundarySnapshot? ExecutionBoundary,
+    DemoCanaryExecutionSnapshot? DemoExecution = null);

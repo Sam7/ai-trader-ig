@@ -26,6 +26,7 @@ To run the app, your configuration must include the following keys:
 * `IG__BaseUrl`: Should be `https://demo-api.ig.com/gateway/deal` for local dev and testing.
 * `IG__ApiKey`, `IG__Identifier`, `IG__Password`: Your IG Demo account credentials.
 * `IG__AccountId`: Optional, to switch to a specific account.
+* `Automation:Execution:Demo:*`: Safety gates for the demo canary, including the approved base URL, approved account, allowlisted instrument, armed flag, and kill switch.
 * `AI:OpenAI:ApiKey`: Required for the LLM planning and intraday review workflows.
 
 ### 1.3 Configuring Tracked Markets
@@ -72,7 +73,7 @@ The solution strictly enforces separation of concerns to keep the business logic
 * **`Ig.Trading.Sdk`**: An isolated, Refit-based SDK for IG's REST API. Manages session tokens (`CST`, `X-SECURITY-TOKEN`), handles RSA encrypted passwords, and maps DTOs.
 * **`Trading.IG`**: The Adapter. Implements `ITradingGateway` using the SDK, translates IG HTTP errors into domain `TradingGatewayException`s, and orchestrates order status lookups.
 * **`Trading.Strategy`**: The workflow orchestrator. Models the daily briefing, intraday opportunity reviews, deterministic shadow decisions, and broker-neutral execution-ready intents.
-* **`Trading.Execution`**: The durable execution boundary. Tracks manual and automated broker mutations, assigns broker-safe deal references, records submission attempts, and prevents duplicate submissions when a stable operation id is provided.
+* **`Trading.Execution`**: The durable execution boundary. Tracks manual and automated broker mutations, preserves stop/limit protection intent, assigns broker-safe deal references, records submission attempts, and prevents duplicate submissions when a stable operation id is provided.
 * **`Trading.AI`**: The LLM interaction layer. Manages prompts via `PromptRegistry` and enforces strict JSON schema output via `Microsoft.Extensions.AI`.
 * **`Trading.MarketData`**: Manages price data ingestion, historical backfilling, SQLite persistence, and GCS-backed market-data snapshots.
 * **`Trading.Charting`**: Generates broker-neutral price chart images (PNG) using `ScottPlot`.
@@ -88,12 +89,13 @@ See the full architecture in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 Market data is the lifeblood of the charting and AI analysis workflows. It is handled through a hybrid stream-and-fill approach.
 
 * **SQLite Storage**: Price data is stored in `ig-market-data.sqlite` with Write-Ahead Logging (WAL) enabled. The schema tracks `price_bars`, connection health (`market_data_health`), and historical backfill status (`market_data_coverage`).
-* **Live Streaming**: The system uses `IgMarketDataStreamClient` to connect to IG's Lightstreamer endpoint, subscribing to items like `CHART:{epic}:5MINUTE`. Ticks are accumulated into forming and finalized candles by `IgChartCandleUpdateAccumulator` before being written to SQLite.
+* **Live Streaming**: The system uses `IgMarketDataStreamClient` to connect to IG's Lightstreamer endpoint, subscribing to items like `CHART:{epic}:5MINUTE`. Stream callbacks are bounded and coalesce expendable forming-candle updates before batched SQLite writes; finalized candles are preserved or the stream fails loudly instead of silently losing data.
 * **Historical Backfill**: If the system detects gaps (e.g., after a restart), the `MarketDataCollector` requests historical data via REST (`GetPricesAsync`). **Crucial note:** IG enforces strict historical data allowance limits. The codebase catches these specific allowance exceptions to prevent infinite retry loops.
 * **Cloud Snapshots**: The production worker can publish a validated SQLite snapshot to GCS every five minutes using the Google Cloud Storage .NET client. Local development can mirror that snapshot with Application Default Credentials, validate it, and transactionally import final market-data bars without replacing an active SQLite file.
+* **Worker Health**: The worker writes `worker-status.json` locally and can publish `market-data/health/worker-status.json` to GCS. The payload includes process memory, GC state, stream queue depth, persisted-update counters, and latest market-data freshness.
 * **Mirror Mode**: When `MarketData:CloudSnapshot:Mirror:Enabled` is `true`, automatic IG historical REST backfill is disabled. Local workflows read the mirrored data from the normal `MarketDataService` path. Explicit REST backfill remains available through the `marketdata backfill` CLI command.
 * **State Separation**: Cloud snapshots import only `instruments` and final `price_bars`. Local `market_data_health`, `market_data_coverage`, observability, workflow, and transient state remain local so the production database does not overwrite local operational state.
-* **Execution Boundary Storage**: Broker mutation idempotency lives in a separate SQLite file, `Logs/Execution/execution-boundary.sqlite`, not in the market-data database. It stores durable operation reservations, deal references, submission attempts, broker outcomes, and reconciliation state for manual CLI and automated execution paths.
+* **Execution Boundary Storage**: Broker mutation idempotency lives in a separate SQLite file, `Logs/Execution/execution-boundary.sqlite`, not in the market-data database. It stores durable operation reservations, stop/limit protection intent, deal references, submission attempts, broker outcomes, and reconciliation state for manual CLI and automated execution paths.
 * **Aggregation**: `PriceBarAggregator` allows the base 5-minute canonical data to be rolled up dynamically into 10-minute or 1-hour candles for the AI charts.
 
 ### 3.1 Local Cloud Mirror Setup
@@ -161,6 +163,7 @@ The trading strategy is executed in two main automated phases, orchestrated by `
 * **AI Review**: Uses `IntradayOpportunityReviewer` to analyze ScottPlot PNG charts and the Daily Plan to find entry, stop, and target prices.
 * **Shadow Decisions**: The system independently validates AI candidates, recalculates reward/risk, checks configured phase-one execution rules, and records whether each candidate would be rejected, unsupported, already processed, or approved as a shadow execution intent. Shadow mode never writes to IG.
 * **Execution Boundary**: When shadow mode selects an execution-ready intent, the automation reserves a durable execution record and broker-safe deal reference before any future broker write path can run. Manual CLI broker mutations use the same execution store and can be deduped with `--operation-id`.
+* **Demo Canary**: When `Automation:Execution:Mode` is set to `Demo`, the same deterministic intent can be promoted into one minimum-size protected market order for the approved IG demo account and allowlisted instrument. The canary path still fail-closes on account, base-url, exposure, or protection mismatches.
 
 
 

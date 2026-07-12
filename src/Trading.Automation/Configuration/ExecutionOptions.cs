@@ -12,6 +12,8 @@ public sealed class ExecutionOptions
 
     public ShadowExecutionOptions Shadow { get; init; } = new();
 
+    public DemoExecutionOptions Demo { get; init; } = new();
+
     public ShadowDecisionPolicy CreateShadowDecisionPolicy(string tradingTimezone)
     {
         var policy = new ShadowDecisionPolicy(
@@ -31,6 +33,49 @@ public sealed class ExecutionOptions
             Shadow.QuantityPolicy);
         policy.Validate();
         return policy;
+    }
+}
+
+public sealed class DemoExecutionOptions
+{
+    public bool Armed { get; init; }
+
+    public bool KillSwitchEngaged { get; init; } = true;
+
+    public string ApprovedBaseUrl { get; init; } = "https://demo-api.ig.com/gateway/deal";
+
+    public string ApprovedAccountId { get; init; } = string.Empty;
+
+    public string[] AllowedInstruments { get; set; } = [];
+
+    public int MaxTradesPerTradingDay { get; init; } = 1;
+
+    public void Validate()
+    {
+        if (!Uri.TryCreate(ApprovedBaseUrl, UriKind.Absolute, out _))
+        {
+            throw new InvalidOperationException("Demo approved base URL must be a valid absolute URL.");
+        }
+
+        if (string.IsNullOrWhiteSpace(ApprovedAccountId))
+        {
+            throw new InvalidOperationException("Demo approved account ID is required.");
+        }
+
+        if (AllowedInstruments.Length == 0)
+        {
+            throw new InvalidOperationException("Demo allowlist must contain at least one instrument.");
+        }
+
+        if (AllowedInstruments.Any(instrument => string.IsNullOrWhiteSpace(instrument)))
+        {
+            throw new InvalidOperationException("Demo allowlist instruments must not be blank.");
+        }
+
+        if (MaxTradesPerTradingDay <= 0)
+        {
+            throw new InvalidOperationException("Demo max trades per trading day must be greater than zero.");
+        }
     }
 }
 

@@ -75,6 +75,39 @@ public sealed class ExecutionBoundaryServiceTests
         linked!.SourceDecisionAuditPath.Should().Be(Path.GetFullPath(auditPath));
     }
 
+    [Fact]
+    public async Task GetOperationsByTradingDateAsync_ShouldReturnReservedOperationsForTheDay()
+    {
+        using var database = TestExecutionDatabase.Create();
+        var service = CreateService(database.Path);
+        var intent = CreateIntent();
+
+        await service.ReserveAsync(intent);
+
+        var operations = await service.GetOperationsByTradingDateAsync(TradingDate);
+
+        operations.Should().ContainSingle();
+        operations[0].OperationId.Should().Be(intent.DecisionId);
+        operations[0].StopLevel.Should().Be(intent.StopLossPrice);
+        operations[0].LimitLevel.Should().Be(intent.TakeProfitPrice);
+    }
+
+    [Fact]
+    public async Task GetUnresolvedOperationsAsync_ShouldReturnReservedOperations()
+    {
+        using var database = TestExecutionDatabase.Create();
+        var service = CreateService(database.Path);
+        var intent = CreateIntent();
+
+        await service.ReserveAsync(intent);
+
+        var unresolved = await service.GetUnresolvedOperationsAsync();
+
+        unresolved.Should().ContainSingle();
+        unresolved[0].OperationId.Should().Be(intent.DecisionId);
+        unresolved[0].State.Should().Be(ExecutionBoundaryState.Reserved);
+    }
+
     private static ExecutionBoundaryService CreateService(string databasePath)
         => new(
             new SqliteExecutionBoundaryStore(databasePath),

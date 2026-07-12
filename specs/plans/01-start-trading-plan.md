@@ -192,6 +192,8 @@ This constraint is a feature, not a limitation. It creates the shortest path to 
 
 # 6. Phase 0: Establish the Verified Broker Baseline
 
+**Status:** DONE
+
 ## Objective
 
 Prove that the existing IG integration can reliably complete a manual demo lifecycle before modifying the AI automation path.
@@ -292,6 +294,8 @@ test category plus a PowerShell wrapper that writes sanitized evidence under
 ---
 
 # 7. Phase 1: Produce Execution-Ready Decisions in Shadow Mode
+
+**Status:** DONE
 
 ## Objective
 
@@ -409,6 +413,8 @@ A controlled shadow run should produce a report showing:
 
 # 8. Phase 2: Create a Durable and Idempotent Execution Boundary
 
+**Status:** DONE
+
 ## Objective
 
 Create the minimum durable state required to ensure that one approved decision can produce at most one broker submission.
@@ -498,6 +504,8 @@ Expected test outcome:
 ---
 
 # 9. Phase 3: Minimum Viable Automated Demo Canary
+
+**Status:** DONE
 
 ## Objective
 

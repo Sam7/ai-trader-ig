@@ -27,6 +27,20 @@ public sealed class ExecutionBoundaryService
             _clock.UtcNow,
             cancellationToken);
 
+    public Task<IReadOnlyList<ExecutionOperationRecord>> GetOperationsByTradingDateAsync(
+        DateOnly tradingDate,
+        CancellationToken cancellationToken = default)
+        => _store.GetOperationsByTradingDateAsync(tradingDate, cancellationToken);
+
+    public Task<IReadOnlyList<ExecutionOperationRecord>> GetUnresolvedOperationsAsync(
+        CancellationToken cancellationToken = default)
+        => _store.GetUnresolvedOperationsAsync(cancellationToken);
+
+    public Task<ExecutionBoundaryRecord?> GetAsync(
+        string decisionId,
+        CancellationToken cancellationToken = default)
+        => _store.GetAsync(decisionId, cancellationToken);
+
     public Task<ExecutionBoundaryRecord?> AttachDecisionAuditArtifactAsync(
         string decisionId,
         string decisionAuditPath,

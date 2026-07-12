@@ -864,6 +864,8 @@ public sealed class TradingCliApplicationTests
             null,
             null,
             null,
+            null,
+            null,
             dealReference,
             dealId,
             status,

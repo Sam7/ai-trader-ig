@@ -34,9 +34,9 @@ public sealed record ShadowDecisionPolicy(
     {
         _ = TimeZoneInfo.FindSystemTimeZoneById(TradingTimezone);
 
-        if (Mode is TradingExecutionMode.Demo or TradingExecutionMode.Live)
+        if (Mode == TradingExecutionMode.Live)
         {
-            throw new InvalidOperationException("Phase one supports only Disabled and Shadow execution modes.");
+            throw new InvalidOperationException("Execution mode must be Disabled, Shadow, or Demo for the current roadmap phase.");
         }
 
         if (MinimumOpportunityScore is < 0 or > 100)

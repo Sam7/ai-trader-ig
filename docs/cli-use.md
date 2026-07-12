@@ -247,7 +247,9 @@ Starts the background automation schedule (TickerQ cron jobs).
 * `--date <YYYY-MM-DD>`, `--at <UTC-ISO>`.
 * A full scan lazily creates the daily plan if it is missing for the target date.
 * The scan writes a decision audit containing phase-one shadow decisions. With `Automation:Execution:Mode` set to `Disabled`, candidates are analyzed and audited but cannot be approved. With `Shadow`, allowlisted market-entry candidates can produce execution-ready intents and reserve durable execution-boundary records, but no IG order is submitted.
+* With `Automation:Execution:Mode` set to `Demo`, the same selected intent can place one protected minimum-size market order for the approved demo account and allowlisted instrument, subject to the demo armed flag and kill switch.
 * When a shadow intent is selected, CLI output includes an `Execution Boundary` panel with the reserved state, deterministic deal reference, and attempt count.
+* When a demo canary completes, CLI output also includes a `Demo Canary Execution` panel with the approved account, broker state, stop/limit protection, and final outcome.
 
 
 * **Command:** `automation intraday prepare` (Prepares charts and JSON payloads without calling OpenAI).
