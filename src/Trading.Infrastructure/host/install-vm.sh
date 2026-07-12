@@ -36,7 +36,12 @@ install -d -o ai-trader -g ai-trader -m 0750 "$APP_DIR" "$DATA_DIR" "$LOG_DIR"
 install -d -o ai-trader -g ai-trader -m 0750 \
     "$DATA_DIR/market-data" \
     "$DATA_DIR/snapshot-publisher" \
-    "$DATA_DIR/observability"
+    "$DATA_DIR/observability" \
+    "$DATA_DIR/health"
+install -d -o root -g ai-trader -m 0750 /etc/ai-trader
+touch /etc/ai-trader/ai-trader.env
+chown root:ai-trader /etc/ai-trader/ai-trader.env
+chmod 0640 /etc/ai-trader/ai-trader.env
 
 find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
 tar -xzf "$WORKER_PACKAGE" -C "$APP_DIR"

@@ -14,6 +14,7 @@ public sealed class MarketDataCollector : IMarketDataCollector
     private readonly IMarketDataClock _clock;
     private readonly MarketDataOptions _marketDataOptions;
     private readonly MarketDataCollectorOptions _options;
+    private readonly MarketDataStreamPipelineMetrics _metrics;
     private readonly ILogger<MarketDataCollector> _logger;
     private ITradingSession? _session;
 
@@ -26,6 +27,7 @@ public sealed class MarketDataCollector : IMarketDataCollector
         IMarketDataClock clock,
         IOptions<MarketDataOptions> marketDataOptions,
         IOptions<MarketDataCollectorOptions> options,
+        MarketDataStreamPipelineMetrics metrics,
         ILogger<MarketDataCollector> logger)
     {
         _streamClient = streamClient;
@@ -36,6 +38,7 @@ public sealed class MarketDataCollector : IMarketDataCollector
         _clock = clock;
         _marketDataOptions = marketDataOptions.Value;
         _options = options.Value;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -54,7 +57,15 @@ public sealed class MarketDataCollector : IMarketDataCollector
             .Select(instrument => new MarketDataStreamSubscription(instrument, resolution))
             .ToArray();
 
-        await using var session = await _streamClient.StartAsync(subscriptions, IngestStreamUpdateAsync, cancellationToken);
+        await using var ingestor = new MarketDataStreamBatchIngestor(
+            _store,
+            _healthStore,
+            _clock,
+            _options,
+            _marketDataOptions.StreamIngestion,
+            _metrics,
+            _logger);
+        await using var session = await _streamClient.StartAsync(subscriptions, ingestor.EnqueueAsync, cancellationToken);
         foreach (var instrument in instruments)
         {
             await UpsertHealthAsync(
@@ -94,46 +105,6 @@ public sealed class MarketDataCollector : IMarketDataCollector
         {
             await Task.Delay(duration.Value, cancellationToken);
         }
-    }
-
-    private async Task IngestStreamUpdateAsync(
-        StreamPriceBarUpdate update,
-        CancellationToken cancellationToken)
-    {
-        if (update.Resolution != _options.Resolution)
-        {
-            _logger.LogWarning(
-                "Ignoring stream update for {Instrument} at unsupported resolution {Resolution}.",
-                update.Instrument,
-                update.Resolution);
-            return;
-        }
-
-        await _store.UpsertAsync(
-        [
-            StoredPriceBar.FromPriceBar(
-                update.Instrument,
-                update.Resolution,
-                update.Bar,
-                MarketDataSource.Stream,
-                update.IsFinal,
-                update.ObservedAtUtc),
-        ],
-        cancellationToken);
-
-        var existing = await _healthStore.GetAsync(update.Instrument, update.Resolution, cancellationToken);
-        await _healthStore.UpsertAsync(
-            BuildHealth(
-                update.Instrument,
-                update.Resolution,
-                MarketDataConnectionState.Connected,
-                update.ObservedAtUtc,
-                update.IsFinal ? update.Bar.TimestampUtc : existing?.LatestCompletedCandleUtc,
-                existing?.RepairState ?? MarketDataRepairState.Idle,
-                existing?.UnresolvedGaps ?? [],
-                existing?.LastHistoricalRepairStatus,
-                existing?.LastHistoricalRepairMessage),
-            cancellationToken);
     }
 
     private async Task RepairMissingCompletedCandlesAsync(

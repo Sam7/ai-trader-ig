@@ -32,7 +32,7 @@ public sealed class ScottPlotPriceChartRenderer : IPriceChartRenderer
         var timeSpan = ResolveTimeSpan(series.Resolution, orderedBars);
         var ohlcs = CreateOhlcs(orderedBars, timeSpan);
 
-        Plot plot = new();
+        using Plot plot = new();
         plot.Title(CreateTitle(series));
         plot.XLabel("Time (UTC)");
         plot.YLabel("Price");

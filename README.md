@@ -141,7 +141,7 @@ To run continuously, start the worker or `automation run`; the mirror hosted ser
 
 Troubleshooting:
 
-* **Stale mirror**: run `marketdata mirror status` and check `Last Success UTC`, `Latest Bar UTC`, and `Message`.
+* **Stale mirror**: run `marketdata mirror status` and check `Remote Object Stale`, `Remote Latest Bar Stale`, `Remote Updated UTC`, `Remote Latest Bar UTC`, and `Diagnosis`. A status of `Unchanged` with stale remote metadata points at the publisher/worker, not the local mirror command.
 * **Permission failures**: verify ADC can read the bucket/object and that the GCS object path matches `BucketName` plus `ObjectName`.
 * **Schema errors**: the mirror rejects snapshots that do not contain the current `instruments` and `price_bars` schema. It preserves the last valid local data.
 * **Corrupt downloads**: validation runs `PRAGMA quick_check`; corrupt snapshots are rejected before import.
@@ -245,6 +245,7 @@ The system deploys as a standalone Linux background service to a GCP `e2-micro` 
 ### 6.2 Host Setup & systemd
 
 * The `install-vm.sh` script runs on the VM to set up an `ai-trader` system user, unpacks the binary to `/opt/ai-trader/app`, and wires up the `ai-trader.service` systemd file to keep the worker running.
+* The service is tuned for `e2-micro`: bounded stream queues, worker health telemetry, `MemoryHigh`/`MemoryMax`, controlled fail-fast thresholds, and restart-rate limits. Slack webhook settings belong in `/etc/ai-trader/ai-trader.env`, not in tracked config.
 
 ### 6.3 SQLite Cloud Snapshots
 
@@ -254,6 +255,7 @@ Because SQLite is used for crucial market data, the worker publishes snapshots f
 * `MarketDataSnapshotValidator` runs `PRAGMA quick_check`, verifies the expected schema, computes SHA-256, and records latest-bar metadata.
 * `GcsMarketDataSnapshotObjectStore` uploads the validated snapshot with the official Google Cloud Storage .NET client and the VM service account.
 * The worker service config enables publishing every five minutes to `market-data/ig-market-data.sqlite` in the provisioned backup bucket.
+* The health reporter publishes JSON status separately from the SQLite snapshot, so remote diagnostics remain available even when SSH or journald are unhealthy.
 * No runtime synchronization uses cron, PowerShell, mounted GCS storage, or `gcloud`.
 
 ---

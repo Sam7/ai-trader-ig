@@ -2,6 +2,8 @@
 Description=AI Trader worker
 Wants=network-online.target
 After=network-online.target
+StartLimitIntervalSec=900
+StartLimitBurst=6
 
 [Service]
 Type=simple
@@ -13,9 +15,12 @@ Restart=on-failure
 RestartSec=10
 KillSignal=SIGINT
 TimeoutStopSec=30
+MemoryHigh=550M
+MemoryMax=650M
 
 Environment=DOTNET_ENVIRONMENT=Production
 Environment=ASPNETCORE_ENVIRONMENT=Production
+EnvironmentFile=-/etc/ai-trader/ai-trader.env
 Environment=MarketData__StorePath=/var/lib/ai-trader/market-data/ig-market-data.sqlite
 Environment=MarketData__CloudSnapshot__BucketName=REPLACE_WITH_BACKUP_BUCKET
 Environment=MarketData__CloudSnapshot__ObjectName=market-data/ig-market-data.sqlite
@@ -23,7 +28,21 @@ Environment=MarketData__CloudSnapshot__Publisher__Enabled=true
 Environment=MarketData__CloudSnapshot__Publisher__Interval=00:05:00
 Environment=MarketData__CloudSnapshot__Publisher__StagingDirectory=/var/lib/ai-trader/snapshot-publisher
 Environment=MarketData__CloudSnapshot__Mirror__Enabled=false
+Environment=MarketData__StreamIngestion__DispatcherCapacity=4096
+Environment=MarketData__StreamIngestion__BatchSize=250
+Environment=MarketData__StreamIngestion__FlushInterval=00:00:01
+Environment=MarketData__StreamIngestion__DrainTimeout=00:00:10
+Environment=MarketData__StreamIngestion__HealthUpdateThrottle=00:00:30
 Environment=AI__Prompts__ObservabilityRootPath=/var/lib/ai-trader/observability
+Environment=WorkerHealth__Enabled=true
+Environment=WorkerHealth__Interval=00:01:00
+Environment=WorkerHealth__LocalDirectory=/var/lib/ai-trader/health
+Environment=WorkerHealth__GcsObjectName=market-data/health/worker-status.json
+Environment=WorkerHealth__WarningWorkingSetBytes=419430400
+Environment=WorkerHealth__CriticalWorkingSetBytes=545259520
+Environment=WorkerHealth__FailFastWorkingSetBytes=608174080
+Environment=WorkerHealth__FailFastEnabled=true
+Environment=Alerting__Slack__Enabled=true
 
 StateDirectory=ai-trader
 LogsDirectory=ai-trader

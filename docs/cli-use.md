@@ -188,10 +188,10 @@ Downloads the configured GCS SQLite snapshot only when the remote object changes
 
 ### 4.3 Mirror Status
 
-Shows the last sync attempt, last successful sync, latest mirrored bar, local immutable snapshot path, remote generation/SHA, and stale status.
+Shows the last sync attempt, last successful sync, latest mirrored bar, local immutable snapshot path, remote generation/SHA, remote object timestamps, stale status, and a diagnosis. It distinguishes a local mirror sync problem from a stale remote publisher.
 
 * **Command:** `marketdata mirror status`
-* **Exit code:** Returns `2` if mirror mode is enabled but not configured or stale.
+* **Exit code:** Returns `2` if mirror mode is enabled but not configured, the local mirror is stale, or the remote snapshot object/latest bar is stale.
 
 * **Example:** `... marketdata mirror status`
 

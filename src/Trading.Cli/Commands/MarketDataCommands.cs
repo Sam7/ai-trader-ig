@@ -197,16 +197,22 @@ public sealed class ShowMarketDataMirrorStatusCommand : AsyncCommand
         table.AddRow("Enabled", status.Enabled.ToString());
         table.AddRow("Configured", status.IsConfigured.ToString());
         table.AddRow("Stale", status.IsStale.ToString());
+        table.AddRow("Remote Checked", status.RemoteObjectChecked.ToString());
+        table.AddRow("Remote Object Stale", status.IsRemoteObjectStale.ToString());
+        table.AddRow("Remote Latest Bar Stale", status.IsRemoteLatestBarStale.ToString());
         table.AddRow("Last Attempt UTC", status.LastAttemptUtc?.ToString("O") ?? "-");
         table.AddRow("Last Success UTC", status.LastSuccessfulSyncUtc?.ToString("O") ?? "-");
         table.AddRow("Latest Bar UTC", status.LatestBarUtc?.ToString("O") ?? "-");
+        table.AddRow("Remote Updated UTC", status.RemoteUpdatedUtc?.ToString("O") ?? "-");
+        table.AddRow("Remote Latest Bar UTC", status.RemoteLatestBarUtc?.ToString("O") ?? "-");
         table.AddRow("Remote Generation", status.RemoteGeneration ?? "-");
         table.AddRow("Remote SHA-256", status.RemoteSha256 ?? "-");
         table.AddRow("Snapshot", status.LocalSnapshotPath ?? "-");
         table.AddRow("Last Status", status.LastStatus.ToString());
         table.AddRow("Message", status.LastMessage ?? "-");
+        table.AddRow("Diagnosis", status.Diagnosis);
         _console.Write(table);
-        return status.Enabled && (!status.IsConfigured || status.IsStale)
+        return status.Enabled && (!status.IsConfigured || status.IsStale || status.IsRemoteObjectStale || status.IsRemoteLatestBarStale)
             ? 2
             : 0;
     }

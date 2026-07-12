@@ -2,6 +2,7 @@ using com.lightstreamer.client;
 using Ig.Trading.Sdk;
 using Ig.Trading.Sdk.Streaming;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Trading.MarketData;
 
 namespace Trading.IG;
@@ -24,13 +25,19 @@ public sealed class IgMarketDataStreamClient : IMarketDataStreamClient
     ];
 
     private readonly IIgTradingApi _igTradingApi;
+    private readonly MarketDataOptions _options;
+    private readonly MarketDataStreamPipelineMetrics _metrics;
     private readonly ILogger<IgMarketDataStreamClient> _logger;
 
     public IgMarketDataStreamClient(
         IIgTradingApi igTradingApi,
+        IOptions<MarketDataOptions> options,
+        MarketDataStreamPipelineMetrics metrics,
         ILogger<IgMarketDataStreamClient> logger)
     {
         _igTradingApi = igTradingApi;
+        _options = options.Value;
+        _metrics = metrics;
         _logger = logger;
     }
 
@@ -67,11 +74,17 @@ public sealed class IgMarketDataStreamClient : IMarketDataStreamClient
         var items = subscriptions
             .Select(subscription => $"CHART:{subscription.Instrument.Value}:{IgStreamingConversions.ToIgChartScale(subscription.Resolution)}")
             .ToArray();
+        _options.StreamIngestion.Validate();
+        var dispatcher = new BoundedMarketDataStreamDispatcher(
+            onUpdate,
+            _options.StreamIngestion.DispatcherCapacity,
+            _metrics,
+            _logger);
         var subscription = new Subscription("MERGE", items, ChartFields)
         {
             RequestedSnapshot = "yes",
         };
-        subscription.addListener(new ChartSubscriptionListener(onUpdate, _logger));
+        subscription.addListener(new ChartSubscriptionListener(dispatcher, _logger));
 
         client.subscribe(subscription);
         client.connect();
@@ -80,22 +93,25 @@ public sealed class IgMarketDataStreamClient : IMarketDataStreamClient
             "Started IG Lightstreamer chart session with {SubscriptionCount} subscriptions.",
             subscriptions.Count);
 
-        return new IgMarketDataStreamSession(client, subscription, _logger);
+        return new IgMarketDataStreamSession(client, subscription, dispatcher, _logger);
     }
 
     private sealed class IgMarketDataStreamSession : IMarketDataStreamSession
     {
         private readonly LightstreamerClient _client;
         private readonly Subscription _subscription;
+        private readonly BoundedMarketDataStreamDispatcher _dispatcher;
         private readonly ILogger _logger;
 
         public IgMarketDataStreamSession(
             LightstreamerClient client,
             Subscription subscription,
+            BoundedMarketDataStreamDispatcher dispatcher,
             ILogger logger)
         {
             _client = client;
             _subscription = subscription;
+            _dispatcher = dispatcher;
             _logger = logger;
         }
 
@@ -106,6 +122,7 @@ public sealed class IgMarketDataStreamClient : IMarketDataStreamClient
                 _client.unsubscribe(_subscription);
                 _client.disconnect();
                 await _client.DisconnectFuture();
+                await _dispatcher.DisposeAsync();
             }
             catch (Exception exception)
             {
@@ -116,15 +133,15 @@ public sealed class IgMarketDataStreamClient : IMarketDataStreamClient
 
     private sealed class ChartSubscriptionListener : SubscriptionListener
     {
-        private readonly Func<StreamPriceBarUpdate, CancellationToken, Task> _onUpdate;
+        private readonly BoundedMarketDataStreamDispatcher _dispatcher;
         private readonly ILogger _logger;
         private readonly IgChartCandleUpdateAccumulator _accumulator = new();
 
         public ChartSubscriptionListener(
-            Func<StreamPriceBarUpdate, CancellationToken, Task> onUpdate,
+            BoundedMarketDataStreamDispatcher dispatcher,
             ILogger logger)
         {
-            _onUpdate = onUpdate;
+            _dispatcher = dispatcher;
             _logger = logger;
         }
 
@@ -172,17 +189,13 @@ public sealed class IgMarketDataStreamClient : IMarketDataStreamClient
                 }
 
                 var update = IgMarketDataStreamMapper.ToStreamPriceBarUpdate(candle, DateTimeOffset.UtcNow);
-                _ = Task.Run(async () =>
+                if (!_dispatcher.TryPost(update))
                 {
-                    try
-                    {
-                        await _onUpdate(update, CancellationToken.None);
-                    }
-                    catch (Exception exception)
-                    {
-                        _logger.LogError(exception, "Failed to process IG Lightstreamer chart update for {Epic}.", epic);
-                    }
-                });
+                    _logger.LogWarning(
+                        "Dropped IG Lightstreamer chart update for {Epic} at {TimestampUtc}; stream dispatcher is full.",
+                        epic,
+                        update.Bar.TimestampUtc);
+                }
             }
             catch (IgStreamingDataException exception)
             {

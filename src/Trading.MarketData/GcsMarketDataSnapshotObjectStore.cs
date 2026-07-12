@@ -55,13 +55,22 @@ public sealed class GcsMarketDataSnapshotObjectStore : IMarketDataSnapshotObject
         string sourcePath,
         IReadOnlyDictionary<string, string> metadata,
         CancellationToken cancellationToken = default)
+        => await UploadAsync(bucketName, objectName, sourcePath, metadata, "application/vnd.sqlite3", cancellationToken);
+
+    public async Task UploadAsync(
+        string bucketName,
+        string objectName,
+        string sourcePath,
+        IReadOnlyDictionary<string, string> metadata,
+        string contentType,
+        CancellationToken cancellationToken = default)
     {
         await using var stream = File.OpenRead(sourcePath);
         var obj = new GcsObject
         {
             Bucket = bucketName,
             Name = objectName,
-            ContentType = "application/vnd.sqlite3",
+            ContentType = contentType,
             Metadata = metadata.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase),
         };
 

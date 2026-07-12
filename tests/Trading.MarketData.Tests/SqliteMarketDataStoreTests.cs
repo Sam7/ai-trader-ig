@@ -213,33 +213,37 @@ public sealed class SqliteMarketDataStoreTests
     }
 
     [Fact]
-    public async Task StreamIngestor_ShouldPersistCanonicalStreamBarsIntoSqliteStore()
+    public async Task StreamBatchIngestor_ShouldPersistCanonicalStreamBarsIntoSqliteStore()
     {
         using var database = TestDatabase.Create();
         IMarketDataStore store = new SqliteMarketDataStore(database.Path);
-        var ingestor = new MarketDataStreamIngestor(
+        await using var ingestor = new MarketDataStreamBatchIngestor(
             store,
-            Options.Create(new MarketDataOptions()),
-            NullLogger<MarketDataStreamIngestor>.Instance);
+            new InMemoryMarketDataHealthStore(),
+            new FixedMarketDataClock(DateTimeOffset.Parse("2026-06-29T00:05:01Z")),
+            new MarketDataCollectorOptions(),
+            new MarketDataStreamIngestionOptions { FlushInterval = TimeSpan.FromMinutes(1), BatchSize = 100 },
+            new MarketDataStreamPipelineMetrics(),
+            NullLogger.Instance);
         var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
 
-        var result = await ingestor.IngestAsync(new StreamPriceBarUpdate(
+        await ingestor.EnqueueAsync(new StreamPriceBarUpdate(
             instrument,
             PriceResolution.FiveMinutes,
             CreateBar("2026-06-29T00:00:00Z", 100.12345m),
             IsFinal: false,
-            ObservedAtUtc: DateTimeOffset.Parse("2026-06-29T00:03:00Z")));
+            ObservedAtUtc: DateTimeOffset.Parse("2026-06-29T00:03:00Z")),
+            CancellationToken.None);
 
-        result.Status.Should().Be(MarketDataIngestStatus.Stored);
-
-        result = await ingestor.IngestAsync(new StreamPriceBarUpdate(
+        await ingestor.EnqueueAsync(new StreamPriceBarUpdate(
             instrument,
             PriceResolution.FiveMinutes,
             CreateBar("2026-06-29T00:00:00Z", 101.54321m),
             IsFinal: true,
-            ObservedAtUtc: DateTimeOffset.Parse("2026-06-29T00:05:01Z")));
+            ObservedAtUtc: DateTimeOffset.Parse("2026-06-29T00:05:01Z")),
+            CancellationToken.None);
 
-        result.Status.Should().Be(MarketDataIngestStatus.Stored);
+        await ingestor.DisposeAsync();
 
         var bars = await store.GetRangeAsync(
             instrument,

@@ -236,6 +236,7 @@ public sealed class MarketDataCollectorTests
             new FixedMarketDataClock(DateTimeOffset.Parse(nowUtc)),
             Options.Create(marketDataOptions ?? new MarketDataOptions()),
             Options.Create(new MarketDataCollectorOptions()),
+            new MarketDataStreamPipelineMetrics(),
             NullLogger<MarketDataCollector>.Instance);
 
     private static PriceBar CreateBar(string timestampUtc)

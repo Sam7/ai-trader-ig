@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Trading.AI.DependencyInjection;
 using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
+using Trading.Automation.Health;
 using Trading.Automation.MarketData;
 using Trading.Automation.Scheduling;
 using Trading.Execution;
@@ -21,6 +22,10 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(AutomationOptions.SectionName));
         services.AddOptions<MarketDataCollectionOptions>()
             .Bind(configuration.GetSection($"{AutomationOptions.SectionName}:MarketDataCollection"));
+        services.AddOptions<WorkerHealthOptions>()
+            .Bind(configuration.GetSection(WorkerHealthOptions.SectionName));
+        services.AddOptions<AlertingOptions>()
+            .Bind(configuration.GetSection(AlertingOptions.SectionName));
 
         services.AddTradingAi(configuration);
         services.AddTradingMarketData(configuration);
@@ -60,9 +65,11 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IntradayOpportunityScanService>();
         services.AddTransient<DailyBriefingTickerJob>();
         services.AddTransient<IntradayOpportunityTickerJob>();
+        services.AddHttpClient<SlackAlertService>();
         services.AddHostedService<MarketDataCollectionHostedService>();
         services.AddHostedService<MarketDataSnapshotPublisherHostedService>();
         services.AddHostedService<MarketDataSnapshotMirrorHostedService>();
+        services.AddHostedService<WorkerHealthReporterHostedService>();
         services.AddHostedService<DailyBriefingScheduleInitializer>();
         services.AddHostedService<IntradayOpportunityScheduleInitializer>();
         return services;

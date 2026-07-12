@@ -54,14 +54,20 @@ public sealed record MarketDataMirrorStatus(
     bool Enabled,
     bool IsConfigured,
     bool IsStale,
+    bool RemoteObjectChecked,
+    bool IsRemoteObjectStale,
+    bool IsRemoteLatestBarStale,
     DateTimeOffset? LastAttemptUtc,
     DateTimeOffset? LastSuccessfulSyncUtc,
     DateTimeOffset? LatestBarUtc,
+    DateTimeOffset? RemoteUpdatedUtc,
+    DateTimeOffset? RemoteLatestBarUtc,
     string? RemoteGeneration,
     string? RemoteSha256,
     string? LocalSnapshotPath,
     MarketDataSnapshotRefreshStatus LastStatus,
-    string? LastMessage);
+    string? LastMessage,
+    string Diagnosis);
 
 public interface IMarketDataSnapshotObjectStore
 {
@@ -81,6 +87,28 @@ public interface IMarketDataSnapshotObjectStore
         string objectName,
         string sourcePath,
         IReadOnlyDictionary<string, string> metadata,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IMarketDataObjectStore
+{
+    Task<MarketDataSnapshotObject?> GetAsync(
+        string bucketName,
+        string objectName,
+        CancellationToken cancellationToken = default);
+
+    Task DownloadAsync(
+        string bucketName,
+        string objectName,
+        string destinationPath,
+        CancellationToken cancellationToken = default);
+
+    Task UploadAsync(
+        string bucketName,
+        string objectName,
+        string sourcePath,
+        IReadOnlyDictionary<string, string> metadata,
+        string contentType,
         CancellationToken cancellationToken = default);
 }
 
