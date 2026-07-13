@@ -23,8 +23,9 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMarketDataSnapshotImporter>(sp => sp.GetRequiredService<SqliteMarketDataStore>());
         services.AddSingleton<IMarketSessionEvidenceStore>(sp => sp.GetRequiredService<SqliteMarketDataStore>());
         services.AddSingleton<IMarketDataClock, SystemMarketDataClock>();
-        services.AddSingleton<IMarketDataSnapshotObjectStore, GcsMarketDataSnapshotObjectStore>();
-        services.AddSingleton<IMarketDataObjectStore>(sp => (IMarketDataObjectStore)sp.GetRequiredService<IMarketDataSnapshotObjectStore>());
+        services.AddSingleton<GcsMarketDataSnapshotObjectStore>();
+        services.AddSingleton<IMarketDataSnapshotObjectStore>(sp => sp.GetRequiredService<GcsMarketDataSnapshotObjectStore>());
+        services.AddSingleton<IMarketDataObjectStore>(sp => sp.GetRequiredService<GcsMarketDataSnapshotObjectStore>());
         services.AddSingleton<MarketDataSnapshotValidator>();
         services.AddSingleton<FileMarketDataMirrorStateStore>();
         services.AddSingleton<MarketDataMirrorStatusService>();

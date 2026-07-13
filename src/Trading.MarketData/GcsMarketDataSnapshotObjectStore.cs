@@ -5,7 +5,7 @@ using GcsObject = Google.Apis.Storage.v1.Data.Object;
 
 namespace Trading.MarketData;
 
-public sealed class GcsMarketDataSnapshotObjectStore : IMarketDataSnapshotObjectStore
+public sealed class GcsMarketDataSnapshotObjectStore : IMarketDataSnapshotObjectStore, IMarketDataObjectStore
 {
     private const string MetadataSha256 = "sha256";
     private const string MetadataLatestBarTicks = "latest-bar-utc-ticks";
