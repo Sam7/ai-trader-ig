@@ -197,6 +197,14 @@ Shows the last sync attempt, last successful sync, latest mirrored bar, local im
 
 ### 4.4 Explicit Historical Backfill
 
+Automatic recovery scans the most recent 14 days after worker startup and on its periodic tick. It drains configured `SelectionPriority` markets in order, newest 250-bar gaps first, persists its cursor, and pauses until IG's reported allowance reset when exhausted. A full 18-market recovery can span multiple IG allowance windows; it progresses automatically rather than promising a one-shot repair. Cloud mirror mode is read-only and never invokes IG recovery.
+
+Inspect persisted progress without contacting IG:
+
+```powershell
+dotnet run --project src/Trading.Cli -- marketdata recovery-status
+```
+
 Intentionally calls IG historical REST and persists returned bars. This is the manual override when mirror mode is enabled; automatic historical fallback remains disabled in mirror mode.
 
 * **Command:** `marketdata backfill`

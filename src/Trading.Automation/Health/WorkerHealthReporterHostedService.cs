@@ -29,6 +29,7 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
     private readonly IHostEnvironment _environment;
     private readonly IMarketDataStore _marketDataStore;
     private readonly IMarketDataHealthStore _healthStore;
+    private readonly IMarketDataRecoveryStore _recoveryStore;
     private readonly IMarketDataObjectStore _objectStore;
     private readonly MarketDataStreamPipelineMetrics _streamMetrics;
     private readonly SlackAlertService _slackAlertService;
@@ -43,6 +44,7 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         IHostEnvironment environment,
         IMarketDataStore marketDataStore,
         IMarketDataHealthStore healthStore,
+        IMarketDataRecoveryStore recoveryStore,
         IMarketDataObjectStore objectStore,
         MarketDataStreamPipelineMetrics streamMetrics,
         SlackAlertService slackAlertService,
@@ -55,6 +57,7 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         _environment = environment;
         _marketDataStore = marketDataStore;
         _healthStore = healthStore;
+        _recoveryStore = recoveryStore;
         _objectStore = objectStore;
         _streamMetrics = streamMetrics;
         _slackAlertService = slackAlertService;
@@ -152,6 +155,8 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
                 health?.RepairState.ToString()));
         }
 
+        var recovery = await _recoveryStore.GetRecoveryStatesAsync(cancellationToken).ConfigureAwait(false);
+        var active = recovery.FirstOrDefault(x => !x.IsComplete);
         return new MarketDataHealthSummary(
             instruments
                 .Select(instrument => instrument.LatestFinalBarUtc)
@@ -160,7 +165,13 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
                 .Max(),
             stream.LastReceivedUpdateUtc,
             stream.LastPersistedUpdateUtc,
-            instruments);
+            instruments,
+            new MarketDataRecoveryHealth(
+                recovery.Count(x => !x.IsComplete),
+                recovery.Count(x => !x.IsComplete && x.AllowanceExpiresAtUtc > DateTimeOffset.UtcNow),
+                active?.RemainingAllowance,
+                active?.AllowanceExpiresAtUtc,
+                active?.Instrument.Value));
     }
 
     private WorkerHealthStatus ResolveStatus(
@@ -205,6 +216,12 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         {
             status = Max(status, WorkerHealthStatus.Warning);
             reasons.Add("No final market-data bar is available for configured instruments.");
+        }
+
+        if (marketData.Recovery?.BlockedRanges > 0)
+        {
+            status = Max(status, WorkerHealthStatus.Warning);
+            reasons.Add($"Historical recovery is blocked by IG allowance until {marketData.Recovery.AllowanceExpiresAtUtc:O}.");
         }
 
         return status;

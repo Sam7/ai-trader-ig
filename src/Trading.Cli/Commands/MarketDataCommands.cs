@@ -291,3 +291,26 @@ public sealed class BackfillMarketDataSettings : CommandSettings
         return ValidationResult.Success();
     }
 }
+
+[Description("Show persisted automatic market-data recovery progress without contacting IG.")]
+public sealed class ShowMarketDataRecoveryStatusCommand : AsyncCommand
+{
+    private readonly IMarketDataRecoveryStore _store;
+    private readonly IAnsiConsole _console;
+
+    public ShowMarketDataRecoveryStatusCommand(IMarketDataRecoveryStore store, IAnsiConsole console)
+        => (_store, _console) = (store, console);
+
+    public override async Task<int> ExecuteAsync(CommandContext context, CancellationToken cancellationToken)
+    {
+        var states = await _store.GetRecoveryStatesAsync(cancellationToken);
+        var table = new Table().Title("Market Data Recovery");
+        table.AddColumn("Instrument"); table.AddColumn("Range"); table.AddColumn("Cursor"); table.AddColumn("State"); table.AddColumn("Allowance"); table.AddColumn("Blocked until");
+        foreach (var state in states)
+        {
+            table.AddRow(state.Instrument.Value, $"{state.FromUtc:O} - {state.ToUtc:O}", state.CursorUtc.ToString("O"), state.IsComplete ? "Complete" : "Pending", state.RemainingAllowance?.ToString() ?? "-", state.AllowanceExpiresAtUtc?.ToString("O") ?? "-");
+        }
+        _console.Write(table);
+        return 0;
+    }
+}

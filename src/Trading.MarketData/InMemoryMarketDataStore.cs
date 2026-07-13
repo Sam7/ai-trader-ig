@@ -2,12 +2,31 @@ using Trading.Abstractions;
 
 namespace Trading.MarketData;
 
-public sealed class InMemoryMarketDataStore : IMarketDataStore, IMarketSessionEvidenceStore
+public sealed class InMemoryMarketDataStore : IMarketDataStore, IMarketSessionEvidenceStore, IMarketDataRecoveryStore
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly Dictionary<(string Instrument, PriceResolution Resolution, DateTimeOffset TimestampUtc), StoredPriceBar> _bars = [];
     private readonly List<MarketDataCoverageRecord> _coverage = [];
     private readonly List<MarketSessionStatusRecord> _sessionStatus = [];
+    private readonly List<MarketDataRecoveryState> _recovery = [];
+
+    public async Task UpsertRecoveryStateAsync(MarketDataRecoveryState state, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            _recovery.RemoveAll(x => x.Instrument == state.Instrument && x.Resolution == state.Resolution && x.FromUtc == state.FromUtc && x.ToUtc == state.ToUtc);
+            _recovery.Add(state);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<MarketDataRecoveryState>> GetRecoveryStatesAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try { return _recovery.OrderBy(x => x.Instrument.Value, StringComparer.Ordinal).ThenBy(x => x.FromUtc).ToArray(); }
+        finally { _gate.Release(); }
+    }
 
     public async Task UpsertAsync(
         IReadOnlyList<StoredPriceBar> bars,

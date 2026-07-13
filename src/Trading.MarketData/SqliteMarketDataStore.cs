@@ -5,7 +5,7 @@ using Trading.Abstractions;
 
 namespace Trading.MarketData;
 
-public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthStore, IMarketDataSnapshotImporter, IMarketSessionEvidenceStore
+public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthStore, IMarketDataSnapshotImporter, IMarketSessionEvidenceStore, IMarketDataRecoveryStore
 {
     private const long PriceScale = 100_000;
 
@@ -144,6 +144,49 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
         {
             _gate.Release();
         }
+    }
+
+    public async Task UpsertRecoveryStateAsync(MarketDataRecoveryState state, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken);
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            var instrumentId = await GetOrCreateInstrumentIdAsync(connection, (SqliteTransaction)transaction, state.Instrument.Value, new Dictionary<string, long>(StringComparer.Ordinal), cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = """
+                INSERT INTO market_data_recovery (instrument_fk, resolution, from_utc_ticks, to_utc_ticks, cursor_utc_ticks, is_complete, returned_points, remaining_allowance, allowance_expires_utc_ticks, last_failure)
+                VALUES ($instrument_fk, $resolution, $from, $to, $cursor, $complete, $points, $remaining, $expires, $failure)
+                ON CONFLICT(instrument_fk, resolution, from_utc_ticks, to_utc_ticks) DO UPDATE SET
+                    cursor_utc_ticks = excluded.cursor_utc_ticks, is_complete = excluded.is_complete, returned_points = excluded.returned_points,
+                    remaining_allowance = excluded.remaining_allowance, allowance_expires_utc_ticks = excluded.allowance_expires_utc_ticks, last_failure = excluded.last_failure;
+                """;
+            command.Parameters.AddWithValue("$instrument_fk", instrumentId); command.Parameters.AddWithValue("$resolution", (int)state.Resolution);
+            command.Parameters.AddWithValue("$from", state.FromUtc.UtcTicks); command.Parameters.AddWithValue("$to", state.ToUtc.UtcTicks); command.Parameters.AddWithValue("$cursor", state.CursorUtc.UtcTicks);
+            command.Parameters.AddWithValue("$complete", state.IsComplete ? 1 : 0); command.Parameters.AddWithValue("$points", state.ReturnedPoints);
+            command.Parameters.AddWithValue("$remaining", (object?)state.RemainingAllowance ?? DBNull.Value); command.Parameters.AddWithValue("$expires", state.AllowanceExpiresAtUtc is null ? DBNull.Value : state.AllowanceExpiresAtUtc.Value.UtcTicks); command.Parameters.AddWithValue("$failure", (object?)state.LastFailure ?? DBNull.Value);
+            await command.ExecuteNonQueryAsync(cancellationToken); await transaction.CommitAsync(cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<MarketDataRecoveryState>> GetRecoveryStatesAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken); await using var connection = new SqliteConnection(_connectionString); await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """SELECT i.instrument_value, r.resolution, r.from_utc_ticks, r.to_utc_ticks, r.cursor_utc_ticks, r.is_complete, r.returned_points, r.remaining_allowance, r.allowance_expires_utc_ticks, r.last_failure FROM market_data_recovery r JOIN instruments i ON i.id = r.instrument_fk ORDER BY i.instrument_value, r.from_utc_ticks;""";
+            var result = new List<MarketDataRecoveryState>(); await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken)) result.Add(new MarketDataRecoveryState(new InstrumentId(reader.GetString(0)), (PriceResolution)reader.GetInt32(1), new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero), new DateTimeOffset(reader.GetInt64(3), TimeSpan.Zero), new DateTimeOffset(reader.GetInt64(4), TimeSpan.Zero), reader.GetInt64(5) != 0, reader.GetInt32(6), reader.IsDBNull(7) ? null : reader.GetInt32(7), reader.IsDBNull(8) ? null : new DateTimeOffset(reader.GetInt64(8), TimeSpan.Zero), reader.IsDBNull(9) ? null : reader.GetString(9)));
+            return result;
+        }
+        finally { _gate.Release(); }
     }
 
     public async Task<StoredPriceBar?> GetLatestFinalAsync(
@@ -747,6 +790,20 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
                 source INTEGER NOT NULL,
                 message TEXT NULL,
                 PRIMARY KEY (instrument_fk, observed_at_utc_ticks)
+            ) WITHOUT ROWID;
+
+            CREATE TABLE IF NOT EXISTS market_data_recovery (
+                instrument_fk INTEGER NOT NULL REFERENCES instruments(id),
+                resolution INTEGER NOT NULL,
+                from_utc_ticks INTEGER NOT NULL,
+                to_utc_ticks INTEGER NOT NULL,
+                cursor_utc_ticks INTEGER NOT NULL,
+                is_complete INTEGER NOT NULL,
+                returned_points INTEGER NOT NULL,
+                remaining_allowance INTEGER NULL,
+                allowance_expires_utc_ticks INTEGER NULL,
+                last_failure TEXT NULL,
+                PRIMARY KEY (instrument_fk, resolution, from_utc_ticks, to_utc_ticks)
             ) WITHOUT ROWID;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);

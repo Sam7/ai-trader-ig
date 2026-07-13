@@ -9,7 +9,7 @@ namespace Trading.MarketData.Tests;
 public sealed class MarketDataCollectorTests
 {
     [Fact]
-    public async Task RunAsync_ShouldStartStreamingBeforeHistoricalRepair()
+    public async Task RunAsync_ShouldStartStreamingWithoutMakingHistoricalRequests()
     {
         var log = new List<string>();
         var store = new InMemoryMarketDataStore();
@@ -19,7 +19,7 @@ public sealed class MarketDataCollectorTests
 
         await collector.RunAsync([new InstrumentId("CS.D.BITCOIN.CFD.IP")], TimeSpan.Zero);
 
-        log.Should().ContainInOrder("stream:start", "history:CS.D.BITCOIN.CFD.IP:2026-06-28T18:15:00.0000000+00:00:2026-06-29T00:15:00.0000000+00:00");
+        log.Should().ContainSingle().Which.Should().Be("stream:start");
     }
 
     [Fact]
@@ -71,7 +71,7 @@ public sealed class MarketDataCollectorTests
     }
 
     [Fact]
-    public async Task RunAsync_ShouldFetchOnlyMissingCompletedBucketsAfterLatestFinal()
+    public async Task RunAsync_ShouldLeaveHistoricalRepairToRecoveryCoordinator()
     {
         var store = new InMemoryMarketDataStore();
         var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
@@ -97,13 +97,11 @@ public sealed class MarketDataCollectorTests
 
         await collector.RunAsync([instrument], TimeSpan.Zero);
 
-        gateway.PriceRequests.Should().ContainSingle();
-        gateway.PriceRequests[0].FromUtc.Should().Be(DateTimeOffset.Parse("2026-06-29T00:05:00Z"));
-        gateway.PriceRequests[0].ToUtc.Should().Be(DateTimeOffset.Parse("2026-06-29T00:15:00Z"));
+        gateway.PriceRequests.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task RunAsync_WhenHistoryReturnsNoBars_ShouldRecordCoverageAndAvoidRepeatFetch()
+    public async Task RunAsync_ShouldNotSpendHistoryAllowanceForNoBars()
     {
         var store = new InMemoryMarketDataStore();
         var healthStore = new InMemoryMarketDataHealthStore();
@@ -114,14 +112,14 @@ public sealed class MarketDataCollectorTests
         await collector.RunAsync([instrument], TimeSpan.Zero);
         await collector.RunAsync([instrument], TimeSpan.Zero);
 
-        gateway.PriceRequests.Should().ContainSingle();
+        gateway.PriceRequests.Should().BeEmpty();
         var health = await healthStore.GetAsync(instrument, PriceResolution.FiveMinutes);
         health.Should().NotBeNull();
-        health!.LastHistoricalRepairStatus.Should().Be(MarketDataCoverageStatus.NoBars);
+        health!.RepairState.Should().Be(MarketDataRepairState.Idle);
     }
 
     [Fact]
-    public async Task RunAsync_WhenHistoryAllowanceIsBlocked_ShouldMarkMarketDegradedAndKeepStreamHealthy()
+    public async Task RunAsync_ShouldKeepStreamHealthyWhenHistoricalAllowanceIsUnavailable()
     {
         var store = new InMemoryMarketDataStore();
         var healthStore = new InMemoryMarketDataHealthStore();
@@ -139,8 +137,8 @@ public sealed class MarketDataCollectorTests
         var health = await healthStore.GetAsync(instrument, PriceResolution.FiveMinutes);
         health.Should().NotBeNull();
         health!.ConnectionState.Should().Be(MarketDataConnectionState.Connected);
-        health.RepairState.Should().Be(MarketDataRepairState.Degraded);
-        health.LastHistoricalRepairStatus.Should().Be(MarketDataCoverageStatus.AllowanceBlocked);
+        health.RepairState.Should().Be(MarketDataRepairState.Idle);
+        gateway.PriceRequests.Should().BeEmpty();
     }
 
     [Fact]

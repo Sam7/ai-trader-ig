@@ -148,7 +148,12 @@ internal static class IgTradingMapper
         return new PriceSeries(
             request.Instrument,
             request.Resolution,
-            bars);
+            bars,
+            source.Metadata?.Allowance is { } allowance
+                ? new HistoricalPriceAllowance(
+                    allowance.RemainingAllowance,
+                    allowance.AllowanceExpirySeconds is { } seconds ? TimeSpan.FromSeconds(seconds) : null)
+                : null);
     }
 
     public static string? ResolveActivityDealReference(ActivityItem activity)

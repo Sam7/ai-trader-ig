@@ -9,6 +9,22 @@ namespace Trading.MarketData.Tests;
 public sealed class SqliteMarketDataStoreTests
 {
     [Fact]
+    public async Task RecoveryState_ShouldSurviveStoreRecreation()
+    {
+        using var database = TestDatabase.Create();
+        var state = new MarketDataRecoveryState(
+            new InstrumentId("CS.D.CFAGOLD.CFA.IP"), PriceResolution.FiveMinutes,
+            DateTimeOffset.Parse("2026-07-01T00:00:00Z"), DateTimeOffset.Parse("2026-07-01T01:00:00Z"),
+            DateTimeOffset.Parse("2026-07-01T00:25:00Z"), false, 5, 9_995,
+            DateTimeOffset.Parse("2026-07-20T00:00:00Z"), null);
+
+        await new SqliteMarketDataStore(database.Path).UpsertRecoveryStateAsync(state);
+
+        var restored = await new SqliteMarketDataStore(database.Path).GetRecoveryStatesAsync();
+        restored.Should().ContainSingle().Which.Should().Be(state);
+    }
+
+    [Fact]
     public async Task UpsertAsync_ShouldReplaceExistingBucketWithoutDuplicates()
     {
         using var database = TestDatabase.Create();

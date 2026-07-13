@@ -12,6 +12,8 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(MarketDataOptions.SectionName));
         services.AddOptions<MarketDataCollectorOptions>()
             .Bind(configuration.GetSection($"{MarketDataOptions.SectionName}:Collector"));
+        services.AddOptions<MarketDataRecoveryOptions>()
+            .Bind(configuration.GetSection($"{MarketDataOptions.SectionName}:Recovery"));
 
         services.AddSingleton(sp =>
         {
@@ -22,6 +24,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<IMarketDataHealthStore>(sp => sp.GetRequiredService<SqliteMarketDataStore>());
         services.AddSingleton<IMarketDataSnapshotImporter>(sp => sp.GetRequiredService<SqliteMarketDataStore>());
         services.AddSingleton<IMarketSessionEvidenceStore>(sp => sp.GetRequiredService<SqliteMarketDataStore>());
+        services.AddSingleton<IMarketDataRecoveryStore>(sp => sp.GetRequiredService<SqliteMarketDataStore>());
         services.AddSingleton<IMarketDataClock, SystemMarketDataClock>();
         services.AddSingleton<GcsMarketDataSnapshotObjectStore>();
         services.AddSingleton<IMarketDataSnapshotObjectStore>(sp => sp.GetRequiredService<GcsMarketDataSnapshotObjectStore>());
@@ -34,6 +37,13 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<MarketDataStreamPipelineMetrics>();
         services.AddSingleton<MarketDataService>();
         services.AddSingleton<MarketDataHistoricalBackfillService>();
+        services.AddSingleton(sp => new MarketDataRecoveryCoordinator(
+            sp.GetRequiredService<IMarketDataStore>(),
+            sp.GetRequiredService<IMarketDataRecoveryStore>(),
+            sp.GetRequiredService<Trading.Abstractions.ITradingGateway>(),
+            sp.GetRequiredService<IMarketDataClock>(),
+            sp.GetRequiredService<IOptions<MarketDataRecoveryOptions>>().Value,
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MarketDataRecoveryCoordinator>>()));
         services.AddSingleton<MarketDataCollector>();
         services.AddSingleton<IMarketDataCollector>(sp => sp.GetRequiredService<MarketDataCollector>());
         return services;

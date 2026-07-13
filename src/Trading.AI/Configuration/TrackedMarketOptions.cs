@@ -9,4 +9,6 @@ public sealed class TrackedMarketOptions
     public string Sector { get; init; } = string.Empty;
 
     public string[] Aliases { get; init; } = [];
+
+    public int SelectionPriority { get; init; } = int.MaxValue;
 }

@@ -69,6 +69,7 @@ public static class ServiceCollectionExtensions
         services.AddTransient<IntradayOpportunityTickerJob>();
         services.AddHttpClient<SlackAlertService>();
         services.AddHostedService<MarketDataCollectionHostedService>();
+        services.AddHostedService<MarketDataRecoveryHostedService>();
         services.AddHostedService<MarketDataSnapshotPublisherHostedService>();
         services.AddHostedService<MarketDataSnapshotMirrorHostedService>();
         services.AddHostedService<WorkerHealthReporterHostedService>();

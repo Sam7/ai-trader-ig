@@ -41,7 +41,15 @@ public sealed record MarketDataHealthSummary(
     DateTimeOffset? LatestFinalBarUtc,
     DateTimeOffset? LastStreamUpdateUtc,
     DateTimeOffset? LastPersistedUpdateUtc,
-    IReadOnlyList<MarketDataInstrumentHealth> Instruments);
+    IReadOnlyList<MarketDataInstrumentHealth> Instruments,
+    MarketDataRecoveryHealth? Recovery = null);
+
+public sealed record MarketDataRecoveryHealth(
+    int PendingRanges,
+    int BlockedRanges,
+    int? RemainingAllowance,
+    DateTimeOffset? AllowanceExpiresAtUtc,
+    string? ActiveInstrument);
 
 public sealed record MarketDataInstrumentHealth(
     string Instrument,

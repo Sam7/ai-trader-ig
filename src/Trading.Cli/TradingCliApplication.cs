@@ -132,6 +132,7 @@ public sealed class TradingCliApplication
         {
             marketData.AddCommand<CollectMarketDataCommand>("collect");
             marketData.AddCommand<BackfillMarketDataCommand>("backfill");
+            marketData.AddCommand<ShowMarketDataRecoveryStatusCommand>("recovery-status");
             marketData.AddBranch("mirror", mirror =>
             {
                 mirror.AddCommand<SyncMarketDataMirrorCommand>("sync");
@@ -165,6 +166,7 @@ public sealed class TradingCliApplication
         configurator.AddExample(["marketdata", "mirror", "sync"]);
         configurator.AddExample(["marketdata", "mirror", "status"]);
         configurator.AddExample(["marketdata", "backfill", "--instrument", "CS.D.BITCOIN.CFD.IP", "--resolution", "5minute", "--from", "2026-06-29T00:00:00Z", "--to", "2026-06-29T01:00:00Z"]);
+        configurator.AddExample(["marketdata", "recovery-status"]);
         configurator.AddExample(["positions", "list"]);
         configurator.AddExample(["positions", "update", "--deal-id", "DIAAAAAAA", "--stop-level", "1", "--limit-level", "100"]);
         configurator.AddExample(["positions", "close", "--deal-id", "DIAAAAAAA"]);

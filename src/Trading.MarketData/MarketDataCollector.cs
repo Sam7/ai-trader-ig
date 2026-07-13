@@ -76,25 +76,15 @@ public sealed class MarketDataCollector : IMarketDataCollector
                 cancellationToken: cancellationToken);
         }
 
-        if (_marketDataOptions.CloudSnapshot.Mirror.Enabled)
+        _logger.LogInformation("Streaming is active; historical recovery is coordinated separately.");
+        foreach (var instrument in instruments)
         {
-            _logger.LogInformation("Skipping automatic historical market-data repair because cloud mirror mode is enabled.");
-            foreach (var instrument in instruments)
-            {
-                await UpsertHealthAsync(
-                    instrument,
-                    resolution,
-                    MarketDataConnectionState.Connected,
-                    repairState: MarketDataRepairState.Idle,
-                    cancellationToken: cancellationToken);
-            }
-        }
-        else
-        {
-            foreach (var instrument in instruments)
-            {
-                await RepairMissingCompletedCandlesAsync(instrument, resolution, cancellationToken);
-            }
+            await UpsertHealthAsync(
+                instrument,
+                resolution,
+                MarketDataConnectionState.Connected,
+                repairState: MarketDataRepairState.Idle,
+                cancellationToken: cancellationToken);
         }
 
         if (duration is null)
