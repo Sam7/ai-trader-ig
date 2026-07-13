@@ -55,6 +55,7 @@ chmod 0644 /etc/systemd/system/ai-trader.service
 
 systemctl daemon-reload
 systemctl enable ai-trader.service
+systemctl reset-failed ai-trader.service
 systemctl restart ai-trader.service
 
 systemctl --no-pager --full status ai-trader.service
