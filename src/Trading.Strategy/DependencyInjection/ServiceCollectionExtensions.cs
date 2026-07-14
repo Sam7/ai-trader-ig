@@ -1,13 +1,8 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Trading.Strategy.ActiveTradeManagement;
 using Trading.Strategy.DayPlanning;
-using Trading.Strategy.ExecutionReporting;
-using Trading.Strategy.MarketAttention;
 using Trading.Strategy.OpportunityReview;
 using Trading.Strategy.Persistence;
-using Trading.Strategy.Rules;
-using Trading.Strategy.Workflow;
 
 namespace Trading.Strategy.DependencyInjection;
 
@@ -15,24 +10,17 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddTradingStrategyCore(
         this IServiceCollection services,
-        StrategyRules? strategyRules = null)
+        DailyPlanningPolicy? planningPolicy = null)
     {
-        var rules = strategyRules ?? StrategyRules.Default;
-        rules.Validate();
+        var policy = planningPolicy ?? DailyPlanningPolicy.Default;
+        policy.Validate();
 
-        services.AddSingleton(rules);
+        services.AddSingleton(policy);
         services.TryAddSingleton<ITradingDayStore, InMemoryTradingDayStore>();
         services.TryAddSingleton(ShadowDecisionPolicy.Disabled());
-        services.AddSingleton<PositionSizer>();
-        services.AddSingleton<BreakEvenStopRule>();
-        services.AddTransient<TradingDayPlanner>();
+        services.AddTransient<ITradingDayPlanner, TradingDayPlanner>();
         services.AddTransient<IntradayCandidateDecisionService>();
-        services.AddTransient<IntradayOpportunityReviewService>();
-        services.AddTransient<MarketAttentionService>();
-        services.AddTransient<OpportunityReviewer>();
-        services.AddTransient<ActiveTradeReviewer>();
-        services.AddTransient<ExecutionReportApplier>();
-        services.AddTransient<ITradingDayWorkflow, TradingDayWorkflow>();
+        services.AddTransient<IIntradayDecisionService, IntradayOpportunityReviewService>();
         return services;
     }
 }

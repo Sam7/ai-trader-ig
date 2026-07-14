@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 
@@ -10,16 +12,21 @@ public static class IntradayOpportunityReviewResponseFormat
     public static ChatResponseFormat Create()
     {
         var schema = LoadSchemaText();
-        var document = JsonDocument.Parse(schema).RootElement.Clone();
-        return ChatResponseFormat.ForJsonSchema(document, "intraday_opportunity_review", "Structured intraday opportunity review.");
+        using var document = JsonDocument.Parse(schema);
+        return ChatResponseFormat.ForJsonSchema(
+            document.RootElement.Clone(),
+            "intraday_opportunity_review",
+            "Structured intraday opportunity review.");
     }
+
+    public static string GetSchemaSha256()
+        => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(LoadSchemaText()))).ToLowerInvariant();
 
     private static string LoadSchemaText()
     {
         using var stream = typeof(IntradayOpportunityReviewResponseFormat).Assembly.GetManifestResourceStream(ResourceName)
             ?? throw new InvalidOperationException($"Prompt schema resource '{ResourceName}' was not found.");
         using var reader = new StreamReader(stream);
-        using var document = JsonDocument.Parse(reader.ReadToEnd());
-        return document.RootElement.GetRawText();
+        return reader.ReadToEnd();
     }
 }

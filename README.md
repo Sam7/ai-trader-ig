@@ -1,6 +1,16 @@
 # AI Trader IG: The Complete Developer Guide
 
-Welcome to **AI Trader IG**. This guide is designed to take you from a fresh clone of the repository to completely understanding how to run, debug, and deploy the system. The project is a .NET 10 algorithmic trading solution that evaluates markets, generates AI-driven trading plans, ingests live IG streaming data, and executes trades.
+Welcome to **AI Trader IG**. This guide takes you from a fresh clone to running, debugging, and deploying the system. The project is a .NET 10 algorithmic trading solution that evaluates markets, generates AI-driven trading plans, ingests live IG streaming data, supports manual broker operations, and can perform tightly gated IG demo-canary execution. Automated live trading is not implemented.
+
+## Recommended reading path
+
+If this is your first time in the repository:
+
+1. Use the quickstart below to configure and run the CLI.
+2. Read [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the canonical system overview, dependency graph, runtime flows, state ownership, evidence model, extension guide, and current roadmap limits.
+3. Use [docs/cli-use.md](docs/cli-use.md) as the command reference.
+4. Read [src/Ig.Trading.Sdk/README.md](src/Ig.Trading.Sdk/README.md) when changing the standalone IG SDK.
+5. Treat files under `specs/plans/` as planning and roadmap context; confirm implemented behavior against the architecture guide and current code.
 
 ---
 
@@ -72,15 +82,16 @@ The solution strictly enforces separation of concerns to keep the business logic
 * **`Trading.Abstractions`**: The core domain. Contains zero implementation logic. Defines things like `ITradingGateway`, `PriceSeries`, and `OrderStatus`.
 * **`Ig.Trading.Sdk`**: An isolated, Refit-based SDK for IG's REST API. Manages session tokens (`CST`, `X-SECURITY-TOKEN`), handles RSA encrypted passwords, and maps DTOs.
 * **`Trading.IG`**: The Adapter. Implements `ITradingGateway` using the SDK, translates IG HTTP errors into domain `TradingGatewayException`s, and orchestrates order status lookups.
-* **`Trading.Strategy`**: The workflow orchestrator. Models the daily briefing, intraday opportunity reviews, deterministic shadow decisions, and broker-neutral execution-ready intents.
+* **`Trading.Strategy`**: The broker-neutral decision layer. Exposes narrow daily-planning and intraday-decision APIs, deterministic shadow decisions, and execution-ready intents.
 * **`Trading.Execution`**: The durable execution boundary. Tracks manual and automated broker mutations, preserves stop/limit protection intent, assigns broker-safe deal references, records submission attempts, and prevents duplicate submissions when a stable operation id is provided.
-* **`Trading.AI`**: The LLM interaction layer. Manages prompts via `PromptRegistry` and enforces strict JSON schema output via `Microsoft.Extensions.AI`.
+* **`Trading.AI`**: The LLM interaction layer. Owns typed review requests, prompt rendering/versioning via `PromptRegistry`, and strict JSON schema output via `Microsoft.Extensions.AI`.
+* **`Trading.Automation`**: The application orchestration layer. Sequences preparation, AI analysis, deterministic decisions, audit evidence, and optional demo execution without moving those concerns into the CLI.
 * **`Trading.MarketData`**: Manages price data ingestion, historical backfilling, SQLite persistence, and GCS-backed market-data snapshots.
 * **`Trading.Charting`**: Generates broker-neutral price chart images (PNG) using `ScottPlot`.
 * **`Trading.Worker`**: The background service running `TickerQ` to execute daily and intraday cron jobs.
 * **`Trading.Infrastructure`**: Pulumi IaC definitions for GCP deployment.
 
-See the full architecture in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+The canonical and more detailed architecture guide is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). It includes the real project-reference direction, composition roots, end-to-end flows, persistence and evidence rules, testing ownership, and guidance for adding strategies, prompts, chart recipes, or market-specific experts.
 
 ---
 
@@ -153,17 +164,15 @@ Troubleshooting:
 
 ## 4. AI Workflows, State & Observability
 
-The trading strategy is executed in two main automated phases, orchestrated by `TradingDayWorkflow`.
+The automated flow uses narrow services instead of one catch-all workflow facade.
 
 ### 4.1 The Pipeline
 
 1. **Daily Briefing**: Runs once a day to assess the macro regime. It produces a Markdown research brief, which a second prompt extracts into a structured `DailyPlanDocument` JSON.
-2. **Intraday Scan**: Runs on a cron schedule (e.g., every 15 minutes).
-* **Attention Filter**: Quickly filters out noise (e.g., spread too wide, or no price volatility) without calling OpenAI.
-* **AI Review**: Uses `IntradayOpportunityReviewer` to analyze ScottPlot PNG charts and the Daily Plan to find entry, stop, and target prices.
-* **Shadow Decisions**: The system independently validates AI candidates, recalculates reward/risk, checks configured phase-one execution rules, and records whether each candidate would be rejected, unsupported, already processed, or approved as a shadow execution intent. Shadow mode never writes to IG.
-* **Execution Boundary**: When shadow mode selects an execution-ready intent, the automation reserves a durable execution record and broker-safe deal reference before any future broker write path can run. Manual CLI broker mutations use the same execution store and can be deduped with `--operation-id`.
-* **Demo Canary**: When `Automation:Execution:Mode` is set to `Demo`, the same deterministic intent can be promoted into one minimum-size protected market order for the approved IG demo account and allowlisted instrument. The canary path still fail-closes on account, base-url, exposure, or protection mismatches.
+2. **Intraday Preparation**: `IntradayOpportunityPreparationService` loads the active plan and fresh price series, renders the current chart recipe, and writes a typed preparation document with evidence IDs, hashes, time windows, and prompt/schema provenance.
+3. **AI Analysis**: `IntradayOpportunityAnalysisService` verifies the prompt contract, request hash, evidence manifest, and artifact hashes before `IntradayOpportunityReviewer` calls OpenAI.
+4. **Deterministic Decision**: `IIntradayDecisionService` independently validates AI candidates, recalculates reward/risk, and records rejected, unsupported, duplicate, or approved execution intents. Shadow mode never writes to IG.
+5. **Coordination**: `IntradayOpportunityDecisionCoordinator` reserves the execution boundary, writes the immutable decision audit, and optionally invokes the demo canary for an approved intent.
 
 
 
@@ -175,9 +184,9 @@ The trading strategy is executed in two main automated phases, orchestrated by `
 
 If the LLM misbehaves, you edit the embedded Markdown files located at `Trading.AI.Prompts.*`.
 
-* **Observability Dumps**: The system drops everything into the `Logs/Observability/<Date>` directory. You will find the exact rendered text prompts, the PNG charts sent to the vision model, raw OpenAI responses, and extracted JSONs.
+* **Observability Dumps**: The system drops everything into the `Logs/Observability/<Date>` directory. You will find exact rendered prompts, versioned evidence manifests, hashed chart artifacts, raw OpenAI responses, and extracted JSONs.
 * **CLI Evidence Root**: `automation run --root <PATH>` overrides the prompt/evidence root for that run. Use this to keep long-run evidence in a dedicated subfolder.
-* **Decision Audits**: AI trade setups are saved as `DecisionAuditRecord`s with prompt references, paper-evaluation fields, and phase-one shadow decision evidence. The audit records show rejected/unsupported/duplicate candidates, any selected execution-ready intent, and later paper-trading outcomes.
+* **Decision Audits**: Each `DecisionAuditRecord` is a write-once decision-time artifact containing prompt provenance, evidence references, deterministic outcomes, and any selected execution-ready intent. Paper evaluations and demo executions are appended as separate sidecars that include the source audit SHA-256; they never rewrite the source audit.
 * **Execution Boundary Evidence**: Decision audits also include the reserved execution-boundary state and deterministic deal reference when an automated intent is selected. Manual submissions render their operation id, ledger state, attempt count, and broker reference in CLI output.
 
 ---

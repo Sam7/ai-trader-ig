@@ -9,6 +9,7 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
     private static readonly TimeSpan AssessmentOutcomeHorizon = TimeSpan.FromHours(1);
 
     private readonly DecisionAuditWriter _writer;
+    private readonly DecisionEvidenceSidecarWriter _sidecarWriter;
     private readonly PaperTradeOutcomeEvaluator _outcomeEvaluator;
     private readonly PaperMarketAssessmentEvaluator _assessmentEvaluator;
     private readonly MarketDataService _marketDataService;
@@ -16,12 +17,14 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
 
     public DecisionAuditEvaluationService(
         DecisionAuditWriter writer,
+        DecisionEvidenceSidecarWriter sidecarWriter,
         PaperTradeOutcomeEvaluator outcomeEvaluator,
         PaperMarketAssessmentEvaluator assessmentEvaluator,
         MarketDataService marketDataService,
         AuditMarketDataQualityAnalyzer dataQualityAnalyzer)
     {
         _writer = writer;
+        _sidecarWriter = sidecarWriter;
         _outcomeEvaluator = outcomeEvaluator;
         _assessmentEvaluator = assessmentEvaluator;
         _marketDataService = marketDataService;
@@ -35,6 +38,8 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
         var evaluatedAtUtc = DateTimeOffset.UtcNow;
         var files = _writer.FindAuditFiles(request.RootPath, request.TradingDate);
         var evaluatedRecords = new List<DecisionAuditRecord>(files.Count);
+        var evaluations = new List<DecisionEvaluationRecord>(files.Count);
+        var evaluationArtifacts = new List<ArtifactReference>(files.Count);
         var dataQualityResults = new List<AuditDataQualityResult>();
         var dataQualityPolicy = request.CreateDataQualityPolicy();
 
@@ -43,12 +48,14 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
             var record = await _writer.LoadAsync(file, cancellationToken);
             var assessmentOutcomes = new List<PaperMarketAssessmentOutcome>(record.MarketAssessments.Count);
             var outcomes = new List<PaperTradeOutcome>(record.CandidateOpportunities.Count);
+            var recordDataQualityResults = new List<AuditDataQualityResult>();
 
             foreach (var assessment in record.MarketAssessments)
             {
                 var result = await EvaluateAssessmentAsync(record, assessment, request.Resolution, dataQualityPolicy, evaluatedAtUtc, cancellationToken);
                 assessmentOutcomes.Add(result.Outcome);
                 dataQualityResults.Add(result.DataQuality);
+                recordDataQualityResults.Add(result.DataQuality);
             }
 
             foreach (var candidate in record.CandidateOpportunities)
@@ -56,16 +63,22 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
                 var result = await EvaluateCandidateAsync(record, candidate, request.Resolution, dataQualityPolicy, evaluatedAtUtc, cancellationToken);
                 outcomes.Add(result.Outcome);
                 dataQualityResults.Add(result.DataQuality);
+                recordDataQualityResults.Add(result.DataQuality);
             }
 
-            var updated = record with
-            {
-                PaperOutcomes = outcomes,
-                MarketAssessmentOutcomes = assessmentOutcomes,
-                BiasSummary = DecisionBiasSummary.From(record.MarketAssessments, record.CandidateOpportunities),
-            };
-            await _writer.SaveAsync(file, updated, cancellationToken);
-            evaluatedRecords.Add(updated);
+            var evaluation = await _sidecarWriter.WriteEvaluationAsync(
+                file,
+                record,
+                evaluatedAtUtc,
+                request.Resolution,
+                dataQualityPolicy,
+                outcomes,
+                assessmentOutcomes,
+                DecisionAuditDataQualitySummary.From(recordDataQualityResults),
+                cancellationToken);
+            evaluatedRecords.Add(record);
+            evaluations.Add(evaluation.Record);
+            evaluationArtifacts.Add(evaluation.Artifact);
         }
 
         var reportPath = BuildReportPath(request.RootPath, request.TradingDate);
@@ -73,8 +86,12 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
             request,
             evaluatedAtUtc,
             evaluatedRecords,
+            evaluations,
             ToArtifactReference(reportPath),
-            DecisionAuditDataQualitySummary.From(dataQualityResults));
+            DecisionAuditDataQualitySummary.From(dataQualityResults)) with
+        {
+            EvaluationArtifacts = evaluationArtifacts,
+        };
         await SaveReportAsync(reportPath, report, cancellationToken);
         return report;
     }
@@ -245,11 +262,12 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
         DecisionAuditEvaluationRequest request,
         DateTimeOffset evaluatedAtUtc,
         IReadOnlyList<DecisionAuditRecord> records,
+        IReadOnlyList<DecisionEvaluationRecord> evaluations,
         ArtifactReference reportArtifact,
         DecisionAuditDataQualitySummary dataQuality)
     {
-        var allOutcomes = records.SelectMany(record => record.PaperOutcomes).ToArray();
-        var allAssessmentOutcomes = records.SelectMany(record => record.MarketAssessmentOutcomes).ToArray();
+        var allOutcomes = evaluations.SelectMany(record => record.PaperOutcomes).ToArray();
+        var allAssessmentOutcomes = evaluations.SelectMany(record => record.MarketAssessmentOutcomes).ToArray();
         var estimatedRValues = allOutcomes
             .Where(outcome => outcome.EstimatedRMultiple is not null)
             .Select(outcome => outcome.EstimatedRMultiple!.Value)

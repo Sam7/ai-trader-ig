@@ -4,7 +4,6 @@ using Trading.AI.DailyBriefing;
 using Trading.AI.Prompts.DailyPlanJson;
 using Trading.Strategy.DayPlanning;
 using Trading.Strategy.Inputs;
-using Trading.Strategy.Rules;
 
 public sealed class DailyPlanMapperTests
 {
@@ -14,7 +13,7 @@ public sealed class DailyPlanMapperTests
         var mapper = new DailyPlanMapper();
         var request = new DailyBriefingRequest(
             new TradingDayRequest(new DateOnly(2026, 3, 12)),
-            StrategyRules.Default,
+            DailyPlanningPolicy.Default,
             DateTimeOffset.Parse("2026-03-12T07:30:00Z"));
         var document = new DailyPlanDocument(
             "Macro",

@@ -11,6 +11,40 @@ using Trading.Strategy.Shared;
 public sealed class DecisionAuditEvaluationServiceTests
 {
     [Fact]
+    public async Task EvaluateAsync_repeated_runs_should_append_sidecars_without_changing_the_source_audit()
+    {
+        var tempDirectory = Directory.CreateTempSubdirectory();
+        try
+        {
+            var instrument = new InstrumentId("CC.D.TEST.IP");
+            var writer = CreateWriter(tempDirectory);
+            var auditPath = Path.Combine(tempDirectory.FullName, "2026-03-12", "100000000-decision-audit.json");
+            await writer.SaveAsync(
+                auditPath,
+                CreateAuditRecord(instrument, assessments: [], candidates: []),
+                CancellationToken.None);
+            var originalAuditBytes = await File.ReadAllBytesAsync(auditPath);
+            var service = CreateService(writer, new InMemoryMarketDataStore());
+            var request = new DecisionAuditEvaluationRequest(
+                tempDirectory.FullName,
+                new DateOnly(2026, 3, 12),
+                PriceResolution.FiveMinutes);
+
+            await service.EvaluateAsync(request, CancellationToken.None);
+            await service.EvaluateAsync(request, CancellationToken.None);
+
+            Directory.GetFiles(
+                Path.GetDirectoryName(auditPath)!,
+                "*-decision-evaluation-*.json").Should().HaveCount(2);
+            (await File.ReadAllBytesAsync(auditPath)).Should().Equal(originalAuditBytes);
+        }
+        finally
+        {
+            tempDirectory.Delete(true);
+        }
+    }
+
+    [Fact]
     public async Task EvaluateAsync_ShouldUpdateAuditRecordWithPaperOutcomeAndSummary()
     {
         var tempDirectory = Directory.CreateTempSubdirectory();
@@ -64,8 +98,10 @@ public sealed class DecisionAuditEvaluationServiceTests
                 }));
             var auditPath = Path.Combine(tempDirectory.FullName, "2026-03-12", "100000000-decision-audit.json");
             await writer.SaveAsync(auditPath, CreateAuditRecord(instrument), CancellationToken.None);
+            var originalAuditBytes = await File.ReadAllBytesAsync(auditPath);
             var service = new DecisionAuditEvaluationService(
                 writer,
+                new DecisionEvidenceSidecarWriter(writer),
                 new PaperTradeOutcomeEvaluator(),
                 new PaperMarketAssessmentEvaluator(),
                 new MarketDataService(
@@ -87,14 +123,20 @@ public sealed class DecisionAuditEvaluationServiceTests
             report.ReportArtifact.Should().NotBeNull();
             File.Exists(report.ReportArtifact!.Path).Should().BeTrue();
 
-            var updated = JsonSerializer.Deserialize<DecisionAuditRecord>(
-                await File.ReadAllTextAsync(auditPath),
+            (await File.ReadAllBytesAsync(auditPath)).Should().Equal(originalAuditBytes);
+            var evaluationPath = Directory.GetFiles(
+                Path.GetDirectoryName(auditPath)!,
+                "*-decision-evaluation-*.json").Should().ContainSingle().Which;
+            var evaluation = JsonSerializer.Deserialize<DecisionEvaluationRecord>(
+                await File.ReadAllTextAsync(evaluationPath),
                 DecisionAuditJson.Options);
-            updated!.PaperOutcomes.Should().ContainSingle();
-            updated.PaperOutcomes[0].Status.Should().Be(PaperTradeOutcomeStatus.TargetHit);
-            updated.PaperOutcomes[0].EstimatedRMultiple.Should().Be(2m);
-            updated.MarketAssessmentOutcomes.Should().ContainSingle();
-            updated.MarketAssessmentOutcomes[0].Status.Should().Be(PaperMarketAssessmentOutcomeStatus.DataInsufficient);
+            evaluation!.PaperOutcomes.Should().ContainSingle();
+            evaluation.PaperOutcomes[0].Status.Should().Be(PaperTradeOutcomeStatus.TargetHit);
+            evaluation.PaperOutcomes[0].EstimatedRMultiple.Should().Be(2m);
+            evaluation.MarketAssessmentOutcomes.Should().ContainSingle();
+            evaluation.MarketAssessmentOutcomes[0].Status.Should().Be(PaperMarketAssessmentOutcomeStatus.DataInsufficient);
+            evaluation.SourceAuditSha256.Should().MatchRegex("^[a-f0-9]{64}$");
+            report.EvaluationArtifacts.Should().ContainSingle().Which.Path.Should().Be(evaluationPath);
         }
         finally
         {
@@ -133,6 +175,7 @@ public sealed class DecisionAuditEvaluationServiceTests
             await writer.SaveAsync(auditPath, CreateAuditRecord(instrument, assessments: []), CancellationToken.None);
             var service = new DecisionAuditEvaluationService(
                 writer,
+                new DecisionEvidenceSidecarWriter(writer),
                 new PaperTradeOutcomeEvaluator(),
                 new PaperMarketAssessmentEvaluator(),
                 new MarketDataService(
@@ -149,12 +192,10 @@ public sealed class DecisionAuditEvaluationServiceTests
             report.TargetHitCount.Should().Be(0);
             report.DataInsufficientCount.Should().Be(1);
 
-            var updated = JsonSerializer.Deserialize<DecisionAuditRecord>(
-                await File.ReadAllTextAsync(auditPath),
-                DecisionAuditJson.Options);
-            updated!.PaperOutcomes.Should().ContainSingle();
-            updated.PaperOutcomes[0].Status.Should().Be(PaperTradeOutcomeStatus.DataInsufficient);
-            updated.PaperOutcomes[0].Reason.Should().Contain("First missing range");
+            var evaluation = await LoadSingleEvaluationAsync(auditPath);
+            evaluation.PaperOutcomes.Should().ContainSingle();
+            evaluation.PaperOutcomes[0].Status.Should().Be(PaperTradeOutcomeStatus.DataInsufficient);
+            evaluation.PaperOutcomes[0].Reason.Should().Contain("First missing range");
         }
         finally
         {
@@ -197,11 +238,9 @@ public sealed class DecisionAuditEvaluationServiceTests
             report.DataInsufficientCount.Should().Be(0);
             report.DataQuality!.InsufficientTailWindows.Should().Be(1);
 
-            var updated = JsonSerializer.Deserialize<DecisionAuditRecord>(
-                await File.ReadAllTextAsync(auditPath),
-                DecisionAuditJson.Options);
-            updated!.PaperOutcomes[0].Status.Should().Be(PaperTradeOutcomeStatus.TargetHit);
-            updated.PaperOutcomes[0].Reason.Should().Contain("first unsafe data-quality issue starts after the close");
+            var evaluation = await LoadSingleEvaluationAsync(auditPath);
+            evaluation.PaperOutcomes[0].Status.Should().Be(PaperTradeOutcomeStatus.TargetHit);
+            evaluation.PaperOutcomes[0].Reason.Should().Contain("first unsafe data-quality issue starts after the close");
         }
         finally
         {
@@ -233,11 +272,9 @@ public sealed class DecisionAuditEvaluationServiceTests
             report.AssessmentDataInsufficientCount.Should().Be(0);
             report.DataQuality!.EvaluatedWithToleratedGaps.Should().Be(1);
 
-            var updated = JsonSerializer.Deserialize<DecisionAuditRecord>(
-                await File.ReadAllTextAsync(auditPath),
-                DecisionAuditJson.Options);
-            updated!.MarketAssessmentOutcomes[0].Status.Should().Be(PaperMarketAssessmentOutcomeStatus.FollowedBias);
-            updated.MarketAssessmentOutcomes[0].Reason.Should().Contain("small interior data gap");
+            var evaluation = await LoadSingleEvaluationAsync(auditPath);
+            evaluation.MarketAssessmentOutcomes[0].Status.Should().Be(PaperMarketAssessmentOutcomeStatus.FollowedBias);
+            evaluation.MarketAssessmentOutcomes[0].Reason.Should().Contain("small interior data gap");
         }
         finally
         {
@@ -271,11 +308,9 @@ public sealed class DecisionAuditEvaluationServiceTests
             report.AssessmentFollowedBiasCount.Should().Be(0);
             report.AssessmentDataInsufficientCount.Should().Be(1);
 
-            var updated = JsonSerializer.Deserialize<DecisionAuditRecord>(
-                await File.ReadAllTextAsync(auditPath),
-                DecisionAuditJson.Options);
-            updated!.MarketAssessmentOutcomes[0].Status.Should().Be(PaperMarketAssessmentOutcomeStatus.DataInsufficient);
-            updated.MarketAssessmentOutcomes[0].Reason.Should().Contain("Strict data mode");
+            var evaluation = await LoadSingleEvaluationAsync(auditPath);
+            evaluation.MarketAssessmentOutcomes[0].Status.Should().Be(PaperMarketAssessmentOutcomeStatus.DataInsufficient);
+            evaluation.MarketAssessmentOutcomes[0].Reason.Should().Contain("Strict data mode");
         }
         finally
         {
@@ -338,9 +373,17 @@ public sealed class DecisionAuditEvaluationServiceTests
             null,
             null,
             new IntradayCandidateDecisionSummary(candidates.Count, 0, candidates.Count, 0, 0),
-            [],
-            [],
             DecisionBiasSummary.From(assessments, candidates));
+    }
+
+    private static async Task<DecisionEvaluationRecord> LoadSingleEvaluationAsync(string auditPath)
+    {
+        var path = Directory.GetFiles(
+            Path.GetDirectoryName(auditPath)!,
+            "*-decision-evaluation-*.json").Should().ContainSingle().Which;
+        return JsonSerializer.Deserialize<DecisionEvaluationRecord>(
+            await File.ReadAllTextAsync(path),
+            DecisionAuditJson.Options)!;
     }
 
     private static DecisionAuditWriter CreateWriter(DirectoryInfo root)
@@ -354,6 +397,7 @@ public sealed class DecisionAuditEvaluationServiceTests
         InMemoryMarketDataStore store)
         => new(
             writer,
+            new DecisionEvidenceSidecarWriter(writer),
             new PaperTradeOutcomeEvaluator(),
             new PaperMarketAssessmentEvaluator(),
             new MarketDataService(

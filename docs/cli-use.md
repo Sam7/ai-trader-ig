@@ -260,10 +260,11 @@ Starts the background automation schedule (TickerQ cron jobs).
 * When a demo canary completes, CLI output also includes a `Demo Canary Execution` panel with the approved account, broker state, stop/limit protection, and final outcome.
 
 
-* **Command:** `automation intraday prepare` (Prepares charts and JSON payloads without calling OpenAI).
+* **Command:** `automation intraday prepare` (Prepares a typed review request and hashed evidence artifacts without calling OpenAI).
 * Preparation does not auto-create a daily plan. It only prepares when a plan already exists.
 * **Command:** `automation intraday submit` (Submits a prepared JSON payload to OpenAI).
 * `--input <PATH>` *(Required)*: Path to the `*intraday-opportunity-prepare.json` file.
+* Submission re-renders the current prompt and verifies prompt/schema versions, the request hash, evidence references, and every evidence artifact hash before calling OpenAI.
 
 
 
@@ -281,6 +282,8 @@ Evaluates past AI candidate opportunities against local SQLite market data to ca
 * `--max-assessment-consecutive-missing-bars <COUNT>` and `--max-assessment-missing-ratio <RATIO>`: Additional assessment-only tolerance guards.
 
 Audit gap handling separates price defects from broker session evidence. Missing bars are not assumed to mean a closed market; they remain insufficient unless the stored evidence includes broker closed-market status for that window, or the trade outcome was already decided before the first unsafe gap.
+
+Evaluation never edits `*-decision-audit.json`. Each run appends one uniquely named `*-decision-evaluation-*.json` sidecar per source audit, containing the source audit SHA-256, calculation version, policy snapshot, outcomes, and data-quality summary. Demo canary outcomes use equivalent `*-demo-execution-*.json` sidecars.
 
 * **Example:** `... automation audit evaluate --root Logs\Observability --date 2026-03-12`
 

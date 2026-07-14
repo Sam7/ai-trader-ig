@@ -1,5 +1,6 @@
 using FluentAssertions;
 using Trading.AI.Prompts;
+using Trading.AI.Prompts.IntradayOpportunityReview;
 
 public sealed class PromptRegistryTests
 {
@@ -33,5 +34,18 @@ public sealed class PromptRegistryTests
 
         prompt.Should().Contain("WATCHED_MARKETS_CONTEXT");
         prompt.Should().Contain("4-day OHLC chart");
+    }
+
+    [Fact]
+    public void Intraday_contract_should_expose_versioned_prompt_and_schema_hashes()
+    {
+        var registry = new PromptRegistry();
+
+        var provenance = registry.GetProvenance(PromptRegistry.IntradayOpportunityReview);
+
+        provenance.PromptVersion.Should().Be("1");
+        provenance.PromptSha256.Should().MatchRegex("^[a-f0-9]{64}$");
+        provenance.ResponseSchemaVersion.Should().Be("1");
+        provenance.ResponseSchemaSha256.Should().Be(IntradayOpportunityReviewResponseFormat.GetSchemaSha256());
     }
 }

@@ -1,12 +1,14 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Extensions.Options;
 using Trading.AI.Configuration;
 using Trading.AI.Prompts;
 
 namespace Trading.Automation.Execution;
 
-public sealed class IntradayOpportunityPreparationWriter
+public sealed class IntradayOpportunityPreparationWriter : IIntradayOpportunityPreparationStore
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -32,17 +34,52 @@ public sealed class IntradayOpportunityPreparationWriter
     {
         var basePath = BuildBasePath(tradingDate, requestedAtUtc);
         var requestTextPath = $"{basePath}-request.txt";
-        await File.WriteAllTextAsync(requestTextPath, preparedRun.RequestText, cancellationToken);
+        await WriteNewAsync(requestTextPath, Encoding.UTF8.GetBytes(preparedRun.RequestText), cancellationToken);
 
-        var attachmentArtifacts = new List<IntradayOpportunityPreparedAttachment>(preparedRun.Markets.Count);
+        var attachments = new List<IntradayOpportunityPreparedAttachment>();
+        var evidenceManifest = new List<DecisionEvidence>();
         var preparedMarkets = new List<IntradayOpportunityPreparedMarket>(preparedRun.Markets.Count);
 
         for (var index = 0; index < preparedRun.Markets.Count; index++)
         {
             var market = preparedRun.Markets[index];
-            var chartPath = $"{basePath}-{index + 1:D2}-{ToSlug(market.InstrumentName)}.png";
-            await File.WriteAllBytesAsync(chartPath, market.ChartBytes, cancellationToken);
-            var artifact = ToArtifactReference(chartPath);
+            var evidenceIds = new List<string>(market.Evidence.Count);
+            for (var evidenceIndex = 0; evidenceIndex < market.Evidence.Count; evidenceIndex++)
+            {
+                var preparedEvidence = market.Evidence[evidenceIndex];
+                var sha256 = ComputeSha256(preparedEvidence.Data);
+                var evidenceId = CreateEvidenceId(
+                    tradingDate,
+                    requestedAtUtc,
+                    market.Instrument.Value,
+                    preparedEvidence,
+                    sha256);
+                var evidencePath = $"{basePath}-{index + 1:D2}-{evidenceIndex + 1:D2}-{ToSlug(market.InstrumentName)}-{ToSlug(preparedEvidence.RecipeId)}{ResolveExtension(preparedEvidence.MediaType)}";
+                await WriteNewAsync(evidencePath, preparedEvidence.Data, cancellationToken);
+
+                evidenceIds.Add(evidenceId);
+                evidenceManifest.Add(new DecisionEvidence(
+                    evidenceId,
+                    preparedEvidence.Kind,
+                    preparedEvidence.Label,
+                    market.Instrument,
+                    preparedEvidence.MediaType,
+                    ToArtifactReference(evidencePath),
+                    preparedEvidence.WindowStartUtc,
+                    preparedEvidence.WindowEndUtc,
+                    preparedEvidence.AsOfUtc,
+                    preparedEvidence.RecipeId,
+                    preparedEvidence.RecipeVersion,
+                    sha256));
+
+                if (preparedEvidence.AttachToPrompt)
+                {
+                    attachments.Add(new IntradayOpportunityPreparedAttachment(
+                        evidenceId,
+                        preparedEvidence.Label,
+                        preparedEvidence.MediaType));
+                }
+            }
 
             preparedMarkets.Add(new IntradayOpportunityPreparedMarket(
                 market.Instrument.Value,
@@ -55,12 +92,7 @@ public sealed class IntradayOpportunityPreparationWriter
                 market.LatestBarAtUtc,
                 market.PriceSeriesRefreshMode,
                 market.FetchedBarCount,
-                artifact));
-
-            attachmentArtifacts.Add(new IntradayOpportunityPreparedAttachment(
-                market.AttachmentLabel,
-                "image/png",
-                artifact));
+                evidenceIds));
         }
 
         var documentPath = $"{basePath}.json";
@@ -70,14 +102,23 @@ public sealed class IntradayOpportunityPreparationWriter
             tradingDate,
             requestedAtUtc,
             PromptRegistry.IntradayOpportunityReview.Id,
-            preparedRun.Input,
+            preparedRun.Request,
             preparedRun.RequestText,
             preparedMarkets,
-            attachmentArtifacts,
+            attachments,
             documentArtifact,
-            requestTextArtifact);
+            requestTextArtifact)
+        {
+            PreparationProfile = preparedRun.PreparationProfile,
+            PromptContract = preparedRun.PromptContract,
+            RequestSha256 = ComputeSha256(Encoding.UTF8.GetBytes(preparedRun.RequestText)),
+            Evidence = evidenceManifest,
+        };
 
-        await File.WriteAllTextAsync(documentPath, JsonSerializer.Serialize(document, JsonOptions), cancellationToken);
+        await WriteNewAsync(
+            documentPath,
+            JsonSerializer.SerializeToUtf8Bytes(document, JsonOptions),
+            cancellationToken);
         return document;
     }
 
@@ -120,4 +161,45 @@ public sealed class IntradayOpportunityPreparationWriter
 
         return count == 0 ? "chart" : new string(buffer[..count]).Trim('-');
     }
+
+    private static string CreateEvidenceId(
+        DateOnly tradingDate,
+        DateTimeOffset requestedAtUtc,
+        string instrumentId,
+        PreparedDecisionEvidence evidence,
+        string contentSha256)
+    {
+        var identity = string.Join(
+            "|",
+            tradingDate.ToString("yyyy-MM-dd"),
+            requestedAtUtc.ToUniversalTime().ToString("O"),
+            instrumentId,
+            evidence.Kind,
+            evidence.RecipeId,
+            evidence.RecipeVersion,
+            contentSha256);
+        return $"ev_{ComputeSha256(Encoding.UTF8.GetBytes(identity))[..24]}";
+    }
+
+    internal static string ComputeSha256(byte[] data)
+        => Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant();
+
+    private static async Task WriteNewAsync(
+        string path,
+        byte[] data,
+        CancellationToken cancellationToken)
+    {
+        await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        await stream.WriteAsync(data, cancellationToken);
+    }
+
+    private static string ResolveExtension(string mediaType)
+        => mediaType switch
+        {
+            "image/png" => ".png",
+            "application/json" => ".json",
+            "text/markdown" => ".md",
+            "text/plain" => ".txt",
+            _ => ".bin",
+        };
 }

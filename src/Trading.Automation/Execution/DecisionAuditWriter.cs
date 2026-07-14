@@ -32,7 +32,7 @@ public sealed class DecisionAuditWriter
     {
         var record = CreateInitialRecord(prepared, executionArtifacts, workflowResult, executionBoundary);
         var path = BuildAuditPath(prepared.TradingDate, prepared.RequestedAtUtc);
-        await SaveAsync(path, record, cancellationToken);
+        await WriteNewAsync(path, record, cancellationToken);
         return ToArtifactReference(path);
     }
 
@@ -44,13 +44,23 @@ public sealed class DecisionAuditWriter
         return NormalizeLoadedRecord(path, record);
     }
 
-    public async Task SaveAsync(
+    internal async Task SaveAsync(
         string path,
         DecisionAuditRecord record,
         CancellationToken cancellationToken = default)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, JsonSerializer.Serialize(record, DecisionAuditJson.Options), cancellationToken);
+    }
+
+    private static async Task WriteNewAsync(
+        string path,
+        DecisionAuditRecord record,
+        CancellationToken cancellationToken)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await using var stream = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read);
+        await JsonSerializer.SerializeAsync(stream, record, DecisionAuditJson.Options, cancellationToken);
     }
 
     public IReadOnlyList<string> FindAuditFiles(string rootPath, DateOnly? tradingDate = null)
@@ -100,7 +110,13 @@ public sealed class DecisionAuditWriter
                 promptMetadata.ModelId,
                 promptMetadata.ProcessingMode,
                 promptMetadata.ProviderResponseId,
-                promptMetadata.ProviderStatus),
+                promptMetadata.ProviderStatus)
+            {
+                PreparationSchemaVersion = prepared.SchemaVersion,
+                PreparationProfile = prepared.PreparationProfile,
+                PromptContract = prepared.PromptContract,
+                RequestSha256 = prepared.RequestSha256,
+            },
             assessments,
             candidates,
             workflowResult.ExecutionMode,
@@ -108,42 +124,10 @@ public sealed class DecisionAuditWriter
             workflowResult.SelectedShadowIntent,
             executionBoundary,
             workflowResult.DecisionSummary,
-            candidates
-                .Select(candidate => new PaperTradeOutcome(
-                    candidate.Instrument,
-                    candidate.Direction,
-                    PaperTradeOutcomeStatus.DataInsufficient,
-                    DateTimeOffset.UtcNow,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    candidate.CurrentSpread,
-                    CalculateSpreadCostR(candidate),
-                    0,
-                    "Paper outcome has not been evaluated against post-signal market data yet."))
-                .ToArray(),
-            assessments
-                .Select(assessment => new PaperMarketAssessmentOutcome(
-                    assessment.Instrument,
-                    assessment.DirectionalBias,
-                    PaperMarketAssessmentOutcomeStatus.DataInsufficient,
-                    DateTimeOffset.UtcNow,
-                    workflowResult.ReviewedAtUtc.AddHours(1),
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    null,
-                    0,
-                    "Assessment follow-through has not been evaluated against post-signal market data yet."))
-                .ToArray(),
-            DecisionBiasSummary.From(assessments, candidates),
-            null);
+            DecisionBiasSummary.From(assessments, candidates))
+        {
+            Evidence = prepared.Evidence,
+        };
     }
 
     private string BuildAuditPath(DateOnly tradingDate, DateTimeOffset requestedAtUtc)
@@ -195,6 +179,7 @@ public sealed class DecisionAuditWriter
         {
             AuditId = string.IsNullOrWhiteSpace(record.AuditId) ? CreateAuditIdFromPath(path) : record.AuditId,
             ShadowDecisions = shadowDecisions,
+            Evidence = record.Evidence ?? [],
             DecisionSummary = record.DecisionSummary ?? new IntradayCandidateDecisionSummary(
                 record.CandidateOpportunities.Count,
                 shadowDecisions.Count(decision => decision.Status == IntradayCandidateDecisionStatus.ApprovedForShadowExecution),
@@ -238,12 +223,6 @@ public sealed class DecisionAuditWriter
             candidate.Invalidation,
             candidate.WhyNow,
             candidate.SetupExpiresAtUtc);
-
-    private static decimal? CalculateSpreadCostR(DecisionAuditCandidate candidate)
-    {
-        var risk = Math.Abs(candidate.EntryPrice - candidate.StopLossPrice);
-        return risk > 0m ? candidate.CurrentSpread / risk : null;
-    }
 
     private static ArtifactReference ToArtifactReference(string path)
         => new(Path.GetFullPath(path), new Uri(Path.GetFullPath(path)).AbsoluteUri);

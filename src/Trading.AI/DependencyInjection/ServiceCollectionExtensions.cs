@@ -109,7 +109,7 @@ public static class ServiceCollectionExtensions
             sp.GetRequiredService<IBackgroundResponseClient>()));
         services.AddTransient<DailyBriefResearcher>();
         services.AddTransient<DailyPlanConverter>();
-        services.AddTransient<IntradayOpportunityReviewer>();
+        services.AddTransient<IIntradayOpportunityReviewer, IntradayOpportunityReviewer>();
         services.AddTransient<IDailyBriefingComposer, OpenAiDailyBriefingComposer>();
         return services;
     }

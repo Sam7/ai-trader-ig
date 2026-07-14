@@ -1,13 +1,16 @@
-using Trading.AI.Prompts.IntradayOpportunityReview;
+using Trading.AI.DailyBriefing;
+using Trading.AI.Prompts;
 using Trading.Abstractions;
 using Trading.Strategy.Shared;
 
 namespace Trading.Automation.Execution;
 
 public sealed record IntradayPreparedRun(
-    IntradayOpportunityReviewInput Input,
+    IntradayOpportunityReviewRequest Request,
     string RequestText,
-    IReadOnlyList<PreparedIntradayMarket> Markets);
+    IReadOnlyList<PreparedIntradayMarket> Markets,
+    PromptContractProvenance PromptContract,
+    IntradayPreparationProfileReference PreparationProfile);
 
 public sealed record PreparedIntradayMarket(
     InstrumentId Instrument,
@@ -23,5 +26,4 @@ public sealed record PreparedIntradayMarket(
     DateTimeOffset LatestBarAtUtc,
     PriceSeriesRefreshMode PriceSeriesRefreshMode,
     int FetchedBarCount,
-    string AttachmentLabel,
-    byte[] ChartBytes);
+    IReadOnlyList<PreparedDecisionEvidence> Evidence);

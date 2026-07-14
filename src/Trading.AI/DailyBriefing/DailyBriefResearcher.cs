@@ -44,17 +44,17 @@ public sealed class DailyBriefResearcher
         => new(
             request.TradingDay.TradingDate,
             _options.DefaultTimezone,
-            request.Rules.MarketWatch.ShortlistSize,
+            request.Policy.ShortlistSize,
             _trackedMarketsFormatter.Format(_options.TrackedMarkets),
             request.TradingDay.TradingDate,
             request.RequestedAtUtc);
 
     private void EnsureTrackedMarketsSatisfyShortlist(DailyBriefingRequest request)
     {
-        if (_options.TrackedMarkets.Length < request.Rules.MarketWatch.ShortlistSize)
+        if (_options.TrackedMarkets.Length < request.Policy.ShortlistSize)
         {
             throw new InvalidOperationException(
-                $"Configured tracked markets ({_options.TrackedMarkets.Length}) must be at least the shortlist size ({request.Rules.MarketWatch.ShortlistSize}).");
+                $"Configured tracked markets ({_options.TrackedMarkets.Length}) must be at least the shortlist size ({request.Policy.ShortlistSize}).");
         }
     }
 }

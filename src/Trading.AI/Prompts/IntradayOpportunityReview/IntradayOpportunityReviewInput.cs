@@ -1,6 +1,6 @@
 namespace Trading.AI.Prompts.IntradayOpportunityReview;
 
-public sealed record IntradayOpportunityReviewInput(
+internal sealed record IntradayOpportunityReviewInput(
     DateOnly TradingDate,
     DateTimeOffset LookbackStartUtc,
     DateTimeOffset LookbackEndUtc,

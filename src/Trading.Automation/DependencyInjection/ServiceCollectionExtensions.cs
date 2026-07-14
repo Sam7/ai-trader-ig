@@ -10,7 +10,6 @@ using Trading.Execution;
 using Trading.MarketData.DependencyInjection;
 using Trading.Strategy.DependencyInjection;
 using Trading.Strategy.Inputs;
-using Trading.Strategy.OpportunityReview;
 
 namespace Trading.Automation.DependencyInjection;
 
@@ -38,9 +37,6 @@ public static class ServiceCollectionExtensions
 
         services.AddSingleton<SystemTradingClock>();
         services.AddSingleton<ITradingClock>(sp => sp.GetRequiredService<SystemTradingClock>());
-        services.AddSingleton<IRiskContextSource, PassiveRiskContextSource>();
-        services.AddSingleton<ITradeSetupPlanner, NoOpTradeSetupPlanner>();
-        services.AddSingleton<ITradeApprover, NoOpTradeApprover>();
         services.AddSingleton<IExecutionClock, SystemExecutionClock>();
         services.AddSingleton<IExecutionDealReferenceFactory, ExecutionDealReferenceFactory>();
         services.AddSingleton<IExecutionBoundaryStore>(sp =>
@@ -58,8 +54,20 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<DailyPlanEnsureService>();
         services.AddSingleton<IntradayOpportunityScanGate>();
         services.AddSingleton<IntradayPriceSeriesCache>();
+        services.AddSingleton<IIntradayPriceSeriesSource>(
+            sp => sp.GetRequiredService<IntradayPriceSeriesCache>());
         services.AddSingleton<IntradayOpportunityPreparationWriter>();
+        services.AddSingleton<IIntradayOpportunityPreparationStore>(
+            sp => sp.GetRequiredService<IntradayOpportunityPreparationWriter>());
+        services.AddTransient<IntradayOpportunityAnalysisService>();
+        services.AddTransient<IIntradayOpportunityRequestRenderer>(
+            sp => sp.GetRequiredService<IntradayOpportunityAnalysisService>());
+        services.AddTransient<IIntradayOpportunityAnalysisService>(
+            sp => sp.GetRequiredService<IntradayOpportunityAnalysisService>());
+        services.AddTransient<IIntradayOpportunityPreparationService, IntradayOpportunityPreparationService>();
+        services.AddTransient<IIntradayOpportunityDecisionCoordinator, IntradayOpportunityDecisionCoordinator>();
         services.AddSingleton<DecisionAuditWriter>();
+        services.AddSingleton<DecisionEvidenceSidecarWriter>();
         services.AddSingleton<PaperTradeOutcomeEvaluator>();
         services.AddSingleton<PaperMarketAssessmentEvaluator>();
         services.AddSingleton<AuditMarketDataQualityAnalyzer>();

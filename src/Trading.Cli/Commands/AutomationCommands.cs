@@ -7,7 +7,6 @@ using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
 using Trading.Strategy.DayPlanning;
 using Trading.Strategy.Inputs;
-using Trading.Strategy.Rules;
 using Trading.Strategy.Shared;
 
 [Description("Start the background automation worker in the foreground.")]
@@ -151,20 +150,20 @@ public sealed class AutomationBriefConvertCommand : AsyncCommand<AutomationBrief
     private readonly DailyPlanConverter _converter;
     private readonly TradingCliRenderer _renderer;
     private readonly AutomationOptions _options;
-    private readonly StrategyRules _rules;
+    private readonly DailyPlanningPolicy _planningPolicy;
     private readonly ITradingClock _tradingClock;
 
     public AutomationBriefConvertCommand(
         DailyPlanConverter converter,
         TradingCliRenderer renderer,
         IOptions<AutomationOptions> options,
-        StrategyRules rules,
+        DailyPlanningPolicy planningPolicy,
         ITradingClock tradingClock)
     {
         _converter = converter;
         _renderer = renderer;
         _options = options.Value;
-        _rules = rules;
+        _planningPolicy = planningPolicy;
         _tradingClock = tradingClock;
     }
 
@@ -172,7 +171,7 @@ public sealed class AutomationBriefConvertCommand : AsyncCommand<AutomationBrief
     {
         var tradingDate = AutomationBriefSettings.ResolveTradingDate(settings.Date, _options.Timezone);
         var markdown = await File.ReadAllTextAsync(settings.Input, cancellationToken);
-        var request = new DailyBriefingRequest(new TradingDayRequest(tradingDate), _rules, _tradingClock.UtcNow);
+        var request = new DailyBriefingRequest(new TradingDayRequest(tradingDate), _planningPolicy, _tradingClock.UtcNow);
         var plan = await _converter.ConvertAsync(request, markdown, cancellationToken);
         _renderer.WriteTradingDayPlan(plan);
         return 0;

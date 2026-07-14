@@ -6,7 +6,7 @@ This document distils the highest-value ideas from the repository's day-trading 
 
 It is deliberately narrower than the source material. It does not attempt to recreate an institutional trading desk, add every professional indicator, or redesign the existing strategy. It identifies only the improvements most likely to make the current AI-driven intraday workflow safer, more deterministic, easier to evaluate, and more useful before broader strategy expansion.
 
-This roadmap complements the existing [start-trading plan](../01-start-trading-plan/01-start-trading-plan.md). The start-trading plan answers:
+This roadmap complements the existing [start-trading plan](01-start-trading-plan.md). The start-trading plan answers:
 
 > How do we reach narrow, safe, automated IG demo execution?
 

@@ -412,16 +412,22 @@ public sealed class TradingCliRenderer
             ("Request Text", preparation.RequestTextArtifact.Path),
             ("Request URI", preparation.RequestTextArtifact.Uri));
 
-        var table = CreateTable("Instrument", "Rank", "Refresh", "Fetched Bars", "Chart Path", "Chart URI");
+        var evidenceById = preparation.Evidence.ToDictionary(item => item.EvidenceId, StringComparer.Ordinal);
+        var table = CreateTable("Instrument", "Rank", "Refresh", "Fetched Bars", "Evidence", "Recipe", "Path");
         foreach (var market in preparation.Markets)
         {
-            table.AddRow(
-                market.InstrumentName,
-                market.Rank.ToString(),
-                market.PriceSeriesRefreshMode.ToString(),
-                market.FetchedBarCount.ToString(),
-                market.ChartArtifact.Path,
-                market.ChartArtifact.Uri);
+            foreach (var evidenceId in market.EvidenceIds)
+            {
+                var evidence = evidenceById[evidenceId];
+                table.AddRow(
+                    market.InstrumentName,
+                    market.Rank.ToString(),
+                    market.PriceSeriesRefreshMode.ToString(),
+                    market.FetchedBarCount.ToString(),
+                    evidence.Kind.ToString(),
+                    $"{evidence.RecipeId}@{evidence.RecipeVersion}",
+                    evidence.Artifact.Path);
+            }
         }
 
         _console.Write(table);
@@ -502,6 +508,7 @@ public sealed class TradingCliRenderer
             ("Resolution", report.Resolution.ToString()),
             ("Records", report.RecordsEvaluated.ToString()),
             ("Candidates", report.CandidatesEvaluated.ToString()),
+            ("Evaluation Sidecars", report.EvaluationArtifacts.Count.ToString()),
             ("Average R", CliParsing.FormatDecimal(report.AverageEstimatedRMultiple)),
             ("Report JSON", report.ReportArtifact?.Path ?? "n/a"));
 
@@ -509,6 +516,17 @@ public sealed class TradingCliRenderer
         {
             WriteInfo("No decision audit records were found for the requested scope. Run automation run or automation intraday scan first, then evaluate after market data has been collected.");
             return;
+        }
+
+        if (report.EvaluationArtifacts.Count > 0)
+        {
+            var evidence = CreateTable("Evaluation Sidecar", "URI");
+            foreach (var artifact in report.EvaluationArtifacts)
+            {
+                evidence.AddRow(artifact.Path, artifact.Uri);
+            }
+
+            _console.Write(evidence);
         }
 
         var outcomes = CreateTable("Outcome", "Count");

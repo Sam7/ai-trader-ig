@@ -2,7 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Trading.AI.Configuration;
-using Trading.AI.Prompts.IntradayOpportunityReview;
+using Trading.AI.Prompts;
 using Trading.Abstractions;
 using Trading.Automation.Execution;
 using Trading.Execution;
@@ -58,14 +58,24 @@ public sealed class DecisionAuditWriterTests
                 CancellationToken.None);
 
             File.Exists(artifact.Path).Should().BeTrue();
+            var auditJson = await File.ReadAllTextAsync(artifact.Path);
+            auditJson.Should().NotContain("\"paperOutcomes\"");
+            auditJson.Should().NotContain("\"marketAssessmentOutcomes\"");
+            auditJson.Should().NotContain("\"demoExecution\"");
             var record = JsonSerializer.Deserialize<DecisionAuditRecord>(
-                await File.ReadAllTextAsync(artifact.Path),
+                auditJson,
                 DecisionAuditJson.Options);
             record.Should().NotBeNull();
             record!.AuditId.Should().Be("2026-03-12/100000000-decision-audit");
             record.Decision.Should().Be(DecisionAuditDecision.ShadowRejected);
             record.Prompt.ProviderResponseId.Should().Be("resp_test");
             record.Prompt.ProcessingMode.Should().Be("ResponsesBackground");
+            record.Prompt.PreparationSchemaVersion.Should().Be("1");
+            record.Prompt.PreparationProfile.Should().Be(IntradayPreparationProfileReference.Default);
+            record.Prompt.PromptContract?.PromptVersion.Should().Be("1");
+            record.Prompt.RequestSha256.Should().MatchRegex("^[a-f0-9]{64}$");
+            record.Evidence.Should().ContainSingle();
+            record.Evidence[0].RecipeId.Should().Be("price-chart-ohlc-compressed");
             record.MarketAssessments.Should().ContainSingle();
             record.CandidateOpportunities.Should().ContainSingle();
             record.ExecutionMode.Should().Be(TradingExecutionMode.Disabled);
@@ -73,12 +83,10 @@ public sealed class DecisionAuditWriterTests
             record.ShadowDecisions[0].Reasons.Should().Contain(IntradayCandidateDecisionReason.ExecutionDisabled);
             record.SelectedShadowIntent.Should().BeNull();
             record.ExecutionBoundary.Should().Be(executionBoundary);
-            record.DemoExecution.Should().BeNull();
+            record.LegacyDemoExecution.Should().BeNull();
             record.DecisionSummary.Rejected.Should().Be(1);
-            record.PaperOutcomes.Should().ContainSingle();
-            record.PaperOutcomes[0].Status.Should().Be(PaperTradeOutcomeStatus.DataInsufficient);
-            record.MarketAssessmentOutcomes.Should().ContainSingle();
-            record.MarketAssessmentOutcomes[0].Status.Should().Be(PaperMarketAssessmentOutcomeStatus.DataInsufficient);
+            record.LegacyPaperOutcomes.Should().BeNull();
+            record.LegacyMarketAssessmentOutcomes.Should().BeNull();
             record.BiasSummary.DominantCandidateDirection.Should().Be("Buy");
         }
         finally
@@ -143,7 +151,9 @@ public sealed class DecisionAuditWriterTests
             record.AuditId.Should().Be("2026-03-12/100000000-decision-audit");
             record.ExecutionMode.Should().Be(TradingExecutionMode.Disabled);
             record.ShadowDecisions.Should().BeEmpty();
-            record.DemoExecution.Should().BeNull();
+            record.LegacyDemoExecution.Should().BeNull();
+            record.LegacyPaperOutcomes.Should().NotBeNull().And.BeEmpty();
+            record.LegacyMarketAssessmentOutcomes.Should().NotBeNull().And.BeEmpty();
             record.DecisionSummary.Considered.Should().Be(0);
         }
         finally
@@ -156,30 +166,46 @@ public sealed class DecisionAuditWriterTests
     {
         var preparedPath = Path.Combine(rootPath, "prepared.json");
         var requestPath = Path.Combine(rootPath, "request.txt");
+        var evidencePath = Path.Combine(rootPath, "chart.png");
         File.WriteAllText(preparedPath, "{}");
         File.WriteAllText(requestPath, "request");
+        File.WriteAllBytes(evidencePath, [1, 2, 3]);
 
         return new IntradayOpportunityPreparationDocument(
             new DateOnly(2026, 3, 12),
             DateTimeOffset.Parse("2026-03-12T10:00:00Z"),
             "intraday-opportunity-review",
-            new IntradayOpportunityReviewInput(
-                new DateOnly(2026, 3, 12),
-                DateTimeOffset.Parse("2026-03-12T09:00:00Z"),
-                DateTimeOffset.Parse("2026-03-12T10:00:00Z"),
-                1,
-                4,
-                "Australia/Melbourne",
-                "Daily plan",
-                "Watched markets",
-                "No events",
+            AutomationTestData.CreateIntradayReviewRequest(
                 new DateOnly(2026, 3, 12),
                 DateTimeOffset.Parse("2026-03-12T10:00:00Z")),
             "request",
             [],
             [],
             ToArtifact(preparedPath),
-            ToArtifact(requestPath));
+            ToArtifact(requestPath))
+        {
+            PromptContract = new PromptContractProvenance(
+                "intraday-opportunity-review",
+                "1",
+                new string('a', 64),
+                "1",
+                new string('b', 64)),
+            RequestSha256 = IntradayOpportunityPreparationWriter.ComputeSha256(
+                System.Text.Encoding.UTF8.GetBytes("request")),
+            Evidence = [new DecisionEvidence(
+                "ev_test",
+                DecisionEvidenceKind.PriceChart,
+                "Test chart",
+                new InstrumentId("CC.D.TEST.IP"),
+                "image/png",
+                ToArtifact(evidencePath),
+                DateTimeOffset.Parse("2026-03-08T10:00:00Z"),
+                DateTimeOffset.Parse("2026-03-12T10:00:00Z"),
+                DateTimeOffset.Parse("2026-03-12T10:00:00Z"),
+                "price-chart-ohlc-compressed",
+                "1",
+                IntradayOpportunityPreparationWriter.ComputeSha256([1, 2, 3]))],
+        };
     }
 
     private static IntradayOpportunityReviewResult CreateReviewResult()

@@ -47,7 +47,7 @@ public sealed class DailyPlanConverter
             PromptRegistry.DailyPlanJson,
             planModel,
             BuildInput(request, researchBriefMarkdown),
-            DailyPlanJsonResponseFormat.Create(request.Rules.MarketWatch.ShortlistSize),
+            DailyPlanJsonResponseFormat.Create(request.Policy.ShortlistSize),
             cancellationToken);
 
         var document = execution.StructuredValue;
@@ -60,18 +60,18 @@ public sealed class DailyPlanConverter
         => new(
             request.TradingDay.TradingDate,
             _options.DefaultTimezone,
-            request.Rules.MarketWatch.ShortlistSize,
-            request.Rules.Risk.MinimumRewardRiskRatio,
+            request.Policy.ShortlistSize,
+            request.Policy.MinimumRewardRiskRatio,
             _trackedMarketsFormatter.Format(_options.TrackedMarkets),
             researchBriefMarkdown,
             DateTimeOffset.UtcNow);
 
     private void EnsureTrackedMarketsSatisfyShortlist(DailyBriefingRequest request)
     {
-        if (_options.TrackedMarkets.Length < request.Rules.MarketWatch.ShortlistSize)
+        if (_options.TrackedMarkets.Length < request.Policy.ShortlistSize)
         {
             throw new InvalidOperationException(
-                $"Configured tracked markets ({_options.TrackedMarkets.Length}) must be at least the shortlist size ({request.Rules.MarketWatch.ShortlistSize}).");
+                $"Configured tracked markets ({_options.TrackedMarkets.Length}) must be at least the shortlist size ({request.Policy.ShortlistSize}).");
         }
     }
 }

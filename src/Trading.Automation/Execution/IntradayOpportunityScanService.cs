@@ -1,109 +1,60 @@
-using System.Globalization;
-using System.Text;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Trading.AI.Configuration;
-using Trading.AI.DailyBriefing;
-using Trading.AI.PromptExecution;
-using Trading.AI.Prompts;
-using Trading.AI.Prompts.IntradayOpportunityReview;
-using Trading.Abstractions;
 using Trading.Automation.Configuration;
-using Trading.Charting;
-using Trading.Execution;
-using Trading.Strategy.Inputs;
-using Trading.Strategy.Persistence;
-using Trading.Strategy.Shared;
-using Trading.Strategy.Workflow;
 
 namespace Trading.Automation.Execution;
 
 public sealed class IntradayOpportunityScanService
 {
-    private readonly ITradingDayStore _tradingDayStore;
-    private readonly IntradayPriceSeriesCache _priceSeriesCache;
-    private readonly IPriceChartRenderer _priceChartRenderer;
-    private readonly IntradayOpportunityReviewer _intradayOpportunityReviewer;
-    private readonly IntradayOpportunityPreparationWriter _preparationWriter;
-    private readonly DecisionAuditWriter _decisionAuditWriter;
     private readonly DailyPlanEnsureService _dailyPlanEnsureService;
     private readonly IntradayOpportunityScanGate _scanGate;
-    private readonly ITradingDayWorkflow _workflow;
-    private readonly ExecutionBoundaryService _executionBoundaryService;
-    private readonly DemoCanaryExecutionService _demoCanaryExecutionService;
-    private readonly AutomationOptions _automationOptions;
-    private readonly IReadOnlyDictionary<string, string> _instrumentNames;
+    private readonly IIntradayOpportunityPreparationService _preparationService;
+    private readonly IIntradayOpportunityAnalysisService _analysisService;
+    private readonly IIntradayOpportunityDecisionCoordinator _decisionCoordinator;
+    private readonly AutomationOptions _options;
     private readonly ILogger<IntradayOpportunityScanService> _logger;
 
     public IntradayOpportunityScanService(
-        ITradingDayStore tradingDayStore,
-        IntradayPriceSeriesCache priceSeriesCache,
-        IPriceChartRenderer priceChartRenderer,
-        IntradayOpportunityReviewer intradayOpportunityReviewer,
-        IntradayOpportunityPreparationWriter preparationWriter,
-        DecisionAuditWriter decisionAuditWriter,
         DailyPlanEnsureService dailyPlanEnsureService,
         IntradayOpportunityScanGate scanGate,
-        ITradingDayWorkflow workflow,
-        ExecutionBoundaryService executionBoundaryService,
-        DemoCanaryExecutionService demoCanaryExecutionService,
-        IOptions<AutomationOptions> automationOptions,
-        IOptions<DailyBriefingOptions> dailyBriefingOptions,
+        IIntradayOpportunityPreparationService preparationService,
+        IIntradayOpportunityAnalysisService analysisService,
+        IIntradayOpportunityDecisionCoordinator decisionCoordinator,
+        IOptions<AutomationOptions> options,
         ILogger<IntradayOpportunityScanService> logger)
     {
-        _tradingDayStore = tradingDayStore;
-        _priceSeriesCache = priceSeriesCache;
-        _priceChartRenderer = priceChartRenderer;
-        _intradayOpportunityReviewer = intradayOpportunityReviewer;
-        _preparationWriter = preparationWriter;
-        _decisionAuditWriter = decisionAuditWriter;
         _dailyPlanEnsureService = dailyPlanEnsureService;
         _scanGate = scanGate;
-        _workflow = workflow;
-        _executionBoundaryService = executionBoundaryService;
-        _demoCanaryExecutionService = demoCanaryExecutionService;
-        _automationOptions = automationOptions.Value;
-        _instrumentNames = dailyBriefingOptions.Value.TrackedMarkets.ToDictionary(
-            market => market.InstrumentId,
-            market => string.IsNullOrWhiteSpace(market.DisplayName) ? market.InstrumentId : market.DisplayName,
-            StringComparer.Ordinal);
+        _preparationService = preparationService;
+        _analysisService = analysisService;
+        _decisionCoordinator = decisionCoordinator;
+        _options = options.Value;
         _logger = logger;
     }
 
     public Task<IntradayOpportunitySubmitResult?> RunForTodayAsync(CancellationToken cancellationToken = default)
-        => RunAsync(ResolveTradingDate(DateTimeOffset.UtcNow), DateTimeOffset.UtcNow, cancellationToken);
-
-    public async Task<IntradayOpportunityPreparationDocument?> PrepareForTodayAsync(CancellationToken cancellationToken = default)
     {
         var requestedAtUtc = DateTimeOffset.UtcNow;
-        return await PrepareAsync(ResolveTradingDate(requestedAtUtc), requestedAtUtc, cancellationToken);
+        return RunAsync(ResolveTradingDate(requestedAtUtc), requestedAtUtc, cancellationToken);
     }
 
-    public async Task<IntradayOpportunityPreparationDocument?> PrepareAsync(
+    public Task<IntradayOpportunityPreparationDocument?> PrepareForTodayAsync(CancellationToken cancellationToken = default)
+    {
+        var requestedAtUtc = DateTimeOffset.UtcNow;
+        return PrepareAsync(ResolveTradingDate(requestedAtUtc), requestedAtUtc, cancellationToken);
+    }
+
+    public Task<IntradayOpportunityPreparationDocument?> PrepareAsync(
         DateOnly tradingDate,
         DateTimeOffset requestedAtUtc,
         CancellationToken cancellationToken = default)
+        => _preparationService.PrepareAsync(tradingDate, requestedAtUtc, cancellationToken);
+
+    public async Task<IntradayOpportunitySubmitResult> SubmitAsync(
+        string preparedJsonPath,
+        CancellationToken cancellationToken = default)
     {
-        var options = _automationOptions.IntradayOpportunities;
-        options.Validate();
-
-        var preparedRun = await BuildPreparedRunAsync(tradingDate, requestedAtUtc, options, cancellationToken);
-        if (preparedRun is null)
-        {
-            return null;
-        }
-
-        var document = await _preparationWriter.WriteAsync(tradingDate, requestedAtUtc, preparedRun, cancellationToken);
-        _logger.LogInformation(
-            "Prepared intraday opportunity review for {TradingDate}. Saved request artifact at {PreparedPath}.",
-            tradingDate,
-            document.PreparedArtifact.Path);
-        return document;
-    }
-
-    public async Task<IntradayOpportunitySubmitResult> SubmitAsync(string preparedJsonPath, CancellationToken cancellationToken = default)
-    {
-        var prepared = await _preparationWriter.LoadAsync(preparedJsonPath, cancellationToken);
+        var prepared = await _preparationService.LoadAsync(preparedJsonPath, cancellationToken);
         return await SubmitAsync(prepared, cancellationToken);
     }
 
@@ -136,12 +87,7 @@ public sealed class IntradayOpportunityScanService
             }
 
             var prepared = await PrepareAsync(tradingDate, requestedAtUtc, cancellationToken);
-            if (prepared is null)
-            {
-                return null;
-            }
-
-            return await SubmitAsync(prepared, cancellationToken);
+            return prepared is null ? null : await SubmitAsync(prepared, cancellationToken);
         }
         finally
         {
@@ -153,283 +99,14 @@ public sealed class IntradayOpportunityScanService
         IntradayOpportunityPreparationDocument prepared,
         CancellationToken cancellationToken)
     {
-        var renderedRequestText = _intradayOpportunityReviewer.RenderRequestText(prepared.Input);
-        if (!string.Equals(renderedRequestText, prepared.RenderedRequestText, StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"Prepared request text for '{prepared.PreparedArtifact.Path}' no longer matches the current prompt template. Regenerate the prepared run before submitting.");
-        }
-
-        var attachments = prepared.Attachments
-            .Select(attachment => new PromptAttachment(
-                attachment.Label,
-                attachment.MediaType,
-                File.ReadAllBytes(attachment.Artifact.Path)))
-            .ToArray();
-
-        var execution = await _intradayOpportunityReviewer.ReviewAsync(prepared.Input, attachments, cancellationToken);
-        var auditId = _decisionAuditWriter.CreateAuditId(prepared.TradingDate, prepared.RequestedAtUtc);
-        var batch = execution.Batch with
-        {
-            MarketQuotes = prepared.Markets
-                .Select(market => new IntradayMarketQuote(
-                    new InstrumentId(market.InstrumentId),
-                    market.CurrentPrice,
-                    market.CurrentSpread,
-                    market.LatestBarAtUtc))
-                .ToArray(),
-            SourceDecisionAuditId = auditId,
-        };
-        var workflowResult = await _workflow.ReviewIntradayOpportunitiesAsync(batch, cancellationToken);
-        _logger.LogInformation(
-            "Validated intraday opportunity batch for {TradingDate}. Assessments: {AssessmentCount}. Candidates: {CandidateCount}. Outcome: {Outcome}",
-            workflowResult.TradingDate,
-            workflowResult.MarketAssessments.Count,
-            workflowResult.CandidateOpportunities.Count,
-            workflowResult.Outcome);
-
-        ExecutionBoundaryRecord? executionBoundaryRecord = null;
-        if (workflowResult.SelectedShadowIntent is { } selectedIntent)
-        {
-            var reservation = await _executionBoundaryService.ReserveAsync(selectedIntent, cancellationToken);
-            executionBoundaryRecord = reservation.Record;
-            _logger.LogInformation(
-                "Reserved execution boundary for decision {DecisionId}. Created: {Created}. State: {State}. Deal reference: {DealReference}.",
-                executionBoundaryRecord.DecisionId,
-                reservation.Created,
-                executionBoundaryRecord.State,
-                executionBoundaryRecord.DealReference);
-        }
-
-        var artifactReferences = execution.AttachmentArtifactPaths
-            .Select(ToArtifactReference)
-            .ToArray();
-        var executionArtifacts = new IntradayOpportunityExecutionArtifacts(
-            ToArtifactReference(execution.EnvelopeArtifactPath),
-            ToArtifactReference(execution.StructuredArtifactPath),
-            artifactReferences);
-        var decisionAuditArtifact = await _decisionAuditWriter.WriteInitialAsync(
-            prepared,
-            executionArtifacts,
-            workflowResult,
-            executionBoundaryRecord is null ? null : ExecutionBoundarySnapshot.From(executionBoundaryRecord),
-            cancellationToken);
-        if (executionBoundaryRecord is not null)
-        {
-            executionBoundaryRecord = await _executionBoundaryService.AttachDecisionAuditArtifactAsync(
-                executionBoundaryRecord.DecisionId,
-                decisionAuditArtifact.Path,
-                cancellationToken) ?? executionBoundaryRecord;
-        }
-
-        var result = new IntradayOpportunitySubmitResult(
-            prepared,
-            executionArtifacts with { DecisionAuditArtifact = decisionAuditArtifact },
-            batch,
-            workflowResult,
-            executionBoundaryRecord is null ? null : ExecutionBoundarySnapshot.From(executionBoundaryRecord));
-
-        if (_automationOptions.Execution.Mode == TradingExecutionMode.Demo
-            && workflowResult.SelectedShadowIntent is not null
-            && decisionAuditArtifact is not null)
-        {
-            var demoExecution = await _demoCanaryExecutionService.ExecuteAsync(result, cancellationToken);
-            result = result with { DemoExecution = demoExecution };
-            _logger.LogInformation(
-                "Demo canary execution completed for decision {DecisionId}. Outcome: {Outcome}.",
-                demoExecution?.DecisionId ?? workflowResult.SelectedShadowIntent.DecisionId,
-                demoExecution?.Outcome ?? "n/a");
-        }
-
-        _logger.LogInformation(
-            "Submitted intraday opportunity review for {TradingDate}. Envelope: {EnvelopePath}. Extracted JSON: {StructuredPath}. Decision audit: {DecisionAuditPath}.",
-            prepared.TradingDate,
-            result.ExecutionArtifacts.PromptEnvelopeArtifact.Path,
-            result.ExecutionArtifacts.ExtractedJsonArtifact.Path,
-            result.ExecutionArtifacts.DecisionAuditArtifact?.Path);
-
-        return result;
+        var execution = await _analysisService.AnalyzeAsync(prepared, cancellationToken);
+        return await _decisionCoordinator.CoordinateAsync(prepared, execution, cancellationToken);
     }
-
-    private async Task<IntradayPreparedRun?> BuildPreparedRunAsync(
-        DateOnly tradingDate,
-        DateTimeOffset requestedAtUtc,
-        IntradayOpportunityScanOptions options,
-        CancellationToken cancellationToken)
-    {
-        var record = await _tradingDayStore.GetAsync(tradingDate, cancellationToken);
-        if (record?.Plan is null)
-        {
-            _logger.LogInformation("Skipping intraday opportunity scan for {TradingDate}: no trading day plan exists.", tradingDate);
-            return null;
-        }
-
-        if (record.Plan.WatchList.Count == 0)
-        {
-            _logger.LogInformation("Skipping intraday opportunity scan for {TradingDate}: watch list is empty.", tradingDate);
-            return null;
-        }
-
-        var preparedMarkets = new List<PreparedIntradayMarket>(record.Plan.WatchList.Count);
-        foreach (var market in record.Plan.WatchList)
-        {
-            var prepared = await TryPrepareMarketAsync(market, requestedAtUtc, options, cancellationToken);
-            if (prepared is null)
-            {
-                continue;
-            }
-
-            preparedMarkets.Add(prepared);
-        }
-
-        if (preparedMarkets.Count == 0)
-        {
-            _logger.LogInformation(
-                "Skipping intraday opportunity scan for {TradingDate}: no watched markets had fresh price data.",
-                tradingDate);
-            return null;
-        }
-
-        var lookbackStartUtc = requestedAtUtc.AddMinutes(-options.LookbackMinutes);
-        var input = new IntradayOpportunityReviewInput(
-            tradingDate,
-            lookbackStartUtc,
-            requestedAtUtc,
-            preparedMarkets.Count,
-            options.MaxCandidatesPerRun,
-            _automationOptions.Timezone,
-            FormatDailyPlanSummary(record.Plan),
-            FormatWatchedMarketsContext(preparedMarkets),
-            FormatCalendarEventsContext(record.Plan.CalendarEvents),
-            tradingDate,
-            requestedAtUtc);
-
-        return new IntradayPreparedRun(
-            input,
-            _intradayOpportunityReviewer.RenderRequestText(input),
-            preparedMarkets);
-    }
-
-    private async Task<PreparedIntradayMarket?> TryPrepareMarketAsync(
-        MarketWatch market,
-        DateTimeOffset requestedAtUtc,
-        IntradayOpportunityScanOptions options,
-        CancellationToken cancellationToken)
-    {
-        var cachedSeries = await _priceSeriesCache.GetSeriesAsync(
-            market.Instrument,
-            requestedAtUtc,
-            options.ChartLookbackHours,
-            options.ChartResolution,
-            cancellationToken);
-        var series = cachedSeries.Series;
-
-        if (series.Bars.Count == 0)
-        {
-            _logger.LogInformation("Skipping {Instrument}: no chart bars returned for intraday scan.", market.Instrument);
-            return null;
-        }
-
-        var latestBar = series.Bars.OrderByDescending(bar => bar.TimestampUtc).First();
-        var maxAge = TimeSpan.FromMinutes(options.FreshPriceMaxAgeMinutes);
-        if (requestedAtUtc - latestBar.TimestampUtc > maxAge)
-        {
-            _logger.LogInformation(
-                "Skipping {Instrument}: latest bar at {TimestampUtc} is older than {MaxAge}.",
-                market.Instrument,
-                latestBar.TimestampUtc,
-                maxAge);
-            return null;
-        }
-
-        var currentBid = latestBar.BidClose;
-        var currentAsk = latestBar.AskClose;
-        var currentPrice = (currentBid + currentAsk) / 2m;
-        var currentSpread = Math.Max(0m, currentAsk - currentBid);
-        var instrumentName = ResolveInstrumentName(market.Instrument);
-        var chartBytes = _priceChartRenderer.RenderPng(series, PriceChartStyle.Ohlc, PriceGapMode.Compress);
-
-        return new PreparedIntradayMarket(
-            market.Instrument,
-            instrumentName,
-            market.Rank,
-            market.Rationale,
-            market.LongScenario,
-            market.ShortScenario,
-            currentBid,
-            currentAsk,
-            currentPrice,
-            currentSpread,
-            latestBar.TimestampUtc,
-            cachedSeries.RefreshMode,
-            cachedSeries.FetchedBarCount,
-            IntradayChartAttachmentLabel.Format(instrumentName, options.ChartLookbackHours, options.ChartResolution),
-            chartBytes);
-    }
-
-    private string ResolveInstrumentName(InstrumentId instrument)
-        => _instrumentNames.TryGetValue(instrument.Value, out var instrumentName)
-            ? instrumentName
-            : instrument.Value;
 
     private DateOnly ResolveTradingDate(DateTimeOffset utcNow)
     {
-        var timezone = TimeZoneInfo.FindSystemTimeZoneById(_automationOptions.Timezone);
+        var timezone = TimeZoneInfo.FindSystemTimeZoneById(_options.Timezone);
         var localNow = TimeZoneInfo.ConvertTime(utcNow, timezone);
         return DateOnly.FromDateTime(localNow.DateTime);
-    }
-
-    private static ArtifactReference ToArtifactReference(string path)
-        => new(Path.GetFullPath(path), new Uri(Path.GetFullPath(path)).AbsoluteUri);
-
-    private static string FormatDailyPlanSummary(TradingDayPlan plan)
-    {
-        var builder = new StringBuilder();
-        builder.AppendLine($"Market regime: {plan.MarketRegime}");
-        builder.AppendLine($"Macro summary: {plan.MacroSummary}");
-        builder.AppendLine($"Regime summary: {plan.MarketRegimeSummary}");
-        return builder.ToString().TrimEnd();
-    }
-
-    private static string FormatWatchedMarketsContext(IReadOnlyList<PreparedIntradayMarket> markets)
-    {
-        var builder = new StringBuilder();
-        foreach (var market in markets.OrderBy(market => market.Rank))
-        {
-            builder.AppendLine($"## Rank {market.Rank}: {market.InstrumentName}");
-            builder.AppendLine($"Instrument ID: {market.Instrument.Value}");
-            builder.AppendLine($"Current bid: {market.CurrentBid.ToString(CultureInfo.InvariantCulture)}");
-            builder.AppendLine($"Current ask: {market.CurrentAsk.ToString(CultureInfo.InvariantCulture)}");
-            builder.AppendLine($"Current mid price: {market.CurrentPrice.ToString(CultureInfo.InvariantCulture)}");
-            builder.AppendLine($"Current spread: {market.CurrentSpread.ToString(CultureInfo.InvariantCulture)}");
-            builder.AppendLine($"Latest price timestamp UTC: {market.LatestBarAtUtc:O}");
-            builder.AppendLine($"Daily rationale: {market.Rationale}");
-            builder.AppendLine($"Long scenario thesis: {market.LongScenario.Thesis}");
-            builder.AppendLine($"Long confirmation: {market.LongScenario.Confirmation}");
-            builder.AppendLine($"Long invalidation: {market.LongScenario.Invalidation}");
-            builder.AppendLine($"Short scenario thesis: {market.ShortScenario.Thesis}");
-            builder.AppendLine($"Short confirmation: {market.ShortScenario.Confirmation}");
-            builder.AppendLine($"Short invalidation: {market.ShortScenario.Invalidation}");
-            builder.AppendLine();
-        }
-
-        return builder.ToString().TrimEnd();
-    }
-
-    private static string FormatCalendarEventsContext(IReadOnlyList<EconomicEvent> calendarEvents)
-    {
-        if (calendarEvents.Count == 0)
-        {
-            return "No scheduled calendar events were captured in the daily plan.";
-        }
-
-        var builder = new StringBuilder();
-        foreach (var calendarEvent in calendarEvents.OrderBy(calendarEvent => calendarEvent.ScheduledAtUtc))
-        {
-            builder.AppendLine(
-                $"- {calendarEvent.Id} | {calendarEvent.ScheduledAtUtc:O} | {calendarEvent.Impact} | {calendarEvent.Title} | affected instruments: {string.Join(", ", calendarEvent.AffectedInstruments.Select(instrument => instrument.Value))}");
-        }
-
-        return builder.ToString().TrimEnd();
     }
 }

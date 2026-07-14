@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Trading.Abstractions;
 using Trading.Execution;
+using Trading.AI.Prompts;
 using Trading.Strategy.Shared;
 
 namespace Trading.Automation.Execution;
@@ -48,10 +49,22 @@ public sealed record DecisionAuditRecord(
     ExecutionReadyTradeIntent? SelectedShadowIntent,
     ExecutionBoundarySnapshot? ExecutionBoundary,
     IntradayCandidateDecisionSummary DecisionSummary,
-    IReadOnlyList<PaperTradeOutcome> PaperOutcomes,
-    IReadOnlyList<PaperMarketAssessmentOutcome> MarketAssessmentOutcomes,
-    DecisionBiasSummary BiasSummary,
-    DemoCanaryExecutionSnapshot? DemoExecution = null);
+    DecisionBiasSummary BiasSummary)
+{
+    public IReadOnlyList<DecisionEvidence> Evidence { get; init; } = [];
+
+    [JsonPropertyName("paperOutcomes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PaperTradeOutcome>? LegacyPaperOutcomes { get; init; }
+
+    [JsonPropertyName("marketAssessmentOutcomes")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public IReadOnlyList<PaperMarketAssessmentOutcome>? LegacyMarketAssessmentOutcomes { get; init; }
+
+    [JsonPropertyName("demoExecution")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DemoCanaryExecutionSnapshot? LegacyDemoExecution { get; init; }
+}
 
 public sealed record DemoCanaryExecutionSnapshot(
     string DecisionId,
@@ -84,7 +97,16 @@ public sealed record PromptAuditReference(
     string? ModelId,
     string? ProcessingMode,
     string? ProviderResponseId,
-    string? ProviderStatus);
+    string? ProviderStatus)
+{
+    public string PreparationSchemaVersion { get; init; } = string.Empty;
+
+    public IntradayPreparationProfileReference? PreparationProfile { get; init; }
+
+    public PromptContractProvenance? PromptContract { get; init; }
+
+    public string RequestSha256 { get; init; } = string.Empty;
+}
 
 public sealed record DecisionAuditAssessment(
     InstrumentId Instrument,
@@ -232,7 +254,10 @@ public sealed record DecisionAuditEvaluationReport(
     decimal? AverageEstimatedRMultiple,
     DecisionBiasSummary BiasSummary,
     ArtifactReference? ReportArtifact,
-    DecisionAuditDataQualitySummary? DataQuality = null);
+    DecisionAuditDataQualitySummary? DataQuality = null)
+{
+    public IReadOnlyList<ArtifactReference> EvaluationArtifacts { get; init; } = [];
+}
 
 internal static class DecisionAuditJson
 {

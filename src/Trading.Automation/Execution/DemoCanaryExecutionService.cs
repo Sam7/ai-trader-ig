@@ -19,7 +19,7 @@ public sealed class DemoCanaryExecutionService
     private readonly ITradingGateway _gateway;
     private readonly IExecutionSubmissionService _executionSubmissionService;
     private readonly ExecutionBoundaryService _executionBoundaryService;
-    private readonly DecisionAuditWriter _decisionAuditWriter;
+    private readonly DecisionEvidenceSidecarWriter _sidecarWriter;
     private readonly IExecutionClock _clock;
     private readonly ILogger<DemoCanaryExecutionService> _logger;
 
@@ -29,7 +29,7 @@ public sealed class DemoCanaryExecutionService
         ITradingGateway gateway,
         IExecutionSubmissionService executionSubmissionService,
         ExecutionBoundaryService executionBoundaryService,
-        DecisionAuditWriter decisionAuditWriter,
+        DecisionEvidenceSidecarWriter sidecarWriter,
         IExecutionClock clock,
         ILogger<DemoCanaryExecutionService> logger)
     {
@@ -38,7 +38,7 @@ public sealed class DemoCanaryExecutionService
         _gateway = gateway;
         _executionSubmissionService = executionSubmissionService;
         _executionBoundaryService = executionBoundaryService;
-        _decisionAuditWriter = decisionAuditWriter;
+        _sidecarWriter = sidecarWriter;
         _clock = clock;
         _logger = logger;
     }
@@ -469,10 +469,10 @@ public sealed class DemoCanaryExecutionService
             throw new InvalidOperationException("Decision audit artifact is required for demo canary execution.");
         }
 
-        var record = await _decisionAuditWriter.LoadAsync(result.ExecutionArtifacts.DecisionAuditArtifact.Path, cancellationToken);
-        await _decisionAuditWriter.SaveAsync(
+        await _sidecarWriter.WriteDemoExecutionAsync(
             result.ExecutionArtifacts.DecisionAuditArtifact.Path,
-            record with { DemoExecution = snapshot },
+            snapshot,
+            _clock.UtcNow,
             cancellationToken);
     }
 

@@ -2,7 +2,6 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Trading.AI.Configuration;
-using Trading.AI.Prompts.IntradayOpportunityReview;
 using Trading.Abstractions;
 using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
@@ -21,6 +20,7 @@ public sealed class DemoCanaryExecutionServiceTests
     public async Task ExecuteAsync_WithHealthyDemoSetup_ShouldSubmitProtectedMarketOrderAndPersistSnapshot()
     {
         await using var harness = await DemoCanaryHarness.CreateAsync();
+        var originalAuditBytes = await File.ReadAllBytesAsync(harness.AuditPath);
 
         var snapshot = await harness.Service.ExecuteAsync(harness.SubmitResult);
 
@@ -31,10 +31,17 @@ public sealed class DemoCanaryExecutionServiceTests
         harness.Gateway.MarketOrderRequests[0].StopLevel.Should().Be(95m);
         harness.Gateway.MarketOrderRequests[0].LimitLevel.Should().Be(110m);
 
-        var record = await harness.AuditWriter.LoadAsync(harness.AuditPath, CancellationToken.None);
-        record.DemoExecution.Should().NotBeNull();
-        record.DemoExecution!.Outcome.Should().Contain("confirmed stop and target protection");
-        record.DemoExecution.DealId.Should().Be(snapshot.DealId);
+        (await File.ReadAllBytesAsync(harness.AuditPath)).Should().Equal(originalAuditBytes);
+        var sidecarPath = Directory.GetFiles(
+            Path.GetDirectoryName(harness.AuditPath)!,
+            "*-demo-execution-*.json").Should().ContainSingle().Which;
+        var record = System.Text.Json.JsonSerializer.Deserialize<DemoCanaryExecutionRecord>(
+            await File.ReadAllTextAsync(sidecarPath),
+            DecisionAuditJson.Options);
+        record.Should().NotBeNull();
+        record!.Execution.Outcome.Should().Contain("confirmed stop and target protection");
+        record.Execution.DealId.Should().Be(snapshot.DealId);
+        record.SourceAuditSha256.Should().MatchRegex("^[a-f0-9]{64}$");
     }
 
     [Fact]
@@ -93,14 +100,12 @@ public sealed class DemoCanaryExecutionServiceTests
     {
         private DemoCanaryHarness(
             TemporaryDirectory temporaryDirectory,
-            DecisionAuditWriter auditWriter,
             DemoCanaryExecutionService service,
             FakeDemoTradingGateway gateway,
             string auditPath,
             IntradayOpportunitySubmitResult submitResult)
         {
             TemporaryDirectory = temporaryDirectory;
-            AuditWriter = auditWriter;
             Service = service;
             Gateway = gateway;
             AuditPath = auditPath;
@@ -108,8 +113,6 @@ public sealed class DemoCanaryExecutionServiceTests
         }
 
         public TemporaryDirectory TemporaryDirectory { get; }
-
-        public DecisionAuditWriter AuditWriter { get; }
 
         public DemoCanaryExecutionService Service { get; }
 
@@ -213,11 +216,11 @@ public sealed class DemoCanaryExecutionServiceTests
                 gateway,
                 executionSubmissionService,
                 executionBoundaryService,
-                auditWriter,
+                new DecisionEvidenceSidecarWriter(auditWriter),
                 new FakeClock(ApprovedAtUtc),
                 NullLogger<DemoCanaryExecutionService>.Instance);
 
-            return new DemoCanaryHarness(tempDirectory, auditWriter, service, gateway, auditPath, submitResult);
+            return new DemoCanaryHarness(tempDirectory, service, gateway, auditPath, submitResult);
         }
 
         public ValueTask DisposeAsync()
@@ -229,18 +232,7 @@ public sealed class DemoCanaryExecutionServiceTests
             TradingDate,
             ApprovedAtUtc,
             "intraday-opportunity-review",
-            new IntradayOpportunityReviewInput(
-                TradingDate,
-                ApprovedAtUtc.AddMinutes(-60),
-                ApprovedAtUtc,
-                1,
-                4,
-                "Australia/Melbourne",
-                "Daily plan",
-                "Watched markets",
-                "No events",
-                TradingDate,
-                ApprovedAtUtc),
+            AutomationTestData.CreateIntradayReviewRequest(TradingDate, ApprovedAtUtc),
             "request",
             [],
             [],
@@ -327,8 +319,6 @@ public sealed class DemoCanaryExecutionServiceTests
             null,
             null,
             new IntradayCandidateDecisionSummary(0, 0, 0, 0, 0),
-            [],
-            [],
             DecisionBiasSummary.From([], []));
 
     private static ExecutionReadyTradeIntent CreateIntent(string decisionId = "dec_test")

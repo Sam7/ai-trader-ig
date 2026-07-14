@@ -4,7 +4,7 @@ using Trading.MarketData;
 
 namespace Trading.Automation.Execution;
 
-public sealed class IntradayPriceSeriesCache
+public sealed class IntradayPriceSeriesCache : IIntradayPriceSeriesSource
 {
     private readonly MarketDataService _marketDataService;
     private readonly ILogger<IntradayPriceSeriesCache> _logger;

@@ -4,7 +4,7 @@ using Trading.Strategy.Shared;
 
 namespace Trading.Strategy.OpportunityReview;
 
-public sealed class IntradayOpportunityReviewService
+public sealed class IntradayOpportunityReviewService : IIntradayDecisionService
 {
     private readonly ITradingDayStore _tradingDayStore;
     private readonly IntradayCandidateDecisionService _candidateDecisionService;

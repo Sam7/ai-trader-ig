@@ -11,4 +11,4 @@ public sealed record IntradayOpportunityPreparedMarket(
     DateTimeOffset LatestBarAtUtc,
     PriceSeriesRefreshMode PriceSeriesRefreshMode,
     int FetchedBarCount,
-    ArtifactReference ChartArtifact);
+    IReadOnlyList<string> EvidenceIds);
