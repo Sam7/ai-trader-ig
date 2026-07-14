@@ -11,7 +11,17 @@ public sealed record WorkerHealthSnapshot(
     ProcessHealthSnapshot Process,
     GcHealthSnapshot Gc,
     MarketDataStreamPipelineSnapshot StreamPipeline,
-    MarketDataHealthSummary MarketData);
+    MarketDataHealthSummary MarketData)
+{
+    public WorkerOperationMetricsSnapshot Operations { get; init; } = new(
+        null,
+        0,
+        0,
+        0,
+        TimeSpan.Zero,
+        0,
+        0);
+}
 
 public enum WorkerHealthStatus
 {

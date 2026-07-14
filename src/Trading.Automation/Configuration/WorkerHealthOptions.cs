@@ -12,15 +12,15 @@ public sealed class WorkerHealthOptions
 
     public string GcsObjectName { get; init; } = "market-data/health/worker-status.json";
 
-    public long WarningWorkingSetBytes { get; init; } = 400L * 1024 * 1024;
+    public long WarningWorkingSetBytes { get; init; } = 300L * 1024 * 1024;
 
-    public long CriticalWorkingSetBytes { get; init; } = 520L * 1024 * 1024;
+    public long CriticalWorkingSetBytes { get; init; } = 360L * 1024 * 1024;
 
-    public long FailFastWorkingSetBytes { get; init; } = 580L * 1024 * 1024;
+    public long FailFastWorkingSetBytes { get; init; } = 420L * 1024 * 1024;
 
     public bool FailFastEnabled { get; init; }
 
-    public int CriticalSampleCount { get; init; } = 3;
+    public int CriticalSampleCount { get; init; } = 2;
 
     public void Validate()
     {

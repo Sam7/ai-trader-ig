@@ -32,6 +32,7 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
     private readonly IMarketDataRecoveryStore _recoveryStore;
     private readonly IMarketDataObjectStore _objectStore;
     private readonly MarketDataStreamPipelineMetrics _streamMetrics;
+    private readonly WorkerOperationMetrics _operationMetrics;
     private readonly SlackAlertService _slackAlertService;
     private readonly ILogger<WorkerHealthReporterHostedService> _logger;
     private int _criticalSamples;
@@ -47,6 +48,7 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         IMarketDataRecoveryStore recoveryStore,
         IMarketDataObjectStore objectStore,
         MarketDataStreamPipelineMetrics streamMetrics,
+        WorkerOperationMetrics operationMetrics,
         SlackAlertService slackAlertService,
         ILogger<WorkerHealthReporterHostedService> logger)
     {
@@ -60,6 +62,7 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         _recoveryStore = recoveryStore;
         _objectStore = objectStore;
         _streamMetrics = streamMetrics;
+        _operationMetrics = operationMetrics;
         _slackAlertService = slackAlertService;
         _logger = logger;
     }
@@ -131,7 +134,10 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
             processHealth,
             gc,
             stream,
-            marketData);
+            marketData)
+        {
+            Operations = _operationMetrics.Snapshot(),
+        };
     }
 
     private async Task<MarketDataHealthSummary> BuildMarketDataSummaryAsync(
@@ -181,15 +187,11 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         List<string> reasons)
     {
         var status = WorkerHealthStatus.Healthy;
-        if (process.WorkingSetBytes >= _options.CriticalWorkingSetBytes)
+        var memory = WorkerMemoryPolicy.Assess(process.WorkingSetBytes, _options, _criticalSamples);
+        if (memory.Status != WorkerHealthStatus.Healthy)
         {
-            status = WorkerHealthStatus.Critical;
-            reasons.Add($"Working set is critical: {process.WorkingSetBytes} bytes.");
-        }
-        else if (process.WorkingSetBytes >= _options.WarningWorkingSetBytes)
-        {
-            status = WorkerHealthStatus.Warning;
-            reasons.Add($"Working set is elevated: {process.WorkingSetBytes} bytes.");
+            status = Max(status, memory.Status);
+            reasons.Add(memory.Reason!);
         }
 
         var ingestion = _marketDataOptions.StreamIngestion;
@@ -285,18 +287,13 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
             string.Join('\n', snapshot.Reasons),
             cancellationToken).ConfigureAwait(false);
 
-        if (snapshot.Process.WorkingSetBytes >= _options.CriticalWorkingSetBytes)
-        {
-            _criticalSamples++;
-        }
-        else
-        {
-            _criticalSamples = 0;
-        }
+        var memory = WorkerMemoryPolicy.Assess(
+            snapshot.Process.WorkingSetBytes,
+            _options,
+            _criticalSamples);
+        _criticalSamples = memory.ConsecutiveCriticalSamples;
 
-        if (_options.FailFastEnabled
-            && _criticalSamples >= _options.CriticalSampleCount
-            && snapshot.Process.WorkingSetBytes >= _options.FailFastWorkingSetBytes)
+        if (memory.ShouldFailFast)
         {
             await _slackAlertService.SendAsync(
                 "worker-health-failfast",

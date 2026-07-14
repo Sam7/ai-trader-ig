@@ -5,6 +5,7 @@ using Trading.AI.Configuration;
 using Trading.AI.DailyBriefing;
 using Trading.Automation.Configuration;
 using Trading.Charting;
+using Trading.Automation.Health;
 using Trading.Strategy.Persistence;
 using Trading.Strategy.Shared;
 
@@ -19,6 +20,7 @@ public sealed class IntradayOpportunityPreparationService : IIntradayOpportunity
     private readonly IIntradayOpportunityPreparationStore _store;
     private readonly AutomationOptions _automationOptions;
     private readonly IReadOnlyDictionary<string, string> _instrumentNames;
+    private readonly WorkerOperationMetrics _operationMetrics;
     private readonly ILogger<IntradayOpportunityPreparationService> _logger;
 
     public IntradayOpportunityPreparationService(
@@ -29,6 +31,7 @@ public sealed class IntradayOpportunityPreparationService : IIntradayOpportunity
         IIntradayOpportunityPreparationStore store,
         IOptions<AutomationOptions> automationOptions,
         IOptions<DailyBriefingOptions> dailyBriefingOptions,
+        WorkerOperationMetrics operationMetrics,
         ILogger<IntradayOpportunityPreparationService> logger)
     {
         _tradingDayStore = tradingDayStore;
@@ -41,6 +44,7 @@ public sealed class IntradayOpportunityPreparationService : IIntradayOpportunity
             market => market.InstrumentId,
             market => string.IsNullOrWhiteSpace(market.DisplayName) ? market.InstrumentId : market.DisplayName,
             StringComparer.Ordinal);
+        _operationMetrics = operationMetrics;
         _logger = logger;
     }
 
@@ -161,6 +165,16 @@ public sealed class IntradayOpportunityPreparationService : IIntradayOpportunity
         var currentBid = latestBar.BidClose;
         var currentAsk = latestBar.AskClose;
         var instrumentName = ResolveInstrumentName(market.Instrument);
+        var chartStopwatch = System.Diagnostics.Stopwatch.StartNew();
+        var chart = _priceChartRenderer.RenderPng(series, PriceChartStyle.Ohlc, PriceGapMode.Compress);
+        chartStopwatch.Stop();
+        using var process = System.Diagnostics.Process.GetCurrentProcess();
+        _operationMetrics.Record(
+            "intraday-chart-preparation",
+            series.Bars.Count,
+            chart.Length,
+            chartStopwatch.Elapsed,
+            process.WorkingSet64);
         return new PreparedIntradayMarket(
             market.Instrument,
             instrumentName,
@@ -179,7 +193,7 @@ public sealed class IntradayOpportunityPreparationService : IIntradayOpportunity
                 DecisionEvidenceKind.PriceChart,
                 IntradayChartAttachmentLabel.Format(instrumentName, options.ChartLookbackHours, options.ChartResolution),
                 "image/png",
-                _priceChartRenderer.RenderPng(series, PriceChartStyle.Ohlc, PriceGapMode.Compress),
+                chart,
                 series.Bars.Min(bar => bar.TimestampUtc),
                 series.Bars.Max(bar => bar.TimestampUtc),
                 latestBar.TimestampUtc,

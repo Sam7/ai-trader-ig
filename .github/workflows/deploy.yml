@@ -133,6 +133,38 @@ jobs:
             echo "backup_bucket_name=$(pulumi -C "$INFRA_DIR" stack output backupBucketName)"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Wait for VM SSH readiness
+        shell: bash
+        env:
+          WORKER_INSTANCE_NAME: ${{ steps.pulumi.outputs.worker_instance_name }}
+          WORKER_INSTANCE_ZONE: ${{ steps.pulumi.outputs.worker_instance_zone }}
+        run: |
+          for attempt in {1..12}; do
+            if gcloud compute ssh "$WORKER_INSTANCE_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --zone "$WORKER_INSTANCE_ZONE" \
+              --quiet \
+              --ssh-flag="-o ConnectTimeout=10" \
+              --command "true"; then
+              echo "VM SSH is ready on attempt $attempt."
+              exit 0
+            fi
+
+            echo "VM SSH is not ready on attempt $attempt/12; retrying in 10 seconds."
+            sleep 10
+          done
+
+          echo "VM SSH did not become ready. Capturing guest diagnostics before failing." >&2
+          gcloud compute instances describe "$WORKER_INSTANCE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --zone "$WORKER_INSTANCE_ZONE" \
+            --format='yaml(name,status,machineType,networkInterfaces[].accessConfigs[].natIP)' || true
+          gcloud compute instances get-serial-port-output "$WORKER_INSTANCE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --zone "$WORKER_INSTANCE_ZONE" \
+            --port=1 || true
+          exit 1
+
       - name: Stage release on VM
         shell: bash
         env:
@@ -195,7 +227,43 @@ jobs:
             --project "$GCP_PROJECT_ID" \
             --zone "$WORKER_INSTANCE_ZONE" \
             --quiet \
-            --command "systemctl status ai-trader.service --no-pager || true; sudo test -f /var/lib/ai-trader/health/worker-status.json && sudo tail -n 80 /var/lib/ai-trader/health/worker-status.json || true; sudo journalctl -u ai-trader.service -n 120 --no-pager; sudo test -f /var/lib/ai-trader/market-data/ig-market-data.sqlite && sudo sqlite3 /var/lib/ai-trader/market-data/ig-market-data.sqlite 'select i.instrument_value, mh.connection_state, mh.last_received_update_utc_ticks, mh.updated_at_utc_ticks from market_data_health mh join instruments i on i.id = mh.instrument_fk order by i.instrument_value;' || true"
+            --command "systemctl status ai-trader.service --no-pager || true; sudo test -f /var/lib/ai-trader/health/worker-status.json && sudo tail -n 80 /var/lib/ai-trader/health/worker-status.json || true; sudo journalctl -u ai-trader.service -n 120 --no-pager; sudo test -f /var/lib/ai-trader/market-data/ig-market-data.sqlite && sudo sqlite3 /var/lib/ai-trader/market-data/ig-market-data.sqlite 'select i.instrument_value, mh.connection_state, mh.last_received_update_utc_ticks, mh.updated_at_utc_ticks from market_data_health mh join instruments i on i.id = mh.instrument_fk order by i.instrument_value;' || true" || true
+
+          gcloud compute instances get-serial-port-output "$WORKER_INSTANCE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --zone "$WORKER_INSTANCE_ZONE" \
+            --port=1 || true
 
           echo "Market-data collection did not become healthy for $expected_market_count tracked market(s)." >&2
           exit 1
+
+      - name: Validate remote health and snapshot freshness
+        shell: bash
+        env:
+          BACKUP_BUCKET_NAME: ${{ steps.pulumi.outputs.backup_bucket_name }}
+        run: |
+          validate_object_freshness() {
+            local object_uri="$1"
+            local max_age_seconds="$2"
+            local updated_at
+            local updated_epoch
+            local now_epoch
+            local age
+
+            updated_at="$(gcloud storage objects describe "$object_uri" --format='value(updateTime)')"
+            updated_epoch="$(date -d "$updated_at" +%s)"
+            now_epoch="$(date -u +%s)"
+            age=$((now_epoch - updated_epoch))
+            if (( age < 0 || age > max_age_seconds )); then
+              echo "$object_uri is stale: updated $updated_at ($age seconds ago)." >&2
+              return 1
+            fi
+            echo "$object_uri is fresh: updated $updated_at ($age seconds ago)."
+          }
+
+          validate_object_freshness \
+            "gs://$BACKUP_BUCKET_NAME/market-data/health/worker-status.json" \
+            180
+          validate_object_freshness \
+            "gs://$BACKUP_BUCKET_NAME/market-data/ig-market-data.sqlite" \
+            600

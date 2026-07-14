@@ -1,6 +1,7 @@
 using Trading.AI.DailyBriefing;
 using Trading.AI.PromptExecution;
 using Trading.AI.Prompts;
+using Trading.Automation.Health;
 using System.Text;
 
 namespace Trading.Automation.Execution;
@@ -8,10 +9,14 @@ namespace Trading.Automation.Execution;
 public sealed class IntradayOpportunityAnalysisService : IIntradayOpportunityAnalysisService
 {
     private readonly IIntradayOpportunityReviewer _reviewer;
+    private readonly WorkerOperationMetrics _operationMetrics;
 
-    public IntradayOpportunityAnalysisService(IIntradayOpportunityReviewer reviewer)
+    public IntradayOpportunityAnalysisService(
+        IIntradayOpportunityReviewer reviewer,
+        WorkerOperationMetrics operationMetrics)
     {
         _reviewer = reviewer;
+        _operationMetrics = operationMetrics;
     }
 
     public PromptContractProvenance Contract => _reviewer.Contract;
@@ -69,7 +74,16 @@ public sealed class IntradayOpportunityAnalysisService : IIntradayOpportunityAna
                     $"Prepared evidence ID '{evidence.EvidenceId}' is duplicated in '{prepared.PreparedArtifact.Path}'.");
             }
 
+            var loadStopwatch = System.Diagnostics.Stopwatch.StartNew();
             var data = await File.ReadAllBytesAsync(evidence.Artifact.Path, cancellationToken);
+            loadStopwatch.Stop();
+            using var process = System.Diagnostics.Process.GetCurrentProcess();
+            _operationMetrics.Record(
+                "intraday-evidence-load",
+                1,
+                data.Length,
+                loadStopwatch.Elapsed,
+                process.WorkingSet64);
             if (!string.Equals(
                     IntradayOpportunityPreparationWriter.ComputeSha256(data),
                     evidence.Sha256,

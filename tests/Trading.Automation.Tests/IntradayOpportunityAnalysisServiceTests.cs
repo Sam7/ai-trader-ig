@@ -4,6 +4,7 @@ using Trading.AI.PromptExecution;
 using Trading.AI.Prompts;
 using Trading.Abstractions;
 using Trading.Automation.Execution;
+using Trading.Automation.Health;
 
 public sealed class IntradayOpportunityAnalysisServiceTests
 {
@@ -11,7 +12,7 @@ public sealed class IntradayOpportunityAnalysisServiceTests
     public async Task AnalyzeAsync_should_reject_an_unknown_preparation_schema()
     {
         var reviewer = new FakeReviewer("current request");
-        var service = new IntradayOpportunityAnalysisService(reviewer);
+        var service = new IntradayOpportunityAnalysisService(reviewer, new WorkerOperationMetrics());
         var prepared = CreatePreparation("current request") with { SchemaVersion = "2" };
 
         var action = () => service.AnalyzeAsync(prepared);
@@ -25,7 +26,7 @@ public sealed class IntradayOpportunityAnalysisServiceTests
     public async Task AnalyzeAsync_should_reject_a_mismatched_prompt_identifier()
     {
         var reviewer = new FakeReviewer("current request");
-        var service = new IntradayOpportunityAnalysisService(reviewer);
+        var service = new IntradayOpportunityAnalysisService(reviewer, new WorkerOperationMetrics());
         var prepared = CreatePreparation("current request") with { PromptId = "different-prompt" };
 
         var action = () => service.AnalyzeAsync(prepared);
@@ -39,7 +40,7 @@ public sealed class IntradayOpportunityAnalysisServiceTests
     public async Task AnalyzeAsync_should_reject_a_preparation_rendered_by_a_different_prompt_contract()
     {
         var reviewer = new FakeReviewer("current request");
-        var service = new IntradayOpportunityAnalysisService(reviewer);
+        var service = new IntradayOpportunityAnalysisService(reviewer, new WorkerOperationMetrics());
         var prepared = CreatePreparation("old request");
 
         var action = () => service.AnalyzeAsync(prepared);
@@ -77,7 +78,7 @@ public sealed class IntradayOpportunityAnalysisServiceTests
                 Evidence = [evidence],
             };
             var reviewer = new FakeReviewer("current request");
-            var service = new IntradayOpportunityAnalysisService(reviewer);
+            var service = new IntradayOpportunityAnalysisService(reviewer, new WorkerOperationMetrics());
 
             var action = () => service.AnalyzeAsync(prepared);
 
@@ -134,7 +135,7 @@ public sealed class IntradayOpportunityAnalysisServiceTests
                 Evidence = [evidence],
             };
             var reviewer = new FakeReviewer("current request");
-            var service = new IntradayOpportunityAnalysisService(reviewer);
+            var service = new IntradayOpportunityAnalysisService(reviewer, new WorkerOperationMetrics());
 
             var action = () => service.AnalyzeAsync(prepared);
 

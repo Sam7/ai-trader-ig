@@ -15,8 +15,8 @@ Restart=on-failure
 RestartSec=10
 KillSignal=SIGINT
 TimeoutStopSec=30
-MemoryHigh=550M
-MemoryMax=650M
+MemoryHigh=400M
+MemoryMax=480M
 
 Environment=DOTNET_ENVIRONMENT=Production
 Environment=ASPNETCORE_ENVIRONMENT=Production
@@ -38,10 +38,11 @@ Environment=WorkerHealth__Enabled=true
 Environment=WorkerHealth__Interval=00:01:00
 Environment=WorkerHealth__LocalDirectory=/var/lib/ai-trader/health
 Environment=WorkerHealth__GcsObjectName=market-data/health/worker-status.json
-Environment=WorkerHealth__WarningWorkingSetBytes=419430400
-Environment=WorkerHealth__CriticalWorkingSetBytes=545259520
-Environment=WorkerHealth__FailFastWorkingSetBytes=608174080
+Environment=WorkerHealth__WarningWorkingSetBytes=314572800
+Environment=WorkerHealth__CriticalWorkingSetBytes=377487360
+Environment=WorkerHealth__FailFastWorkingSetBytes=440401920
 Environment=WorkerHealth__FailFastEnabled=true
+Environment=WorkerHealth__CriticalSampleCount=2
 Environment=Alerting__Slack__Enabled=true
 
 StateDirectory=ai-trader

@@ -7,6 +7,7 @@ using Trading.AI.DailyBriefing;
 using Trading.AI.Prompts;
 using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
+using Trading.Automation.Health;
 using Trading.Charting;
 using Trading.Strategy.Inputs;
 using Trading.Strategy.Persistence;
@@ -74,6 +75,7 @@ public sealed class IntradayOpportunityPreparationServiceTests
                     },
                 ],
             }),
+            new WorkerOperationMetrics(),
             NullLogger<IntradayOpportunityPreparationService>.Instance);
 
         var document = await service.PrepareAsync(tradingDate, requestedAtUtc);

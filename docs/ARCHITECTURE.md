@@ -236,6 +236,18 @@ Market data follows a local-first stream-and-fill model:
 
 Strategy and AI code consume broker-neutral price data through these services; they do not call IG price endpoints directly.
 
+### 5.7 Worker memory and deployment safety
+
+The production worker currently runs on a 1 GiB GCP `e2-micro`. Memory safety is therefore an operational boundary, not an afterthought:
+
+- systemd applies `MemoryHigh=400M` and `MemoryMax=480M` so the worker is restarted before host-wide OOM can make the VM unreachable;
+- worker health reports warning at 300 MiB, critical at 360 MiB, and fail-fast at 420 MiB after two consecutive samples;
+- fail-fast exits the worker and relies on systemd `Restart=on-failure`, preserving the VM and allowing the next health/snapshot cycle to resume;
+- `worker-status.json` includes process/GC metrics, stream-pipeline depth, and the latest chart/evidence operation metrics (item count, payload size, duration, and working set at completion);
+- the deployment workflow waits for SSH readiness, captures serial-console evidence when the guest is unavailable, and verifies fresh health and SQLite snapshot objects after restart.
+
+These limits are an initial safety budget for the current machine size. Do not raise them to hide a regression. Use the operation metrics, GCS health freshness, systemd restart history, and serial-console OOM records to identify the allocation source first. The stream dispatcher and ingestion channel are already bounded; changes there require a reproducing test or telemetry evidence.
+
 ## 6. State, persistence, and ownership
 
 | State or artifact | Owner | Default location | Lifetime and rule |
@@ -249,7 +261,7 @@ Strategy and AI code consume broker-neutral price data through these services; t
 | Paper evaluation | `Trading.Automation` | `*-decision-evaluation-*.json` | Append-only sidecar containing the source audit path and SHA-256. |
 | Demo-canary result | `Trading.Automation` | `*-demo-execution-*.json` | Append-only sidecar containing the source audit path and SHA-256. |
 | Cloud mirror state and snapshots | `Trading.MarketData` | Configured under `Logs/MarketData/cloud-mirror/` | Local synchronization state; validated before import. |
-| Worker health | `Trading.Automation` | `worker-status.json` and optionally GCS | Operational evidence, not trading policy. |
+| Worker health | `Trading.Automation` | `worker-status.json` and optionally GCS | Operational evidence, not trading policy. Includes process/GC state, stream metrics, and the latest bounded chart/evidence operation metrics. |
 
 Historical audit JSON containing the older embedded outcome fields can still be loaded. New evaluations and demo results must use sidecars and must not rewrite source audits.
 

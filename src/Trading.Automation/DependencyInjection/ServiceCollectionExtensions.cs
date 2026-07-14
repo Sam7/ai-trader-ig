@@ -25,6 +25,7 @@ public static class ServiceCollectionExtensions
             .Bind(configuration.GetSection(WorkerHealthOptions.SectionName));
         services.AddOptions<AlertingOptions>()
             .Bind(configuration.GetSection(AlertingOptions.SectionName));
+        services.AddSingleton<WorkerOperationMetrics>();
 
         services.AddTradingAi(configuration);
         services.AddTradingMarketData(configuration);
