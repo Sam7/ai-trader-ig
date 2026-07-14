@@ -11,6 +11,7 @@ User=ai-trader
 Group=ai-trader
 WorkingDirectory=/opt/ai-trader/app
 ExecStart=/opt/ai-trader/app/Trading.Worker
+ExecStopPost=-/opt/ai-trader/bin/capture-worker-exit-evidence.sh
 Restart=on-failure
 RestartSec=10
 KillSignal=SIGINT
@@ -43,6 +44,16 @@ Environment=WorkerHealth__CriticalWorkingSetBytes=377487360
 Environment=WorkerHealth__FailFastWorkingSetBytes=440401920
 Environment=WorkerHealth__FailFastEnabled=true
 Environment=WorkerHealth__CriticalSampleCount=2
+Environment=WorkerDiagnostics__Enabled=true
+Environment=WorkerDiagnostics__SentryInterval=00:00:01
+Environment=WorkerDiagnostics__SampleInterval=00:00:05
+Environment=WorkerDiagnostics__FlushInterval=00:00:30
+Environment=WorkerDiagnostics__LocalDirectory=/var/lib/ai-trader/diagnostics
+Environment=WorkerDiagnostics__SegmentMaximumBytes=8388608
+Environment=WorkerDiagnostics__RetentionMaximumBytes=25165824
+Environment=WorkerDiagnostics__UploadClosedSegments=true
+Environment=WorkerDiagnostics__GcsPrefix=market-data/diagnostics
+Environment=WorkerDiagnostics__Containment__Enabled=false
 Environment=Alerting__Slack__Enabled=true
 
 StateDirectory=ai-trader

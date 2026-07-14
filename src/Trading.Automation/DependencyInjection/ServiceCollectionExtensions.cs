@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Trading.AI.DependencyInjection;
 using Trading.Automation.Configuration;
+using Trading.Automation.Diagnostics;
 using Trading.Automation.Execution;
 using Trading.Automation.Health;
 using Trading.Automation.MarketData;
@@ -29,6 +30,8 @@ public static class ServiceCollectionExtensions
 
         services.AddTradingAi(configuration);
         services.AddTradingMarketData(configuration);
+        services.AddWorkerDiagnostics(configuration);
+        services.UseGcsWorkerDiagnosticsArtifactUploader();
         services.AddTradingStrategyCore();
         services.AddSingleton(sp =>
         {

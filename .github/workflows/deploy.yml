@@ -180,6 +180,7 @@ jobs:
           gcloud compute scp \
             "$PACKAGE_PATH" \
             "$INFRA_DIR/host/ai-trader.service" \
+            "$INFRA_DIR/host/capture-worker-exit-evidence.sh" \
             "$INFRA_DIR/host/install-vm.sh" \
             "$WORKER_INSTANCE_NAME:/tmp/ai-trader-deploy/" \
             --project "$GCP_PROJECT_ID" \

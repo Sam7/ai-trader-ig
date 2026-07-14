@@ -10,6 +10,7 @@ BIN_DIR="$APP_ROOT/bin"
 DATA_DIR="/var/lib/ai-trader"
 LOG_DIR="/var/log/ai-trader"
 SERVICE_FILE="$DEPLOY_DIR/ai-trader.service"
+EXIT_EVIDENCE_FILE="$DEPLOY_DIR/capture-worker-exit-evidence.sh"
 WORKER_PACKAGE="$DEPLOY_DIR/ai-trader-worker.tar.gz"
 
 fail() {
@@ -19,6 +20,7 @@ fail() {
 
 [[ -n "$BACKUP_BUCKET_NAME" ]] || fail "backup bucket name is required"
 [[ -f "$SERVICE_FILE" ]] || fail "missing $SERVICE_FILE"
+[[ -f "$EXIT_EVIDENCE_FILE" ]] || fail "missing $EXIT_EVIDENCE_FILE"
 [[ -f "$WORKER_PACKAGE" ]] || fail "missing $WORKER_PACKAGE"
 
 export DEBIAN_FRONTEND=noninteractive
@@ -37,7 +39,8 @@ install -d -o ai-trader -g ai-trader -m 0750 \
     "$DATA_DIR/market-data" \
     "$DATA_DIR/snapshot-publisher" \
     "$DATA_DIR/observability" \
-    "$DATA_DIR/health"
+    "$DATA_DIR/health" \
+    "$DATA_DIR/diagnostics"
 install -d -o root -g ai-trader -m 0750 /etc/ai-trader
 touch /etc/ai-trader/ai-trader.env
 chown root:ai-trader /etc/ai-trader/ai-trader.env
@@ -48,6 +51,8 @@ tar -xzf "$WORKER_PACKAGE" -C "$APP_DIR"
 chown -R ai-trader:ai-trader "$APP_DIR"
 chmod 0750 "$APP_DIR"
 chmod 0750 "$APP_DIR/Trading.Worker"
+
+install -o root -g root -m 0755 "$EXIT_EVIDENCE_FILE" "$BIN_DIR/capture-worker-exit-evidence.sh"
 
 sed "s#REPLACE_WITH_BACKUP_BUCKET#$BACKUP_BUCKET_NAME#g" "$SERVICE_FILE" \
     > /etc/systemd/system/ai-trader.service

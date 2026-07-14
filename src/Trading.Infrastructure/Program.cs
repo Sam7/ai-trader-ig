@@ -34,6 +34,21 @@ return await Deployment.RunAsync(() =>
         PublicAccessPrevention = "enforced",
         StorageClass = "STANDARD",
         UniformBucketLevelAccess = true,
+        LifecycleRules =
+        {
+            new Gcp.Storage.Inputs.BucketLifecycleRuleArgs
+            {
+                Condition = new Gcp.Storage.Inputs.BucketLifecycleRuleConditionArgs
+                {
+                    Age = 30,
+                    MatchesPrefixes = { "market-data/diagnostics/" },
+                },
+                Action = new Gcp.Storage.Inputs.BucketLifecycleRuleActionArgs
+                {
+                    Type = "Delete",
+                },
+            },
+        },
     });
 
     _ = new Gcp.Storage.BucketIAMMember("worker-backup-bucket-object-admin", new()

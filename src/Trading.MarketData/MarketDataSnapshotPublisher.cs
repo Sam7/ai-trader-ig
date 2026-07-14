@@ -2,6 +2,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using System.Globalization;
+using System.Diagnostics;
 
 namespace Trading.MarketData;
 
@@ -12,6 +13,7 @@ public sealed class MarketDataSnapshotPublisher
     private readonly IMarketDataClock _clock;
     private readonly MarketDataOptions _options;
     private readonly ILogger<MarketDataSnapshotPublisher> _logger;
+    private readonly MarketDataRuntimeActivityMetrics _activityMetrics;
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public MarketDataSnapshotPublisher(
@@ -19,13 +21,15 @@ public sealed class MarketDataSnapshotPublisher
         MarketDataSnapshotValidator validator,
         IMarketDataClock clock,
         IOptions<MarketDataOptions> options,
-        ILogger<MarketDataSnapshotPublisher> logger)
+        ILogger<MarketDataSnapshotPublisher> logger,
+        MarketDataRuntimeActivityMetrics? activityMetrics = null)
     {
         _objectStore = objectStore;
         _validator = validator;
         _clock = clock;
         _options = options.Value;
         _logger = logger;
+        _activityMetrics = activityMetrics ?? new MarketDataRuntimeActivityMetrics();
     }
 
     public async Task<MarketDataSnapshotRefreshResult> PublishOnceAsync(CancellationToken cancellationToken = default)
@@ -47,12 +51,16 @@ public sealed class MarketDataSnapshotPublisher
             return new MarketDataSnapshotRefreshResult(MarketDataSnapshotRefreshStatus.AlreadyRunning, "Snapshot publish is already running.");
         }
 
+        var stopwatch = Stopwatch.StartNew();
+        _activityMetrics.RecordSnapshotStarted();
         try
         {
             var sourcePath = Path.GetFullPath(_options.StorePath);
             if (!File.Exists(sourcePath))
             {
-                return new MarketDataSnapshotRefreshResult(MarketDataSnapshotRefreshStatus.Failed, $"Market-data database was not found: {sourcePath}");
+                return RecordResult(new MarketDataSnapshotRefreshResult(
+                    MarketDataSnapshotRefreshStatus.Failed,
+                    $"Market-data database was not found: {sourcePath}"), stopwatch);
             }
 
             Directory.CreateDirectory(publisher.StagingDirectory);
@@ -84,12 +92,13 @@ public sealed class MarketDataSnapshotPublisher
                     validation.LatestBarUtc,
                     validation.Sha256);
 
-                return new MarketDataSnapshotRefreshResult(
+                var result = new MarketDataSnapshotRefreshResult(
                     MarketDataSnapshotRefreshStatus.Succeeded,
                     "Snapshot published.",
                     RemoteSha256: validation.Sha256,
                     ImportedBarCount: validation.FinalPriceBarCount,
                     LatestBarUtc: validation.LatestBarUtc);
+                return RecordResult(result, stopwatch);
             }
             finally
             {
@@ -99,7 +108,9 @@ public sealed class MarketDataSnapshotPublisher
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             _logger.LogError(exception, "Failed to publish market-data snapshot.");
-            return new MarketDataSnapshotRefreshResult(MarketDataSnapshotRefreshStatus.Failed, exception.Message);
+            return RecordResult(
+                new MarketDataSnapshotRefreshResult(MarketDataSnapshotRefreshStatus.Failed, exception.Message),
+                stopwatch);
         }
         finally
         {
@@ -135,5 +146,21 @@ public sealed class MarketDataSnapshotPublisher
         {
             File.Delete(path);
         }
+    }
+
+    private MarketDataSnapshotRefreshResult RecordResult(
+        MarketDataSnapshotRefreshResult result,
+        Stopwatch stopwatch)
+    {
+        if (result.Status == MarketDataSnapshotRefreshStatus.Failed)
+        {
+            _activityMetrics.RecordSnapshotFailed(stopwatch.Elapsed);
+        }
+        else
+        {
+            _activityMetrics.RecordSnapshotCompleted(stopwatch.Elapsed);
+        }
+
+        return result;
     }
 }

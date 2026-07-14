@@ -27,5 +27,9 @@
     <Project Path="tests/Trading.IG.Tests/Trading.IG.Tests.csproj" />
     <Project Path="tests/Trading.MarketData.Tests/Trading.MarketData.Tests.csproj" />
     <Project Path="tests/Trading.Strategy.Tests/Trading.Strategy.Tests.csproj" />
+    <Project Path="tests/Trading.Worker.Diagnostics.Tests/Trading.Worker.Diagnostics.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/Trading.Worker.Diagnostics/Trading.Worker.Diagnostics.csproj" />
   </Folder>
 </Solution>

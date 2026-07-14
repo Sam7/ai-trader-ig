@@ -35,6 +35,7 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<MarketDataSnapshotPublisher>();
         services.AddSingleton<MarketDataSnapshotSynchronizer>();
         services.AddSingleton<MarketDataStreamPipelineMetrics>();
+        services.AddSingleton<MarketDataRuntimeActivityMetrics>();
         services.AddSingleton<MarketDataService>();
         services.AddSingleton<MarketDataHistoricalBackfillService>();
         services.AddSingleton(sp => new MarketDataRecoveryCoordinator(

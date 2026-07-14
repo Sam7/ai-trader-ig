@@ -34,6 +34,21 @@ public sealed class MarketDataSnapshotPublisherTests
         objectStore.Uploads[0].Metadata.Should().ContainKey("sha256");
     }
 
+    [Fact]
+    public async Task PublishOnceAsync_WhenSourceIsMissing_ShouldRecordAFailedActivity()
+    {
+        using var workspace = TestWorkspace.Create();
+        var activity = new MarketDataRuntimeActivityMetrics();
+        var publisher = workspace.CreatePublisher(new FakeUploadObjectStore(workspace.UploadedSnapshotPath), activity);
+
+        var result = await publisher.PublishOnceAsync();
+
+        result.Status.Should().Be(MarketDataSnapshotRefreshStatus.Failed);
+        activity.Snapshot().SnapshotStartedCount.Should().Be(1);
+        activity.Snapshot().SnapshotFailedCount.Should().Be(1);
+        activity.Snapshot().SnapshotCompletedCount.Should().Be(0);
+    }
+
     private static StoredPriceBar CreateStoredBar(string timestampUtc)
         => StoredPriceBar.FromPriceBar(
             new InstrumentId("CS.D.BITCOIN.CFD.IP"),
@@ -108,7 +123,9 @@ public sealed class MarketDataSnapshotPublisherTests
         public static TestWorkspace Create()
             => new(Directory.CreateTempSubdirectory().FullName);
 
-        public MarketDataSnapshotPublisher CreatePublisher(FakeUploadObjectStore objectStore)
+        public MarketDataSnapshotPublisher CreatePublisher(
+            FakeUploadObjectStore objectStore,
+            MarketDataRuntimeActivityMetrics? activityMetrics = null)
             => new(
                 objectStore,
                 new MarketDataSnapshotValidator(),
@@ -127,7 +144,8 @@ public sealed class MarketDataSnapshotPublisherTests
                         },
                     },
                 }),
-                NullLogger<MarketDataSnapshotPublisher>.Instance);
+                NullLogger<MarketDataSnapshotPublisher>.Instance,
+                activityMetrics);
 
         public void Dispose()
         {

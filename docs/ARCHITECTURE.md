@@ -11,8 +11,9 @@ Use the repository documentation in this order:
 1. Start with the root [README](../README.md) for local setup, configuration, and the shortest path to running the CLI.
 2. Read this document for system structure, dependency direction, runtime flows, state ownership, and extension guidance.
 3. Use the [CLI reference](cli-use.md) for command syntax and operational workflows.
-4. Read [the SDK README](../src/Ig.Trading.Sdk/README.md) only when working on the standalone IG REST SDK.
-5. Consult `specs/plans/` for roadmap context after understanding the current implementation.
+4. Read [worker memory diagnostics](worker-memory-diagnostics.md) before changing worker limits, GC settings, or restart behavior.
+5. Read [the SDK README](../src/Ig.Trading.Sdk/README.md) only when working on the standalone IG REST SDK.
+6. Consult `specs/plans/` for roadmap context after understanding the current implementation.
 
 The most important architectural rule is:
 
@@ -22,10 +23,11 @@ No layer should quietly take over another layer's responsibility.
 
 ## 2. System at a glance
 
-The solution is a .NET trading system with two outer hosts:
+The solution is a .NET trading system with two production outer hosts and one local-only diagnostics tool:
 
 - `Trading.Cli` runs explicit manual, diagnostic, and automation commands.
 - `Trading.Worker` hosts scheduled automation, market-data services, health reporting, and TickerQ jobs.
+- `Trading.Worker.Diagnostics` runs the worker diagnostics module with synthetic allocations in a local Linux cgroup; it never composes IG, AI, or trading automation services.
 
 Both hosts compose the same application services. The worker uses a minimal local ASP.NET host to run TickerQ; it is not a public trading API.
 
@@ -70,6 +72,7 @@ Dependencies should point inward toward broker-neutral contracts and policy. Out
 | `Trading.Automation` | Application orchestration across planning, preparation, AI analysis, deterministic decisions, evidence persistence, execution handoff, scheduling, and worker health. | `Trading.AI`, `Trading.Charting`, `Trading.Execution`, `Trading.IG`, `Trading.MarketData`, `Trading.Strategy` |
 | `Trading.Cli` | Spectre.Console composition root and command rendering. | `Trading.Abstractions`, `Trading.Automation`, `Trading.Charting`, `Trading.Execution`, `Trading.IG`, `Trading.MarketData` |
 | `Trading.Worker` | Minimal executable that starts `TradingWorkerApplication`. | `Trading.Automation`, `Trading.IG` |
+| `Trading.Worker.Diagnostics` (`tools/`) | Local-only synthetic memory lab that composes the production diagnostics module without broker or AI services. | `Trading.Automation` |
 | `Trading.Infrastructure` | Pulumi definitions for the GCP worker VM, service account, and backup bucket. It is deployment tooling, not a runtime domain layer. | None |
 
 ### Boundary guardrails
@@ -124,7 +127,7 @@ The main configuration owners are:
 | `AI:Prompts` | `Trading.AI` | Prompt observability root |
 | `Automation` | `Trading.Automation` | schedules, timezone, intraday preparation, and execution mode |
 | `MarketData` | `Trading.MarketData` | SQLite, collection, recovery, backfill, and cloud snapshots |
-| `WorkerHealth` / `Alerting` | `Trading.Automation` | health evidence and operational alerts |
+| `WorkerHealth` / `WorkerDiagnostics` / `Alerting` | `Trading.Automation` | health evidence, bounded memory forensics, optional containment, and operational alerts |
 
 Secrets must live in environment variables, user secrets, or ignored local configuration. Tracked configuration must never contain live credentials.
 
@@ -238,15 +241,14 @@ Strategy and AI code consume broker-neutral price data through these services; t
 
 ### 5.7 Worker memory and deployment safety
 
-The production worker currently runs on a 1 GiB GCP `e2-micro`. Memory safety is therefore an operational boundary, not an afterthought:
+The production worker runs on a 1 GiB GCP `e2-micro`, so memory safety is an operational boundary. systemd applies `MemoryHigh=400M`, `MemoryMax=480M`, `Restart=on-failure`, and a best-effort `ExecStopPost` evidence hook. The worker also keeps:
 
-- systemd applies `MemoryHigh=400M` and `MemoryMax=480M` so the worker is restarted before host-wide OOM can make the VM unreachable;
-- worker health reports warning at 300 MiB, critical at 360 MiB, and fail-fast at 420 MiB after two consecutive samples;
-- fail-fast exits the worker and relies on systemd `Restart=on-failure`, preserving the VM and allowing the next health/snapshot cycle to resume;
-- `worker-status.json` includes process/GC metrics, stream-pipeline depth, and the latest chart/evidence operation metrics (item count, payload size, duration, and working set at completion);
-- the deployment workflow waits for SSH readiness, captures serial-console evidence when the guest is unavailable, and verifies fresh health and SQLite snapshot objects after restart.
+- the existing one-minute `worker-status.json` health/Slack path;
+- a one-second in-memory cgroup sentry;
+- a five-second bounded JSONL forensic trace with process, GC, cgroup, stream, operation, snapshot, and recovery counters; and
+- closed-artifact upload on a later process start, with 30-day GCS prefix retention.
 
-These limits are an initial safety budget for the current machine size. Do not raise them to hide a regression. Use the operation metrics, GCS health freshness, systemd restart history, and serial-console OOM records to identify the allocation source first. The stream dispatcher and ingestion channel are already bounded; changes there require a reproducing test or telemetry evidence.
+The diagnostics module does not retain broker or prompt payloads. Its proactive cgroup containment policy is currently disabled in production; it must be enabled only after local and production evidence meets the documented acceptance gate. The full design, local lab, GC experiment policy, and incident workflow are in [worker-memory-diagnostics.md](worker-memory-diagnostics.md).
 
 ## 6. State, persistence, and ownership
 
@@ -262,6 +264,7 @@ These limits are an initial safety budget for the current machine size. Do not r
 | Demo-canary result | `Trading.Automation` | `*-demo-execution-*.json` | Append-only sidecar containing the source audit path and SHA-256. |
 | Cloud mirror state and snapshots | `Trading.MarketData` | Configured under `Logs/MarketData/cloud-mirror/` | Local synchronization state; validated before import. |
 | Worker health | `Trading.Automation` | `worker-status.json` and optionally GCS | Operational evidence, not trading policy. Includes process/GC state, stream metrics, and the latest bounded chart/evidence operation metrics. |
+| Worker memory trace and exit evidence | `Trading.Automation` / systemd | `/var/lib/ai-trader/diagnostics` and optional GCS | Bounded operational forensics only. Active traces are recovered on the next start; successful prior-run uploads are deleted locally. |
 
 Historical audit JSON containing the older embedded outcome fields can still be loaded. New evaluations and demo results must use sidecars and must not rewrite source audits.
 

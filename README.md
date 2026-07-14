@@ -89,6 +89,7 @@ The solution strictly enforces separation of concerns to keep the business logic
 * **`Trading.MarketData`**: Manages price data ingestion, historical backfilling, SQLite persistence, and GCS-backed market-data snapshots.
 * **`Trading.Charting`**: Generates broker-neutral price chart images (PNG) using `ScottPlot`.
 * **`Trading.Worker`**: The background service running `TickerQ` to execute daily and intraday cron jobs.
+* **`Trading.Worker.Diagnostics`**: A local-only synthetic worker-memory lab that composes the diagnostics module without IG or AI traffic.
 * **`Trading.Infrastructure`**: Pulumi IaC definitions for GCP deployment.
 
 The canonical and more detailed architecture guide is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). It includes the real project-reference direction, composition roots, end-to-end flows, persistence and evidence rules, testing ownership, and guidance for adding strategies, prompts, chart recipes, or market-specific experts.
@@ -103,7 +104,7 @@ Market data is the lifeblood of the charting and AI analysis workflows. It is ha
 * **Live Streaming**: The system uses `IgMarketDataStreamClient` to connect to IG's Lightstreamer endpoint, subscribing to items like `CHART:{epic}:5MINUTE`. Stream callbacks are bounded and coalesce expendable forming-candle updates before batched SQLite writes; finalized candles are preserved or the stream fails loudly instead of silently losing data.
 * **Historical Backfill**: If the system detects gaps (e.g., after a restart), the `MarketDataCollector` requests historical data via REST (`GetPricesAsync`). **Crucial note:** IG enforces strict historical data allowance limits. The codebase catches these specific allowance exceptions to prevent infinite retry loops.
 * **Cloud Snapshots**: The production worker can publish a validated SQLite snapshot to GCS every five minutes using the Google Cloud Storage .NET client. Local development can mirror that snapshot with Application Default Credentials, validate it, and transactionally import final market-data bars without replacing an active SQLite file.
-* **Worker Health**: The worker writes `worker-status.json` locally and can publish `market-data/health/worker-status.json` to GCS. The payload includes process memory, GC state, stream queue depth, persisted-update counters, latest market-data freshness, and the most recent chart/evidence operation size and duration. Production systemd limits the worker to a conservative e2-micro memory budget and restarts it before host-wide OOM.
+* **Worker Health**: The worker writes `worker-status.json` locally and can publish `market-data/health/worker-status.json` to GCS. The payload includes process memory, GC state, stream queue depth, persisted-update counters, latest market-data freshness, and the most recent chart/evidence operation size and duration. A separate bounded one-second/five-second memory-forensics path captures cgroup evidence and post-exit state without retaining market payloads. See [worker memory diagnostics](docs/worker-memory-diagnostics.md) before changing memory limits or GC settings.
 * **Mirror Mode**: When `MarketData:CloudSnapshot:Mirror:Enabled` is `true`, automatic IG historical REST backfill is disabled. Local workflows read the mirrored data from the normal `MarketDataService` path. Explicit REST backfill remains available through the `marketdata backfill` CLI command.
 * **State Separation**: Cloud snapshots import only `instruments` and final `price_bars`. Local `market_data_health`, `market_data_coverage`, observability, workflow, and transient state remain local so the production database does not overwrite local operational state.
 * **Execution Boundary Storage**: Broker mutation idempotency lives in a separate SQLite file, `Logs/Execution/execution-boundary.sqlite`, not in the market-data database. It stores durable operation reservations, stop/limit protection intent, deal references, submission attempts, broker outcomes, and reconciliation state for manual CLI and automated execution paths.
@@ -256,8 +257,8 @@ The system deploys as a standalone Linux background service to a GCP `e2-micro` 
 
 ### 6.2 Host Setup & systemd
 
-* The `install-vm.sh` script runs on the VM to set up an `ai-trader` system user, unpacks the binary to `/opt/ai-trader/app`, and wires up the `ai-trader.service` systemd file to keep the worker running.
-* The service is tuned for `e2-micro`: bounded stream queues, worker health telemetry, `MemoryHigh`/`MemoryMax`, controlled fail-fast thresholds, and restart-rate limits. Slack webhook settings belong in `/etc/ai-trader/ai-trader.env`, not in tracked config.
+* The `install-vm.sh` script runs on the VM to set up an `ai-trader` system user, unpacks the binary to `/opt/ai-trader/app`, installs the local-only exit-evidence hook, and wires up the `ai-trader.service` systemd file to keep the worker running.
+* The service is tuned for `e2-micro`: bounded stream queues, health telemetry, `MemoryHigh`/`MemoryMax`, bounded cgroup diagnostics, controlled fail-fast thresholds, and restart-rate limits. Slack webhook settings belong in `/etc/ai-trader/ai-trader.env`, not in tracked config.
 
 ### 6.3 SQLite Cloud Snapshots
 
