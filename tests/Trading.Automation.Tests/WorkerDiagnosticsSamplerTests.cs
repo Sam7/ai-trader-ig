@@ -49,6 +49,38 @@ public sealed class WorkerDiagnosticsSamplerTests
         snapshot.Activity!.SnapshotCompletedCount.Should().Be(1);
     }
 
+    [Fact]
+    public void CaptureSnapshot_should_include_the_bounded_host_census_without_a_command_line()
+    {
+        var host = new LinuxHostMemorySnapshot(
+            TotalBytes: 1_024,
+            AvailableBytes: 512,
+            CachedBytes: 20,
+            DirtyBytes: 10,
+            SlabBytes: 5,
+            SwapTotalBytes: 100,
+            SwapFreeBytes: 50,
+            MemoryPressure: new LinuxMemoryPressureSnapshot(0.1, 0.1, 0.1, 1, 0, 0, 0, 0),
+            ProcessCount: 2,
+            TopProcesses:
+            [
+                new HostProcessSnapshot(9, 1, 1000, null, "gcloud", "/cron.service", 300, 200),
+            ]);
+        var sampler = new WorkerDiagnosticsSampler(
+            new StubProcessProbe(CreateProcess()),
+            new StubCgroupReader(null),
+            new MarketDataStreamPipelineMetrics(),
+            new WorkerOperationMetrics(),
+            new MarketDataRuntimeActivityMetrics(),
+            new StubHostMemoryProbe(host));
+
+        var snapshot = sampler.CaptureSnapshot(1, DateTimeOffset.UtcNow);
+
+        snapshot.SchemaVersion.Should().Be(2);
+        snapshot.Host.Should().Be(host);
+        snapshot.Host!.TopProcesses.Single().ExecutableName.Should().Be("gcloud");
+    }
+
     private static WorkerDiagnosticsSampler CreateSampler(CgroupMemorySnapshot? cgroup)
         => new(
             new StubProcessProbe(CreateProcess()),
@@ -68,5 +100,10 @@ public sealed class WorkerDiagnosticsSamplerTests
     private sealed class StubCgroupReader(CgroupMemorySnapshot? snapshot) : IWorkerCgroupMemoryReader
     {
         public CgroupMemorySnapshot? TryRead() => snapshot;
+    }
+
+    private sealed class StubHostMemoryProbe(LinuxHostMemorySnapshot snapshot) : IWorkerHostMemoryProbe
+    {
+        public LinuxHostMemorySnapshot? TryRead() => snapshot;
     }
 }

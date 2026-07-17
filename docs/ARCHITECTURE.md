@@ -109,8 +109,13 @@ Operational commands and diagnostic commands are deliberately grouped separately
 - configures Serilog;
 - configures TickerQ in the automation timezone;
 - registers the same automation, IG, and charting services as the CLI;
-- starts scheduled daily-planning and intraday jobs;
+- keeps daily-planning and intraday schedules disabled during the production market-data-only phase;
 - hosts market-data collection, recovery, snapshot, mirror, and health services.
+
+The production systemd unit explicitly sets `Automation__Enabled=false`,
+`Automation__IntradayOpportunities__Enabled=false`, and
+`Automation__Execution__Mode=Disabled`. Worker health reporting and its existing
+Slack alert path remain enabled.
 
 ### Configuration
 
@@ -241,12 +246,12 @@ Strategy and AI code consume broker-neutral price data through these services; t
 
 ### 5.7 Worker memory and deployment safety
 
-The production worker runs on a 1 GiB GCP `e2-micro`, so memory safety is an operational boundary. systemd applies `MemoryHigh=400M`, `MemoryMax=480M`, `Restart=on-failure`, and a best-effort `ExecStopPost` evidence hook. The worker also keeps:
+The production worker is capable of running market-data collection, SQLite snapshot/recovery, daily automation, and fifteen-minute intraday chart preparation in one process on a 1 GiB GCP `e2-micro`. During the current collection-only phase, the systemd configuration disables the daily/intraday schedules and execution while retaining market-data persistence, health, and Slack alerting. This means a chart allocation failure and unrelated guest-wide pressure remain distinct failure classes: systemd's service cgroup can constrain the worker, but it cannot prevent unrelated cron or other host processes from exhausting the VM. systemd applies `MemoryHigh=400M`, `MemoryMax=480M`, `Restart=on-failure`, and a best-effort `ExecStopPost` evidence hook. The worker also keeps:
 
 - the existing one-minute `worker-status.json` health/Slack path;
 - a one-second in-memory cgroup sentry;
-- a five-second bounded JSONL forensic trace with process, GC, cgroup, stream, operation, snapshot, and recovery counters; and
-- closed-artifact upload on a later process start, with 30-day GCS prefix retention.
+- a five-second bounded JSONL forensic trace with process/PSS, GC generation, SQLite allocator, full cgroup, host PSI/process-census, stream, operation, snapshot, and recovery counters; and
+- healthy-only single-flight closed-artifact upload with a 30-second timeout, pressure cancellation, and 30-day GCS prefix retention.
 
 The diagnostics module does not retain broker or prompt payloads. Its proactive cgroup containment policy is currently disabled in production; it must be enabled only after local and production evidence meets the documented acceptance gate. The full design, local lab, GC experiment policy, and incident workflow are in [worker-memory-diagnostics.md](worker-memory-diagnostics.md).
 

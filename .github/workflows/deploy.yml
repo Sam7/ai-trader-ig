@@ -67,6 +67,12 @@ jobs:
       - name: Restore
         run: dotnet restore ./Trading.slnx
 
+      - name: Validate host recovery and exit-evidence scripts
+        shell: bash
+        run: |
+          bash tests/host/install-vm-legacy-backup-tests.sh
+          bash tests/host/capture-worker-exit-evidence-tests.sh
+
       - name: Test
         run: dotnet test ./Trading.slnx --configuration Release --no-restore
 
@@ -268,3 +274,15 @@ jobs:
           validate_object_freshness \
             "gs://$BACKUP_BUCKET_NAME/market-data/ig-market-data.sqlite" \
             600
+
+      - name: Validate market-data-only worker mode
+        shell: bash
+        env:
+          WORKER_INSTANCE_NAME: ${{ steps.pulumi.outputs.worker_instance_name }}
+          WORKER_INSTANCE_ZONE: ${{ steps.pulumi.outputs.worker_instance_zone }}
+        run: |
+          gcloud compute ssh "$WORKER_INSTANCE_NAME" \
+            --project "$GCP_PROJECT_ID" \
+            --zone "$WORKER_INSTANCE_ZONE" \
+            --quiet \
+            --command "active_since=\$(systemctl show ai-trader.service -p ActiveEnterTimestamp --value); journal=\$(sudo journalctl -u ai-trader.service --since \"\$active_since\" --no-pager); printf '%s\\n' \"\$journal\" | grep -q 'Automation scheduling is disabled.'; printf '%s\\n' \"\$journal\" | grep -q 'Intraday opportunity scheduling is disabled.'; ! printf '%s\\n' \"\$journal\" | grep -Eq 'Running scheduled (daily briefing|intraday opportunity)'"

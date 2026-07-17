@@ -19,27 +19,32 @@ A future MIG needs durable worker state, a health endpoint with meaningful seman
 
 | Part | Cadence / lifecycle | Responsibility |
 | --- | --- | --- |
-| Memory sentry | Every second | Reads current process working set and cgroup-v2 `memory.current` plus OOM-related events. It retains only the sustained-threshold counter. |
-| Forensic sampler | Every five seconds | Appends process/GC, cgroup, stream, operation, snapshot-publish, and recovery counters to a JSONL trace. |
-| Trace store | Local, bounded | Uses an 8 MiB active segment and a 24 MiB total local budget. A segment is flushed at least every 30 seconds, on rotation, and before proactive exit. |
-| Prior-artifact uploader | Later worker start only | Uploads closed traces and exit evidence to the configured GCS prefix; it never blocks the sentry. A successful upload removes the local copy. |
-| Exit-evidence hook | systemd `ExecStopPost` | Writes a small local JSON record after any worker exit. It never makes a network request and its failure cannot change service outcome. |
+| Memory sentry | Every second | Reads process/cgroup totals plus cheap host available-memory, PSI, and process-count signals. It does not read command lines or environments. |
+| Forensic sampler | Every five seconds normally; every second in pressure mode | Appends process/GC, full cgroup, SQLite, host-memory/PSI, bounded host-process census, stream, operation, snapshot-publish, and recovery counters to a JSONL trace. |
+| Trace store | Local, bounded | Uses an 8 MiB active segment and a 256 MiB production disk budget. A segment is flushed at least every 30 seconds, on rotation, and before proactive exit. |
+| Prior-artifact uploader | Healthy worker only | Uploads closed traces, threshold artifacts, and exit evidence in one flight with a 30-second timeout. It pauses/cancels when pressure begins, never blocks the sentry, and retains a failed upload locally. |
+| Exit-evidence hook | systemd `ExecStopPost` | Writes a small local JSON record after any worker exit: cgroup maps, host memory/PSI, top processes without command lines, and closed-artifact names. It never makes a network request and its failure cannot change service outcome. |
 | Containment policy | Disabled initially | Optionally exits with code `75` after cgroup memory stays at or above its threshold for the configured one-second samples. `Restart=on-failure` then restarts the worker. |
 
-The trace deliberately contains counters and sizes only. It does not include prompt text, API credentials, raw price updates, broker tokens, chart data, or exception payloads.
+The trace deliberately contains counters and sizes only. It never reads process command lines or environments, and does not include prompt text, API credentials, raw price updates, broker tokens, chart data, or exception payloads.
+
+Pressure mode starts when worker cgroup memory reaches 256 MiB, host available memory drops below 256 MiB, memory PSI is non-zero, or the host process count rises materially above this process lifetime's baseline. It returns to the five-second cadence only after five continuous minutes below every signal. The first crossing of 256, 320, and 384 MiB per process instance synchronously flushes the JSONL trace then writes bounded compressed `smaps`, `smaps_rollup`, maps, descriptor classification, full cgroup, host census, and activity artifacts. No dump is taken automatically.
 
 ### Evidence fields
 
 The forensic JSONL record includes:
 
 - process ID, uptime, working set, private memory, thread/handle count;
-- managed total, heap size, fragmentation, committed bytes, and GC generation counts;
-- cgroup current and peak memory; anonymous/file/kernel-stack/slab memory; `high`, `max`, `oom`, and `oom_kill` event counters;
+- `/proc` RSS/PSS, anonymous/file/shared memory, private/shared clean and dirty pages, swap, locked/stack/executable/library/data memory, and file-descriptor/mapping counts;
+- managed total/allocation rate, heap and committed bytes, per-generation/LOH/POH sizes and fragmentation, pinned/finalization counters, GC pause/load limits, and thread-pool counters;
+- cgroup current, peak, swap, complete `memory.stat`/`memory.events`, cgroup PSI, and the legacy `high`, `max`, `oom`, and `oom_kill` summary fields;
+- SQLite allocator/page-cache/malloc counters where the native provider supports them, plus database/WAL/shared-memory file sizes. The store deliberately uses no connection pool, so active-connection count remains unavailable rather than guessed;
+- host total/available/cache/dirty/slab/swap, memory PSI, and a bounded top-process census (PID, PPID, UID, start time, executable name, cgroup, RSS, PSS only);
 - bounded market-data stream queue/depth counters;
-- bounded automation-operation counters; and
+- bounded automation-operation start/completion/failure checkpoints with correlation IDs, item counts, duration, managed-allocated/committed/RSS/PSS/cgroup before/after samples, and all currently active operations; and
 - bounded market-data snapshot/recovery activity counters.
 
-The exit hook adds the systemd result, exit code/status, main PID, and the same cgroup memory/event family. This is useful when the CLR dies before its next five-second sample.
+The exit hook adds the systemd result, exit code/status, main PID, complete cgroup maps, host memory/PSI, process count, and top-process census. This is useful when the CLR dies before its next five-second sample.
 
 ### Files and retention
 
@@ -47,7 +52,7 @@ Production paths are configured in `src/Trading.Infrastructure/host/ai-trader.se
 
 - local artifacts: `/var/lib/ai-trader/diagnostics`;
 - cloud prefix: `market-data/diagnostics/<machine>/<UTC-date>/...`;
-- local maximum: 24 MiB, including a reserved active-segment allowance;
+- local maximum: 256 MiB in production, including a reserved active-segment allowance. This is disk-only retention, not an in-memory queue;
 - cloud retention: the Pulumi bucket lifecycle deletes only `market-data/diagnostics/` artifacts after 30 days.
 
 An `.active` trace from a crash is renamed to a closed JSONL file at the next startup before upload is attempted. Failed uploads remain local for a later start, still subject to the local retention budget. The GCS uploader runs asynchronously after the initial local sample, so an unavailable bucket cannot defer the one-second sentry.
@@ -62,11 +67,17 @@ WorkerDiagnostics__SentryInterval=00:00:01
 WorkerDiagnostics__SampleInterval=00:00:05
 WorkerDiagnostics__FlushInterval=00:00:30
 WorkerDiagnostics__SegmentMaximumBytes=8388608
-WorkerDiagnostics__RetentionMaximumBytes=25165824
+WorkerDiagnostics__RetentionMaximumBytes=268435456
 WorkerDiagnostics__Containment__Enabled=false
+Automation__Enabled=false
+Automation__IntradayOpportunities__Enabled=false
+Automation__Execution__Mode=Disabled
+Alerting__Slack__Enabled=true
 ```
 
 `appsettings.example.json` shows the same schema for local use. The current production setting intentionally leaves `Containment.Enabled=false`. Existing `WorkerHealth` and Slack health reporting remain separate, slower health evidence; they are not the primary sudden-spike detector.
+
+During the collection-only production phase, market-data streaming, historical recovery, snapshots, health reporting, diagnostics, and Slack health alerts remain enabled. Daily briefing, intraday chart/AI scheduling, and execution are disabled by the systemd environment overrides above.
 
 To inspect a production incident after the next restart:
 
@@ -77,6 +88,27 @@ sudo journalctl -u ai-trader.service --since '30 minutes ago' --no-pager
 ```
 
 The deployment copies `capture-worker-exit-evidence.sh`, installs it under `/opt/ai-trader/bin`, and wires it with a best-effort `ExecStopPost=-...` entry. Do not add a network call, a Slack call, or a second long-running process to that hook.
+
+## Incident preservation and legacy-backup removal
+
+Before guest recovery, preserve serial-console output, relevant GCS object metadata, instance/disk metadata, and a boot-disk snapshot. Do not reboot or remove guest files before that point. After SSH is available, copy only the small forensic directories and journal/cron evidence described in the incident plan; do not export the entire disk without separate approval.
+
+The installer now removes only the obsolete `/etc/cron.d/ai-trader-backup` and `/opt/ai-trader/bin/backup-db.sh` path, first terminating that script's descendant process tree. It neither disables cron globally nor touches unrelated jobs. It then checks that the obsolete paths and an `ai-trader`-owned `gcloud` process are absent and samples the worker's cgroup process count three times. The deployment workflow runs a Linux fixture test for this idempotent cleanup before publishing.
+
+Trace JSONL is schema version 2. The local reader preserves existing version-1 rows as version 1; it does not manufacture host, PSS, SQLite, or generation data that an older row never recorded.
+
+## Deterministic incident analysis
+
+Analyze downloaded closed traces (and optionally a serial capture) locally; the analyzer emits only derived values, source paths, and hashes, never raw inputs:
+
+```powershell
+pwsh -File tools/analyze-worker-memory-incident.ps1 `
+  -TracePaths artifacts/forensics/trace-1.jsonl,artifacts/forensics/trace-2.jsonl `
+  -SerialPaths artifacts/forensics/serial-console.txt `
+  -OutputDirectory artifacts/incident-analysis
+```
+
+It writes `timeline.csv`, `summary.json`, `REPORT.md`, and `sources.sha256`. Classification is deliberately conservative: managed retention/churn, native/runtime, file/cache, threading, SQLite, and external-host-pressure are selected only when their evidence dominates. A report is conclusive only when at least 95% of material worker growth is reconciled; otherwise it says `Inconclusive` rather than choosing a root cause.
 
 ## Local synthetic memory lab
 
@@ -101,6 +133,14 @@ pwsh -File tools/run-worker-memory-lab.ps1 -Profile moderate -DurationSeconds 12
 
 The script publishes a self-contained Linux executable, runs it through `systemd-run --user`, and writes result/trace artifacts under `artifacts/diagnostics-lab/` (ignored by Git). Its final output includes the actual GC flavor, peak working set/cgroup memory, and cgroup `max`, OOM, and OOM-kill counters.
 
+For a long-running overhead comparison, start one detached coordinator from the repository root:
+
+```powershell
+pwsh -File tools/start-worker-memory-overhead-series.ps1 -Runs 3 -DurationSeconds 600 -MemoryMaxMiB 480
+```
+
+The command prints the coordinator PID and absolute stdout/stderr paths. Monitor the printed stdout path with `Get-Content -Wait`. The launcher refuses to start when another coordinator, memory-lab unit, or series lock is active; each worker run uses a unique systemd unit so an unrelated cleanup cannot stop the active run. The series is incomplete unless its directory contains `run-01-off.log`, `run-01-on.log`, through `run-03-on.log`, plus `summary.json`.
+
 `idle` has no synthetic allocation. `moderate` retains 96 MiB, churns 8 MiB per 100 ms, and holds 64 MiB bursts. `pressure` retains 160 MiB with the same churn/burst shape. These are allocation profiles, not a simulation of IG traffic.
 
 ### Initial calibration results
@@ -115,6 +155,36 @@ The first warmed WSL2/systemd-cgroup calibration on 2026-07-14 was intentionally
 | Moderate, Workstation GC, 45 s, 320 MiB scope | 293.8 MiB | 290.6 MiB | no `max`, OOM, or OOM-kill events |
 
 The idle comparison puts the observed diagnostics increment at about 3.3 MiB peak cgroup memory and 7.6 MiB peak working set in this local environment. Repeat it after meaningful diagnostic changes; do not assume the number is transferable to the VM.
+
+For a bounded, read-only ingestion profile against the IG demo environment, use
+`tools/run-live-ig-stream-memory.ps1`. It requires the ignored local
+`appsettings.json` to point at `https://demo-api.ig.com/gateway/deal`, runs the
+real Lightstreamer subscriptions and SQLite ingestion, and writes process
+samples and broker logs under `artifacts/live-ig-stream-<UTC>/`. This profile is
+Windows-based and is not the 480 MiB Linux-cgroup attribution lab; use it to
+observe real stream/SQLite behaviour, then use the synthetic lab and enhanced
+worker diagnostics for cgroup, GC, PSS and operation attribution.
+
+```powershell
+pwsh -File tools/run-live-ig-stream-memory.ps1 -DurationSeconds 1800
+Get-Content artifacts/live-ig-stream-<UTC>/memory.csv -Wait
+```
+
+The runner defaults to IG's one-minute consolidated candles (`1MINUTE`) to
+increase observation events. Use `-Resolution FiveMinutes` to match the
+production stream resolution. The resolution applies only to this local test.
+
+Analyze a completed live-stream run with:
+
+```powershell
+pwsh -File tools/analyze-live-ig-stream.ps1 `
+  -RunDirectory artifacts/live-ig-stream-<UTC>
+```
+
+The live-stream analyzer writes `analysis.json`, `timeline.csv`,
+`sources.sha256`, and `REPORT.md`. Its conclusion is intentionally limited to
+the Windows RSS/private-memory and SQLite-file evidence collected by that
+runner; it does not replace the Linux-cgroup attribution lab.
 
 The implementation validation also forced containment at a deliberately low local threshold: it exited with status `75` after three sentry samples, left an active trace, and the next normal process recovered that trace into closed JSONL. A transient systemd service with the installed `ExecStopPost` command then exited with `75` and produced a valid local exit-evidence JSON artifact. Neither validation enables production containment.
 

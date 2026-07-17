@@ -96,6 +96,7 @@ internal sealed class RollingWorkerTraceStore : IAsyncDisposable
 
         return Directory.EnumerateFiles(directory, "*.jsonl")
             .Concat(Directory.EnumerateFiles(directory, "exit-*.json"))
+            .Concat(Directory.EnumerateFiles(directory, "forensic-*.gz"))
             .OrderBy(path => path, StringComparer.Ordinal)
             .ToArray();
     }
@@ -173,6 +174,7 @@ internal sealed class RollingWorkerTraceStore : IAsyncDisposable
         var directory = Path.GetFullPath(_options.LocalDirectory);
         var artifacts = Directory.EnumerateFiles(directory, "*.jsonl")
             .Concat(Directory.EnumerateFiles(directory, "exit-*.json"))
+            .Concat(Directory.EnumerateFiles(directory, "forensic-*.gz"))
             .Select(path => new FileInfo(path))
             .OrderByDescending(file => file.LastWriteTimeUtc)
             .ToList();
@@ -203,6 +205,8 @@ internal sealed class RollingWorkerTraceStore : IAsyncDisposable
 
     private static bool IsClosedArtifactName(string fileName)
         => fileName.EndsWith(".jsonl", StringComparison.OrdinalIgnoreCase)
+           || (fileName.StartsWith("forensic-", StringComparison.Ordinal)
+               && fileName.EndsWith(".gz", StringComparison.OrdinalIgnoreCase))
            || (fileName.StartsWith("exit-", StringComparison.Ordinal)
                && fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
 

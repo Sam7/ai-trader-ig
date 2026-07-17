@@ -16,7 +16,55 @@ internal sealed record WorkerProcessMemorySnapshot(
     long TotalCommittedBytes,
     int Gen0Collections,
     int Gen1Collections,
-    int Gen2Collections);
+    int Gen2Collections)
+{
+    public LinuxProcessMemorySnapshot? Linux { get; init; }
+
+    public ManagedRuntimeSnapshot? ManagedRuntime { get; init; }
+}
+
+internal sealed record GcGenerationSnapshot(long SizeAfterBytes, long FragmentedBytes);
+
+internal sealed record ThreadPoolRuntimeSnapshot(
+    int ThreadCount,
+    long PendingWorkItemCount,
+    long CompletedWorkItemCount);
+
+internal sealed record ManagedRuntimeSnapshot(
+    long TotalAllocatedBytes,
+    double? AllocationRateBytesPerSecond,
+    long LiveManagedBytes,
+    long HeapSizeBytes,
+    long TotalCommittedBytes,
+    long FragmentedBytes,
+    GcGenerationSnapshot Gen0,
+    GcGenerationSnapshot Gen1,
+    GcGenerationSnapshot Gen2,
+    GcGenerationSnapshot LargeObjectHeap,
+    GcGenerationSnapshot PinnedObjectHeap,
+    long PinnedObjectCount,
+    long FinalizationPendingCount,
+    int Gen0Collections,
+    int Gen1Collections,
+    int Gen2Collections,
+    long MemoryLoadBytes,
+    long HighMemoryLoadThresholdBytes,
+    long TotalAvailableMemoryBytes,
+    double PauseTimePercentage,
+    ThreadPoolRuntimeSnapshot ThreadPool);
+
+internal sealed record SqliteRuntimeMetricsSnapshot(
+    long? DatabaseBytes,
+    long? WalBytes,
+    long? SharedMemoryBytes,
+    long? AllocatorCurrentBytes,
+    long? AllocatorHighWaterBytes,
+    long? PageCacheCurrentBytes,
+    long? PageCacheHighWaterBytes,
+    long? MallocCount,
+    long? MallocCountHighWater,
+    bool ConnectionPoolingEnabled,
+    int? ActiveConnectionCount);
 
 internal sealed record CgroupMemorySnapshot(
     long CurrentBytes,
@@ -28,7 +76,18 @@ internal sealed record CgroupMemorySnapshot(
     long? HighEvents,
     long? MaxEvents,
     long? OomEvents,
-    long? OomKillEvents);
+    long? OomKillEvents)
+{
+    public long? SwapCurrentBytes { get; init; }
+
+    public long? SwapPeakBytes { get; init; }
+
+    public IReadOnlyDictionary<string, long>? MemoryStat { get; init; }
+
+    public IReadOnlyDictionary<string, long>? MemoryEvents { get; init; }
+
+    public LinuxMemoryPressureSnapshot? MemoryPressure { get; init; }
+}
 
 internal sealed record WorkerDiagnosticsSentrySample(
     DateTimeOffset ObservedAtUtc,
@@ -37,7 +96,10 @@ internal sealed record WorkerDiagnosticsSentrySample(
     long? HighEvents,
     long? MaxEvents,
     long? OomEvents,
-    long? OomKillEvents);
+    long? OomKillEvents)
+{
+    public WorkerHostPressureSnapshot? HostPressure { get; init; }
+}
 
 internal sealed record WorkerDiagnosticSnapshot(
     DateTimeOffset ObservedAtUtc,
@@ -46,4 +108,12 @@ internal sealed record WorkerDiagnosticSnapshot(
     CgroupMemorySnapshot? Cgroup,
     MarketDataStreamPipelineSnapshot? Stream,
     WorkerOperationMetricsSnapshot? Operations,
-    MarketDataRuntimeActivitySnapshot? Activity);
+    MarketDataRuntimeActivitySnapshot? Activity)
+{
+    /// <summary>Version two adds host-wide attribution while retaining all version-one fields.</summary>
+    public int SchemaVersion { get; init; } = 2;
+
+    public LinuxHostMemorySnapshot? Host { get; init; }
+
+    public SqliteRuntimeMetricsSnapshot? Sqlite { get; init; }
+}

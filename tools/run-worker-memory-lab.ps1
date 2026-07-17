@@ -8,7 +8,8 @@ param(
     [int] $MemoryMaxMiB = 384,
     [string] $Distro = "Ubuntu",
     [switch] $UseWorkstationGarbageCollection,
-    [switch] $DisableDiagnostics
+    [switch] $DisableDiagnostics,
+    [switch] $NormalTelemetryOnly
 )
 
 Set-StrictMode -Version Latest
@@ -28,6 +29,7 @@ $publishDirectory = Join-Path $repoRoot "artifacts\publish\worker-diagnostics-la
 $runId = "memory-lab-$([DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ'))"
 $localRunDirectory = Join-Path $repoRoot "artifacts\diagnostics-lab\$runId"
 New-Item -ItemType Directory -Path $localRunDirectory -Force | Out-Null
+$unitName = "ai-trader-$runId"
 
 $profileOptions = switch ($Profile) {
     "idle" {
@@ -84,7 +86,7 @@ $syntheticEnabled = $profileOptions.Enabled.ToString().ToLowerInvariant()
 
 $systemdArguments = @(
     "-d", $Distro, "--",
-    "systemd-run", "--user", "--wait", "--pipe",
+    "systemd-run", "--user", "--unit=$unitName", "--wait", "--pipe",
     "-p", "MemoryMax=$MemoryMaxMiB`M",
     "-p", "MemoryAccounting=yes",
     "--", $wslExecutable,
@@ -99,6 +101,15 @@ $systemdArguments = @(
     "--SyntheticWorkerLoad:BurstHold=00:00:01",
     "--SyntheticWorkerLoad:ResultPath=$wslRunDirectory/summary.json"
 )
+if ($NormalTelemetryOnly) {
+    # WSL user scopes can include unrelated processes. Keep the overhead gate in normal five-second
+    # sampling so a host-scope false positive does not measure one-shot forensic artifacts instead.
+    $systemdArguments += @(
+        "--WorkerDiagnostics:Pressure:WorkerCgroupWarningBytes=$($MemoryMaxMiB * 1MB)",
+        "--WorkerDiagnostics:Pressure:HostAvailableWarningBytes=1",
+        "--WorkerDiagnostics:Pressure:ExternalProcessCountGrowth=100000"
+    )
+}
 
 & wsl.exe @systemdArguments
 $runExitCode = $LASTEXITCODE
@@ -144,6 +155,7 @@ $peakManagedMemoryBytes = if ($null -ne $summary) { $summary.PeakManagedMemoryBy
 [pscustomobject]@{
     Profile = $Profile
     DiagnosticsEnabled = -not $DisableDiagnostics
+    NormalTelemetryOnly = $NormalTelemetryOnly.IsPresent
     RequestedWorkstationGc = $UseWorkstationGarbageCollection.IsPresent
     SystemdExitCode = $runExitCode
     ArtifactDirectory = $localRunDirectory

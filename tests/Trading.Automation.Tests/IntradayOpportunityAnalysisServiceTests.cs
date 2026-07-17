@@ -149,6 +149,20 @@ public sealed class IntradayOpportunityAnalysisServiceTests
         }
     }
 
+    [Fact]
+    public async Task AnalyzeAsync_should_record_a_failed_ai_review_without_retaining_the_exception()
+    {
+        var metrics = new WorkerOperationMetrics();
+        var service = new IntradayOpportunityAnalysisService(new FakeReviewer("current request"), metrics);
+
+        var action = () => service.AnalyzeAsync(CreatePreparation("current request"));
+
+        await action.Should().ThrowAsync<NotSupportedException>();
+        metrics.Snapshot().RecentCheckpoints.Should().ContainSingle(checkpoint =>
+            checkpoint.Operation == "intraday-ai-review"
+            && checkpoint.Outcome == WorkerOperationOutcome.Failed);
+    }
+
     private static IntradayOpportunityPreparationDocument CreatePreparation(string renderedRequestText)
     {
         var requestedAtUtc = DateTimeOffset.Parse("2026-07-03T01:00:00Z");

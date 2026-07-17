@@ -74,16 +74,18 @@ public sealed class IntradayOpportunityAnalysisService : IIntradayOpportunityAna
                     $"Prepared evidence ID '{evidence.EvidenceId}' is duplicated in '{prepared.PreparedArtifact.Path}'.");
             }
 
-            var loadStopwatch = System.Diagnostics.Stopwatch.StartNew();
-            var data = await File.ReadAllBytesAsync(evidence.Artifact.Path, cancellationToken);
-            loadStopwatch.Stop();
-            using var process = System.Diagnostics.Process.GetCurrentProcess();
-            _operationMetrics.Record(
-                "intraday-evidence-load",
-                1,
-                data.Length,
-                loadStopwatch.Elapsed,
-                process.WorkingSet64);
+            var evidenceLoad = _operationMetrics.Begin("intraday-evidence-load", itemCount: 1);
+            byte[] data;
+            try
+            {
+                data = await File.ReadAllBytesAsync(evidence.Artifact.Path, cancellationToken);
+                evidenceLoad.Complete(data.Length);
+            }
+            catch
+            {
+                evidenceLoad.Fail();
+                throw;
+            }
             if (!string.Equals(
                     IntradayOpportunityPreparationWriter.ComputeSha256(data),
                     evidence.Sha256,
@@ -139,6 +141,17 @@ public sealed class IntradayOpportunityAnalysisService : IIntradayOpportunityAna
                 item.Data));
         }
 
-        return await _reviewer.ReviewAsync(prepared.Request, attachments, cancellationToken);
+        var review = _operationMetrics.Begin("intraday-ai-review", prepared.Request.Markets.Count);
+        try
+        {
+            var execution = await _reviewer.ReviewAsync(prepared.Request, attachments, cancellationToken);
+            review.Complete();
+            return execution;
+        }
+        catch
+        {
+            review.Fail();
+            throw;
+        }
     }
 }

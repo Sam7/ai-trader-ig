@@ -44,7 +44,14 @@ internal sealed class LinuxCgroupMemoryReader : IWorkerCgroupMemoryReader
                 ReadValue(events, "high"),
                 ReadValue(events, "max"),
                 ReadValue(events, "oom"),
-                ReadValue(events, "oom_kill"));
+                ReadValue(events, "oom_kill"))
+            {
+                SwapCurrentBytes = ReadLong(Path.Combine(path, "memory.swap.current")),
+                SwapPeakBytes = ReadLong(Path.Combine(path, "memory.swap.peak")),
+                MemoryStat = statistics,
+                MemoryEvents = events,
+                MemoryPressure = LinuxHostMemoryReader.TryReadPressure(Path.Combine(path, "memory.pressure")),
+            };
         }
         catch (IOException)
         {

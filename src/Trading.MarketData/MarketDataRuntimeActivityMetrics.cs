@@ -18,7 +18,11 @@ public sealed class MarketDataRuntimeActivityMetrics
     {
         lock (_sync)
         {
-            _snapshot = _snapshot with { SnapshotStartedCount = _snapshot.SnapshotStartedCount + 1 };
+            _snapshot = _snapshot with
+            {
+                SnapshotStartedCount = _snapshot.SnapshotStartedCount + 1,
+                ActiveSnapshotCount = _snapshot.ActiveSnapshotCount + 1,
+            };
         }
     }
 
@@ -31,6 +35,7 @@ public sealed class MarketDataRuntimeActivityMetrics
             {
                 SnapshotCompletedCount = _snapshot.SnapshotCompletedCount + 1,
                 LastSnapshotDuration = duration,
+                ActiveSnapshotCount = Math.Max(0, _snapshot.ActiveSnapshotCount - 1),
             };
         }
     }
@@ -44,6 +49,7 @@ public sealed class MarketDataRuntimeActivityMetrics
             {
                 SnapshotFailedCount = _snapshot.SnapshotFailedCount + 1,
                 LastSnapshotDuration = duration,
+                ActiveSnapshotCount = Math.Max(0, _snapshot.ActiveSnapshotCount - 1),
             };
         }
     }
@@ -52,7 +58,11 @@ public sealed class MarketDataRuntimeActivityMetrics
     {
         lock (_sync)
         {
-            _snapshot = _snapshot with { RecoveryStartedCount = _snapshot.RecoveryStartedCount + 1 };
+            _snapshot = _snapshot with
+            {
+                RecoveryStartedCount = _snapshot.RecoveryStartedCount + 1,
+                ActiveRecoveryCount = _snapshot.ActiveRecoveryCount + 1,
+            };
         }
     }
 
@@ -65,6 +75,7 @@ public sealed class MarketDataRuntimeActivityMetrics
             {
                 RecoveryCompletedCount = _snapshot.RecoveryCompletedCount + 1,
                 LastRecoveryDuration = duration,
+                ActiveRecoveryCount = Math.Max(0, _snapshot.ActiveRecoveryCount - 1),
             };
         }
     }
@@ -78,6 +89,7 @@ public sealed class MarketDataRuntimeActivityMetrics
             {
                 RecoveryFailedCount = _snapshot.RecoveryFailedCount + 1,
                 LastRecoveryDuration = duration,
+                ActiveRecoveryCount = Math.Max(0, _snapshot.ActiveRecoveryCount - 1),
             };
         }
     }
@@ -107,4 +119,9 @@ public sealed record MarketDataRuntimeActivitySnapshot(
     long RecoveryStartedCount,
     long RecoveryCompletedCount,
     long RecoveryFailedCount,
-    TimeSpan LastRecoveryDuration);
+    TimeSpan LastRecoveryDuration)
+{
+    public int ActiveSnapshotCount { get; init; }
+
+    public int ActiveRecoveryCount { get; init; }
+}

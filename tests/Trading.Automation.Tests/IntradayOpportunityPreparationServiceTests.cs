@@ -57,6 +57,7 @@ public sealed class IntradayOpportunityPreparationServiceTests
             0));
         var preparationStore = new FakePreparationStore();
         var analysis = new FakeAnalysisService();
+        var operationMetrics = new WorkerOperationMetrics();
         var service = new IntradayOpportunityPreparationService(
             tradingDayStore,
             priceSource,
@@ -75,7 +76,7 @@ public sealed class IntradayOpportunityPreparationServiceTests
                     },
                 ],
             }),
-            new WorkerOperationMetrics(),
+            operationMetrics,
             NullLogger<IntradayOpportunityPreparationService>.Instance);
 
         var document = await service.PrepareAsync(tradingDate, requestedAtUtc);
@@ -89,6 +90,10 @@ public sealed class IntradayOpportunityPreparationServiceTests
         preparationStore.CapturedRun.Markets[0].Evidence.Should().ContainSingle();
         preparationStore.CapturedRun.Markets[0].Evidence[0].RecipeId.Should().Be("price-chart-ohlc-compressed");
         priceSource.RequestedInstrument.Should().Be(instrument);
+        operationMetrics.Snapshot().RecentCheckpoints.Should().Contain(checkpoint =>
+            checkpoint.Operation == "intraday-chart-render"
+            && checkpoint.Outcome == WorkerOperationOutcome.Completed
+            && checkpoint.PayloadBytes == 3);
     }
 
     private sealed class FakePriceSeriesSource(CachedPriceSeriesResult result) : IIntradayPriceSeriesSource

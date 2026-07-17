@@ -25,6 +25,12 @@ public sealed class WorkerDiagnosticsOptions
 
     public string GcsPrefix { get; init; } = "market-data/diagnostics";
 
+    public TimeSpan ArtifactUploadInterval { get; init; } = TimeSpan.FromMinutes(5);
+
+    public TimeSpan ArtifactUploadTimeout { get; init; } = TimeSpan.FromSeconds(30);
+
+    public WorkerDiagnosticsPressureOptions Pressure { get; init; } = new();
+
     public WorkerDiagnosticsContainmentOptions Containment { get; init; } = new();
 
     public void Validate()
@@ -64,7 +70,53 @@ public sealed class WorkerDiagnosticsOptions
             throw new InvalidOperationException("Worker diagnostics GCS prefix is required when upload is enabled.");
         }
 
+        if (ArtifactUploadInterval <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("Worker diagnostics artifact upload interval must be greater than zero.");
+        }
+
+        if (ArtifactUploadTimeout <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("Worker diagnostics artifact upload timeout must be greater than zero.");
+        }
+
+        Pressure.Validate();
         Containment.Validate();
+    }
+}
+
+/// <summary>Controls adaptive evidence collection; it never restarts or constrains the worker.</summary>
+public sealed class WorkerDiagnosticsPressureOptions
+{
+    public long WorkerCgroupWarningBytes { get; init; } = 256L * 1024 * 1024;
+
+    public long HostAvailableWarningBytes { get; init; } = 256L * 1024 * 1024;
+
+    public int ExternalProcessCountGrowth { get; init; } = 8;
+
+    public TimeSpan Cooldown { get; init; } = TimeSpan.FromMinutes(5);
+
+    public void Validate()
+    {
+        if (WorkerCgroupWarningBytes <= 0)
+        {
+            throw new InvalidOperationException("Worker diagnostics cgroup pressure threshold must be greater than zero.");
+        }
+
+        if (HostAvailableWarningBytes <= 0)
+        {
+            throw new InvalidOperationException("Worker diagnostics host-available pressure threshold must be greater than zero.");
+        }
+
+        if (ExternalProcessCountGrowth <= 0)
+        {
+            throw new InvalidOperationException("Worker diagnostics external process growth threshold must be greater than zero.");
+        }
+
+        if (Cooldown < TimeSpan.Zero)
+        {
+            throw new InvalidOperationException("Worker diagnostics pressure cooldown cannot be negative.");
+        }
     }
 }
 

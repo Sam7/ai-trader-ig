@@ -136,12 +136,23 @@ public sealed class IntradayOpportunityPreparationService : IIntradayOpportunity
         IntradayOpportunityScanOptions options,
         CancellationToken cancellationToken)
     {
-        var cachedSeries = await _priceSeriesSource.GetSeriesAsync(
-            market.Instrument,
-            requestedAtUtc,
-            options.ChartLookbackHours,
-            options.ChartResolution,
-            cancellationToken);
+        var priceLoad = _operationMetrics.Begin("intraday-price-load", itemCount: 1);
+        CachedPriceSeriesResult cachedSeries;
+        try
+        {
+            cachedSeries = await _priceSeriesSource.GetSeriesAsync(
+                market.Instrument,
+                requestedAtUtc,
+                options.ChartLookbackHours,
+                options.ChartResolution,
+                cancellationToken);
+            priceLoad.Complete();
+        }
+        catch
+        {
+            priceLoad.Fail();
+            throw;
+        }
         var series = cachedSeries.Series;
 
         if (series.Bars.Count == 0)
@@ -165,16 +176,18 @@ public sealed class IntradayOpportunityPreparationService : IIntradayOpportunity
         var currentBid = latestBar.BidClose;
         var currentAsk = latestBar.AskClose;
         var instrumentName = ResolveInstrumentName(market.Instrument);
-        var chartStopwatch = System.Diagnostics.Stopwatch.StartNew();
-        var chart = _priceChartRenderer.RenderPng(series, PriceChartStyle.Ohlc, PriceGapMode.Compress);
-        chartStopwatch.Stop();
-        using var process = System.Diagnostics.Process.GetCurrentProcess();
-        _operationMetrics.Record(
-            "intraday-chart-preparation",
-            series.Bars.Count,
-            chart.Length,
-            chartStopwatch.Elapsed,
-            process.WorkingSet64);
+        var chartOperation = _operationMetrics.Begin("intraday-chart-render", series.Bars.Count);
+        byte[] chart;
+        try
+        {
+            chart = _priceChartRenderer.RenderPng(series, PriceChartStyle.Ohlc, PriceGapMode.Compress);
+            chartOperation.Complete(chart.Length);
+        }
+        catch
+        {
+            chartOperation.Fail();
+            throw;
+        }
         return new PreparedIntradayMarket(
             market.Instrument,
             instrumentName,

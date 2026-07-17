@@ -16,11 +16,18 @@ public static class WorkerDiagnosticsServiceCollectionExtensions
     {
         services.AddOptions<WorkerDiagnosticsOptions>()
             .Bind(configuration.GetSection(WorkerDiagnosticsOptions.SectionName));
+        services.AddOptions<MarketDataOptions>();
         services.TryAddSingleton<WorkerOperationMetrics>();
         services.TryAddSingleton<MarketDataStreamPipelineMetrics>();
         services.TryAddSingleton<MarketDataRuntimeActivityMetrics>();
+        services.TryAddSingleton<ILinuxProcessMemoryReader, LinuxProcessMemoryReader>();
         services.TryAddSingleton<IWorkerProcessMemoryProbe, CurrentProcessMemoryProbe>();
         services.TryAddSingleton<IWorkerCgroupMemoryReader, LinuxCgroupMemoryReader>();
+        services.TryAddSingleton<IWorkerHostMemoryProbe, LinuxHostMemoryProbe>();
+        services.TryAddSingleton<IWorkerSqliteRuntimeMetricsProbe>(sp => new WorkerSqliteRuntimeMetricsProbe(
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<MarketDataOptions>>().Value));
+        services.TryAddSingleton<IWorkerForensicArtifactCapture>(sp => new LinuxWorkerForensicArtifactCapture(
+            sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<WorkerDiagnosticsOptions>>().Value));
         services.TryAddSingleton<IWorkerDiagnosticsSampler, WorkerDiagnosticsSampler>();
         services.TryAddSingleton<IWorkerProcessTerminator, EnvironmentWorkerProcessTerminator>();
         services.TryAddSingleton(sp => new RollingWorkerTraceStore(
@@ -30,7 +37,8 @@ public static class WorkerDiagnosticsServiceCollectionExtensions
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<WorkerDiagnosticsOptions>>().Value,
             sp.GetRequiredService<IWorkerDiagnosticsSampler>(),
             sp.GetRequiredService<RollingWorkerTraceStore>(),
-            sp.GetRequiredService<IWorkerProcessTerminator>()));
+            sp.GetRequiredService<IWorkerProcessTerminator>(),
+            sp.GetRequiredService<IWorkerForensicArtifactCapture>()));
         services.TryAddSingleton<IWorkerDiagnosticsArtifactUploader, NoOpWorkerDiagnosticsArtifactUploader>();
         services.AddHostedService<WorkerDiagnosticsHostedService>();
         return services;

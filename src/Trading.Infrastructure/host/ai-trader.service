@@ -35,6 +35,9 @@ Environment=MarketData__StreamIngestion__FlushInterval=00:00:01
 Environment=MarketData__StreamIngestion__DrainTimeout=00:00:10
 Environment=MarketData__StreamIngestion__HealthUpdateThrottle=00:00:30
 Environment=AI__Prompts__ObservabilityRootPath=/var/lib/ai-trader/observability
+Environment=Automation__Enabled=false
+Environment=Automation__IntradayOpportunities__Enabled=false
+Environment=Automation__Execution__Mode=Disabled
 Environment=WorkerHealth__Enabled=true
 Environment=WorkerHealth__Interval=00:01:00
 Environment=WorkerHealth__LocalDirectory=/var/lib/ai-trader/health
@@ -50,7 +53,7 @@ Environment=WorkerDiagnostics__SampleInterval=00:00:05
 Environment=WorkerDiagnostics__FlushInterval=00:00:30
 Environment=WorkerDiagnostics__LocalDirectory=/var/lib/ai-trader/diagnostics
 Environment=WorkerDiagnostics__SegmentMaximumBytes=8388608
-Environment=WorkerDiagnostics__RetentionMaximumBytes=25165824
+Environment=WorkerDiagnostics__RetentionMaximumBytes=268435456
 Environment=WorkerDiagnostics__UploadClosedSegments=true
 Environment=WorkerDiagnostics__GcsPrefix=market-data/diagnostics
 Environment=WorkerDiagnostics__Containment__Enabled=false

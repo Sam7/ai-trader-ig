@@ -13,6 +13,20 @@ using Trading.Automation.Scheduling;
 public sealed class ScheduleInitializerTests
 {
     [Fact]
+    public async Task DailyBriefingStartAsync_ShouldNotRegisterWhenAutomationIsDisabled()
+    {
+        var manager = FakeCronTickerManager.Succeeding();
+        var initializer = new DailyBriefingScheduleInitializer(
+            manager,
+            Options.Create(new AutomationOptions { Enabled = false }),
+            NullLogger<DailyBriefingScheduleInitializer>.Instance);
+
+        await initializer.StartAsync(CancellationToken.None);
+
+        manager.Added.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task DailyBriefingStartAsync_ShouldRegisterConfiguredCron()
     {
         var manager = FakeCronTickerManager.Succeeding();
@@ -72,6 +86,24 @@ public sealed class ScheduleInitializerTests
         var ticker = manager.Added.Should().ContainSingle().Subject;
         ticker.Function.Should().Be(IntradayOpportunityConstants.JobName);
         ticker.Expression.Should().Be("0 */5 * * * *");
+    }
+
+    [Fact]
+    public async Task IntradayOpportunityStartAsync_ShouldNotRegisterWhenAutomationIsDisabled()
+    {
+        var manager = FakeCronTickerManager.Succeeding();
+        var initializer = new IntradayOpportunityScheduleInitializer(
+            manager,
+            Options.Create(new AutomationOptions
+            {
+                Enabled = false,
+                IntradayOpportunities = new IntradayOpportunityScanOptions { Enabled = true },
+            }),
+            NullLogger<IntradayOpportunityScheduleInitializer>.Instance);
+
+        await initializer.StartAsync(CancellationToken.None);
+
+        manager.Added.Should().BeEmpty();
     }
 
     [Fact]

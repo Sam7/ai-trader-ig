@@ -66,7 +66,9 @@ internal sealed class GcsWorkerDiagnosticsArtifactUploader : IWorkerDiagnosticsA
                 var artifact = new FileInfo(artifactPath);
                 var kind = artifact.Name.StartsWith("exit-", StringComparison.Ordinal)
                     ? "exit-evidence"
-                    : "trace";
+                    : artifact.Name.StartsWith("forensic-", StringComparison.Ordinal)
+                        ? "forensic"
+                        : "trace";
                 await _objectStore.UploadAsync(
                     _marketData.CloudSnapshot.BucketName,
                     BuildObjectName(artifact),
@@ -77,7 +79,9 @@ internal sealed class GcsWorkerDiagnosticsArtifactUploader : IWorkerDiagnosticsA
                         ["created-at-utc"] = artifact.LastWriteTimeUtc.ToString("O", CultureInfo.InvariantCulture),
                         ["size-bytes"] = artifact.Length.ToString(CultureInfo.InvariantCulture),
                     },
-                    kind == "trace" ? "application/x-ndjson" : "application/json",
+                    kind == "trace" ? "application/x-ndjson"
+                    : kind == "forensic" ? "application/gzip"
+                    : "application/json",
                     cancellationToken).ConfigureAwait(false);
                 uploaded.Add(artifact.FullName);
             }

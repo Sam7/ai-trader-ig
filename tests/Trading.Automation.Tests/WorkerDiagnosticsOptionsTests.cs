@@ -75,4 +75,18 @@ public sealed class WorkerDiagnosticsOptionsTests
         action.Should().Throw<InvalidOperationException>()
             .WithMessage("*GCS prefix*");
     }
+
+    [Fact]
+    public void Validate_should_require_a_positive_artifact_upload_timeout()
+    {
+        var options = new WorkerDiagnosticsOptions
+        {
+            ArtifactUploadTimeout = TimeSpan.Zero,
+        };
+
+        var action = options.Validate;
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*upload timeout*");
+    }
 }

@@ -70,6 +70,13 @@ Build a small, clean, test-first trading solution with an isolated IG SDK and a 
 - Handle network and broker failures explicitly.
 - Translate broker errors into clear application-level outcomes.
 
+## Communication and execution-status rules
+
+- Every progress update must clearly distinguish: completed, currently running, not started, blocked, and next.
+- Never imply that a test, deployment, or rollout has happened unless its live command/process and result have been verified.
+- For long-running work, state who starts it, the exact command or entry point, where output is written, the expected duration, and the pass/fail criteria.
+- End operational updates with explicit user action required, if any.
+
 ## Review workflow
 
 - Include documentation impact in every implementation plan. Update the root `README.md`, project-level README files, or files under `docs/` when a change makes existing documentation stale or when documenting the change would materially improve developer understanding. Skip documentation edits for trivial or internal-only changes where the docs remain accurate.

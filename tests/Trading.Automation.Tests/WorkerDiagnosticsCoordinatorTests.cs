@@ -48,6 +48,28 @@ public sealed class WorkerDiagnosticsCoordinatorTests : IAsyncDisposable
         traces.GetUploadCandidates().Should().ContainSingle();
     }
 
+    [Fact]
+    public async Task ObserveSentryAsync_should_flush_and_capture_each_pressure_threshold_once()
+    {
+        var options = CreateOptions(containmentEnabled: false);
+        await using var traces = new RollingWorkerTraceStore(options, "test-worker");
+        var capture = new RecordingForensicCapture();
+        var coordinator = new WorkerDiagnosticsCoordinator(
+            options,
+            new StubSampler(
+                new WorkerDiagnosticsSentrySample(DateTimeOffset.UtcNow, 100, 256L * 1024 * 1024, 0, 0, 0, 0),
+                CreateSnapshot() with { Cgroup = new CgroupMemorySnapshot(256L * 1024 * 1024, null, null, null, null, null, 0, 0, 0, 0) }),
+            traces,
+            new RecordingTerminator(),
+            capture);
+
+        await coordinator.ObserveSentryAsync();
+        await coordinator.ObserveSentryAsync();
+
+        capture.Thresholds.Should().Equal(256L * 1024 * 1024);
+        coordinator.IsPressureMode.Should().BeTrue();
+    }
+
     public ValueTask DisposeAsync()
     {
         if (Directory.Exists(_root))
@@ -100,5 +122,16 @@ public sealed class WorkerDiagnosticsCoordinatorTests : IAsyncDisposable
         public List<int> ExitCodes { get; } = [];
 
         public void Exit(int exitCode) => ExitCodes.Add(exitCode);
+    }
+
+    private sealed class RecordingForensicCapture : IWorkerForensicArtifactCapture
+    {
+        public List<long> Thresholds { get; } = [];
+
+        public Task CaptureAsync(WorkerDiagnosticSnapshot snapshot, long thresholdBytes, CancellationToken cancellationToken = default)
+        {
+            Thresholds.Add(thresholdBytes);
+            return Task.CompletedTask;
+        }
     }
 }

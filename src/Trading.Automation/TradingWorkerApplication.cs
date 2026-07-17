@@ -25,6 +25,8 @@ public static class TradingWorkerApplication
         TrackedMarketsConfiguration.AddConfiguredTrackedMarketsFile(builder.Configuration);
         TrackedMarketsConfiguration.ApplyTrackedMarketsOverride(builder.Configuration, trackedMarketInstrumentFilter ?? []);
         builder.Configuration.AddUserSecrets(typeof(TradingWorkerApplication).Assembly, optional: true);
+        // Keep deploy-time environment overrides authoritative over optional local/user settings.
+        builder.Configuration.AddEnvironmentVariables();
         PromptObservabilityConfiguration.ApplyRootOverride(builder.Configuration, observabilityRootPath);
 
         builder.Host.UseSerilog((context, services, loggerConfiguration) =>
