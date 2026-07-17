@@ -116,6 +116,19 @@ pwsh -File tools/analyze-worker-memory-incident.ps1 `
 
 It writes `timeline.csv`, `summary.json`, `REPORT.md`, and `sources.sha256`. Classification is deliberately conservative: managed retention/churn, native/runtime, file/cache, threading, SQLite, and external-host-pressure are selected only when their evidence dominates. A report is conclusive only when at least 95% of material worker growth is reconciled; otherwise it says `Inconclusive` rather than choosing a root cause.
 
+## Production history notebook
+
+`notebooks/production_worker_memory_analysis.ipynb` reads all retained worker JSONL segments from the durable GCS diagnostics prefix by default. It also supports the current VM active files and local artifact directories. The first code cell controls the analysis window:
+
+```python
+DATA_SOURCE = 'gcs'
+LOOKBACK_HOURS = None  # None = all retained history; use 48 for two days.
+MAX_FILES = None       # None = every matching worker segment.
+MAX_TOTAL_BYTES = None # None = no artificial byte cap.
+```
+
+The notebook writes a combined `memory.csv`, `summary.json`, and `source-manifest.json`. It deduplicates overlapping local snapshots, preserves process/segment boundaries, and fails explicitly when a configured cap would exclude data. GCS is preferred for long windows because VM `.active` files are point-in-time copies and may disappear after restart.
+
 ## Local synthetic memory lab
 
 The local tool uses the production diagnostics module inside a Linux cgroup-v2 scope. It is the safe way to increase allocation pressure without adding IG subscriptions, historical requests, or automation activity.
