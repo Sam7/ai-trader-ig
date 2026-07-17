@@ -156,6 +156,21 @@ The first warmed WSL2/systemd-cgroup calibration on 2026-07-14 was intentionally
 
 The idle comparison puts the observed diagnostics increment at about 3.3 MiB peak cgroup memory and 7.6 MiB peak working set in this local environment. Repeat it after meaningful diagnostic changes; do not assume the number is transferable to the VM.
 
+### Telemetry overhead acceptance gate
+
+For three warmed diagnostics-off/diagnostics-on comparisons, accept the normal
+telemetry path only when all of these hold:
+
+- steady cgroup overhead is no more than 8 MiB;
+- average CPU delta is no more than 2 percentage points (diagnostics on minus
+  diagnostics off, measured over the same workload);
+- baseline diagnostic writes are below 2 KiB/s; and
+- workload throughput has no material regression.
+
+The CPU limit is an incremental diagnostics budget, not a limit on the worker's
+total CPU usage. Threshold-triggered forensic captures and any separately
+guarded dump are measured outside this steady-state gate.
+
 For a bounded, read-only ingestion profile against the IG demo environment, use
 `tools/run-live-ig-stream-memory.ps1`. It requires the ignored local
 `appsettings.json` to point at `https://demo-api.ig.com/gateway/deal`, runs the
