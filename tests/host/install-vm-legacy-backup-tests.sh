@@ -16,6 +16,11 @@ mkdir -p "$(dirname "$legacy_cron")" "$(dirname "$legacy_script")"
 printf '%s\n' '*/5 * * * * ai-trader /opt/ai-trader/bin/backup-db.sh' > "$legacy_cron"
 printf '%s\n' '#!/usr/bin/env bash' > "$legacy_script"
 
+# Package-manager races on fresh images must wait for unattended-upgrades
+# rather than aborting an otherwise valid deployment.
+grep -q 'apt-get -o DPkg::Lock::Timeout=300 update' "$installer"
+grep -q 'apt-get -o DPkg::Lock::Timeout=300 install' "$installer"
+
 # The installer is sourced so this test exercises only the legacy-removal path;
 # it never invokes apt, systemd, or any production filesystem path.
 source "$installer"

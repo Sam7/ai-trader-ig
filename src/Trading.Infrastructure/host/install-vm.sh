@@ -109,8 +109,10 @@ main() {
     export DEBIAN_FRONTEND=noninteractive
     export CLOUDSDK_SKIP_PY_COMPILATION=1
 
-    apt-get update
-    apt-get install -y ca-certificates gzip sqlite3 tar
+    # The base image may be running unattended-upgrades. Let apt wait for its
+    # dpkg lock instead of failing a deployment during an otherwise safe race.
+    apt-get -o DPkg::Lock::Timeout=300 update
+    apt-get -o DPkg::Lock::Timeout=300 install -y ca-certificates gzip sqlite3 tar
 
     if ! id -u ai-trader >/dev/null 2>&1; then
         useradd --system --home-dir "$DATA_DIR" --create-home --shell /usr/sbin/nologin ai-trader
