@@ -39,6 +39,27 @@ public sealed class MarketDataRecoveryCoordinatorTests
         (await store.GetCoverageAsync(target.Instrument, PriceResolution.FiveMinutes, now.AddDays(-14), now)).Should().ContainSingle(x => x.Status == MarketDataCoverageStatus.NoBars);
     }
 
+    [Fact]
+    public async Task RecoverOnceAsync_WhenAllowanceFails_PersistsAnEstimatedOneHourExpiry()
+    {
+        var now = DateTimeOffset.Parse("2026-07-13T00:00:00Z");
+        var store = new InMemoryMarketDataStore();
+        var gateway = new RecoveryGateway(_ => throw new TradingGatewayException(
+            TradingErrorCode.BrokerError,
+            "IG API error: error.public-api.exceeded-account-historical-data-allowance."));
+        var service = Create(store, gateway, now);
+        var target = new MarketDataRecoveryTarget(new InstrumentId("GOLD"), 1);
+
+        var result = await service.RecoverOnceAsync([target], PriceResolution.FiveMinutes);
+
+        result.BlockedRanges.Should().ContainSingle();
+        result.RemainingAllowance.Should().Be(0);
+        result.AllowanceExpiresAtUtc.Should().Be(now.AddHours(1));
+        (await store.GetRecoveryStatesAsync()).Should().ContainSingle(state =>
+            state.AllowanceExpiresAtUtc == now.AddHours(1)
+            && state.LastFailure!.Contains("allowance", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static MarketDataRecoveryCoordinator Create(InMemoryMarketDataStore store, RecoveryGateway gateway, DateTimeOffset now)
         => new(store, store, gateway, new FixedMarketDataClock(now), new MarketDataRecoveryOptions(), NullLogger<MarketDataRecoveryCoordinator>.Instance);
 

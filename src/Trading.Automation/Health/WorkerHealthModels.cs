@@ -59,7 +59,10 @@ public sealed record MarketDataRecoveryHealth(
     int BlockedRanges,
     int? RemainingAllowance,
     DateTimeOffset? AllowanceExpiresAtUtc,
-    string? ActiveInstrument);
+    string? ActiveInstrument)
+{
+    public bool AllowanceExpiryEstimated { get; init; }
+}
 
 public sealed record MarketDataInstrumentHealth(
     string Instrument,

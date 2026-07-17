@@ -36,6 +36,7 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
     private readonly SlackAlertService _slackAlertService;
     private readonly ILogger<WorkerHealthReporterHostedService> _logger;
     private int _criticalSamples;
+    private bool _degradedAlertSent;
 
     public WorkerHealthReporterHostedService(
         IOptions<WorkerHealthOptions> options,
@@ -162,7 +163,6 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         }
 
         var recovery = await _recoveryStore.GetRecoveryStatesAsync(cancellationToken).ConfigureAwait(false);
-        var active = recovery.FirstOrDefault(x => !x.IsComplete);
         return new MarketDataHealthSummary(
             instruments
                 .Select(instrument => instrument.LatestFinalBarUtc)
@@ -172,12 +172,7 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
             stream.LastReceivedUpdateUtc,
             stream.LastPersistedUpdateUtc,
             instruments,
-            new MarketDataRecoveryHealth(
-                recovery.Count(x => !x.IsComplete),
-                recovery.Count(x => !x.IsComplete && x.AllowanceExpiresAtUtc > DateTimeOffset.UtcNow),
-                active?.RemainingAllowance,
-                active?.AllowanceExpiresAtUtc,
-                active?.Instrument.Value));
+            BuildRecoveryHealth(recovery, DateTimeOffset.UtcNow));
     }
 
     private WorkerHealthStatus ResolveStatus(
@@ -223,7 +218,7 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         if (marketData.Recovery?.BlockedRanges > 0)
         {
             status = Max(status, WorkerHealthStatus.Warning);
-            reasons.Add($"Historical recovery is blocked by IG allowance until {marketData.Recovery.AllowanceExpiresAtUtc:O}.");
+            reasons.Add(FormatAllowanceReason(marketData.Recovery));
         }
 
         return status;
@@ -274,18 +269,35 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         if (snapshot.Status == WorkerHealthStatus.Healthy)
         {
             _criticalSamples = 0;
+            if (_degradedAlertSent)
+            {
+                var recovered = await _slackAlertService.SendStateChangeAsync(
+                    "worker-health",
+                    "healthy",
+                    WorkerAlertSeverity.Warning,
+                    "AI Trader worker health recovered",
+                    "Worker health returned to healthy.",
+                    cancellationToken).ConfigureAwait(false);
+                if (recovered)
+                {
+                    _degradedAlertSent = false;
+                }
+            }
+
             return;
         }
 
         var severity = snapshot.Status == WorkerHealthStatus.Critical
             ? WorkerAlertSeverity.Critical
             : WorkerAlertSeverity.Warning;
-        await _slackAlertService.SendAsync(
-            $"worker-health-{snapshot.Status}",
+        var delivered = await _slackAlertService.SendStateChangeAsync(
+            "worker-health",
+            WorkerHealthAlertFingerprint.Create(snapshot.Status, snapshot.Reasons),
             severity,
             "AI Trader worker health degraded",
             string.Join('\n', snapshot.Reasons),
             cancellationToken).ConfigureAwait(false);
+        _degradedAlertSent |= delivered;
 
         var memory = WorkerMemoryPolicy.Assess(
             snapshot.Process.WorkingSetBytes,
@@ -326,6 +338,49 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         {
             return 0;
         }
+    }
+
+    internal static string FormatAllowanceReason(MarketDataRecoveryHealth recovery)
+    {
+        ArgumentNullException.ThrowIfNull(recovery);
+
+        if (recovery.AllowanceExpiresAtUtc is not { } expiry)
+        {
+            return "Historical recovery is blocked by IG allowance; IG did not provide a reset time.";
+        }
+
+        var estimate = recovery.AllowanceExpiryEstimated ? "approximately " : string.Empty;
+        var suffix = recovery.AllowanceExpiryEstimated
+            ? " (estimated; IG did not provide a reset time)."
+            : ".";
+        return $"Historical recovery is blocked by IG allowance until {estimate}{expiry:O}{suffix}";
+    }
+
+    internal static MarketDataRecoveryHealth BuildRecoveryHealth(
+        IReadOnlyList<MarketDataRecoveryState> recovery,
+        DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(recovery);
+
+        var pending = recovery.Where(x => !x.IsComplete).ToArray();
+        var blocked = pending
+            .Where(x => x.AllowanceExpiresAtUtc is { } expiry && expiry > now)
+            .OrderBy(x => x.AllowanceExpiresAtUtc)
+            .ThenBy(x => x.Instrument.Value, StringComparer.Ordinal)
+            .ThenBy(x => x.FromUtc)
+            .ToArray();
+        var active = blocked.FirstOrDefault() ?? pending.FirstOrDefault();
+
+        return new MarketDataRecoveryHealth(
+            pending.Length,
+            blocked.Length,
+            active?.RemainingAllowance,
+            active?.AllowanceExpiresAtUtc,
+            active?.Instrument.Value)
+        {
+            AllowanceExpiryEstimated = active is not null
+                && active.LastFailure?.Contains("allowance", StringComparison.OrdinalIgnoreCase) == true,
+        };
     }
 
     private static void TryDelete(string path)

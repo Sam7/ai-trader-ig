@@ -34,6 +34,32 @@ public sealed class SlackAlertServiceTests
         handler.RequestBodies[0].Should().NotContain(webhookUrl);
     }
 
+    [Fact]
+    public async Task SendStateChangeAsync_ShouldPostOnlyWhenTheFingerprintChanges()
+    {
+        var handler = new RecordingHandler();
+        var service = new SlackAlertService(
+            new HttpClient(handler),
+            Options.Create(new AlertingOptions
+            {
+                Slack = new SlackAlertOptions
+                {
+                    Enabled = true,
+                    WebhookUrl = "https://hooks.slack.test/services/secret",
+                    StartupSuppressionWindow = TimeSpan.Zero,
+                },
+            }),
+            NullLogger<SlackAlertService>.Instance);
+
+        (await service.SendStateChangeAsync("worker-health", "warning:allowance", WorkerAlertSeverity.Warning, "Degraded", "Allowance blocked.")).Should().BeTrue();
+        (await service.SendStateChangeAsync("worker-health", "warning:allowance", WorkerAlertSeverity.Warning, "Degraded", "Allowance still blocked.")).Should().BeFalse();
+        (await service.SendStateChangeAsync("worker-health", "healthy", WorkerAlertSeverity.Warning, "Recovered", "Worker is healthy.")).Should().BeTrue();
+
+        handler.RequestBodies.Should().HaveCount(2);
+        handler.RequestBodies[0].Should().Contain("Allowance blocked.");
+        handler.RequestBodies[1].Should().Contain("Worker is healthy.");
+    }
+
     private sealed class RecordingHandler : HttpMessageHandler
     {
         public List<string> RequestBodies { get; } = [];

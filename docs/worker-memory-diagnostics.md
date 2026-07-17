@@ -77,6 +77,12 @@ Alerting__Slack__Enabled=true
 
 `appsettings.example.json` shows the same schema for local use. The current production setting intentionally leaves `Containment.Enabled=false`. Existing `WorkerHealth` and Slack health reporting remain separate, slower health evidence; they are not the primary sudden-spike detector.
 
+Health Slack notifications are state-transition alerts: an unchanged warning is
+sent once, a different warning category or severity can send a new alert, and a
+return to `Healthy` sends one recovery notification. The transition state is
+in-memory and resets after a worker restart; the Slack cooldown remains for
+non-health alerts such as fail-fast notifications.
+
 During the collection-only production phase, market-data streaming, historical recovery, snapshots, health reporting, diagnostics, and Slack health alerts remain enabled. Daily briefing, intraday chart/AI scheduling, and execution are disabled by the systemd environment overrides above.
 
 To inspect a production incident after the next restart:
@@ -200,6 +206,15 @@ The live-stream analyzer writes `analysis.json`, `timeline.csv`,
 `sources.sha256`, and `REPORT.md`. Its conclusion is intentionally limited to
 the Windows RSS/private-memory and SQLite-file evidence collected by that
 runner; it does not replace the Linux-cgroup attribution lab.
+
+For production VM diagnostics, use
+`notebooks/production_worker_memory_analysis.ipynb`. Its download cell discovers
+the newest active JSONL segment under `/var/lib/ai-trader/diagnostics` through
+read-only `gcloud compute ssh`, then derives `memory.csv` and `summary.json`
+before plotting RSS, PSS, managed, cgroup-category, pressure, and operation
+signals. The notebook requires an authenticated local `gcloud` CLI; it does not
+read command lines, environments, credentials, prompts, broker payloads, or raw
+market data.
 
 The implementation validation also forced containment at a deliberately low local threshold: it exited with status `75` after three sentry samples, left an active trace, and the next normal process recovered that trace into closed JSONL. A transient systemd service with the installed `ExecStopPost` command then exited with `75` and produced a valid local exit-evidence JSON artifact. Neither validation enables production containment.
 
