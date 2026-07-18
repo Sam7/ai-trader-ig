@@ -29,6 +29,7 @@ public static class IgMarketDataStreamMapper
     private static PriceResolution FromIgChartScale(string scale)
         => scale switch
         {
+            "1MINUTE" => PriceResolution.Minute,
             "5MINUTE" => PriceResolution.FiveMinutes,
             _ => throw new ArgumentOutOfRangeException(nameof(scale), scale, "Unsupported IG chart streaming scale."),
         };

@@ -9,6 +9,9 @@ using Trading.IG.DependencyInjection;
 
 var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddJsonFile("appsettings.local.json", optional: true, reloadOnChange: false);
+// Re-apply environment variables after the optional local file so bounded local
+// runs can override ignored machine-local paths without changing that file.
+builder.Configuration.AddEnvironmentVariables();
 TrackedMarketsConfiguration.AddConfiguredTrackedMarketsFile(builder.Configuration);
 builder.Configuration.AddUserSecrets<Program>(optional: true);
 
