@@ -37,6 +37,42 @@ public sealed class ScottPlotPriceChartRendererTests
     }
 
     [Fact]
+    public void RenderPng_WithCompressedIndicatorsAndGappedBars_ShouldReturnPngBytes()
+    {
+        var resolution = TimeSpan.FromMinutes(10);
+        var bars = Enumerable.Range(0, 576)
+            .Select(index =>
+            {
+                var open = 20m + (index % 200) * 0.05m;
+                var timestamp = DateTimeOffset.Parse("2026-03-11T00:00:00Z")
+                    .AddTicks((resolution.Ticks * index) + (index / 97 * resolution.Ticks * 3));
+                return new PriceBar(
+                    timestamp,
+                    open,
+                    open + 2m,
+                    open - 1m,
+                    open + 1m,
+                    open + 0.2m,
+                    open + 2.2m,
+                    open - 0.8m,
+                    open + 1.2m,
+                    100 + index);
+            })
+            .ToArray();
+        var series = new PriceSeries(new InstrumentId("GAPPED"), PriceResolution.TenMinutes, bars);
+
+        var action = () => _renderer.RenderPng(
+            series,
+            PriceChartStyle.Ohlc,
+            PriceGapMode.Compress,
+            [20, 50, 100],
+            width: 800,
+            height: 600);
+
+        action.Should().NotThrow();
+    }
+
+    [Fact]
     public void RenderPng_WithEmptySeries_ShouldThrow()
     {
         var series = new PriceSeries(new InstrumentId("CC.D.VIX.UMA.IP"), PriceResolution.Minute, []);
@@ -124,6 +160,20 @@ public sealed class ScottPlotPriceChartRendererTests
         var xs = ScottPlotPriceChartRenderer.ResolveIndicatorXPositions(sma.Dates, ohlcs, PriceGapMode.Compress);
 
         xs.Should().Equal(expected);
+    }
+
+    [Fact]
+    public void ResolveIndicatorXPositions_WithDuplicateDateCoordinates_ShouldUseFirstSequentialPosition()
+    {
+        var bars = CreateBars(2, PriceResolution.Hour, TimeSpan.FromHours(1));
+        var ohlcs = ScottPlotPriceChartRenderer.CreateOhlcs(
+            [bars[0], bars[0], bars[1]],
+            TimeSpan.FromHours(1));
+        var dates = new[] { ohlcs[0].DateTime.ToOADate() };
+
+        var xs = ScottPlotPriceChartRenderer.ResolveIndicatorXPositions(dates, ohlcs, PriceGapMode.Compress);
+
+        xs.Should().Equal(0d);
     }
 
     [Fact]

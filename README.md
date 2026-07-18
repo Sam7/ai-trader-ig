@@ -11,6 +11,7 @@ If this is your first time in the repository:
 3. Use [docs/cli-use.md](docs/cli-use.md) as the command reference.
 4. Read [src/Ig.Trading.Sdk/README.md](src/Ig.Trading.Sdk/README.md) when changing the standalone IG SDK.
 5. Treat files under `specs/plans/` as planning and roadmap context; confirm implemented behavior against the architecture guide and current code.
+6. Check [the worker memory experiment log](docs/worker-memory-experiment-log.md) for current issues, investigations, findings, rejected assumptions, and next experiments.
 
 ---
 
@@ -93,6 +94,10 @@ The solution strictly enforces separation of concerns to keep the business logic
 * **`Trading.Infrastructure`**: Pulumi IaC definitions for GCP deployment.
 
 The canonical and more detailed architecture guide is [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). It includes the real project-reference direction, composition roots, end-to-end flows, persistence and evidence rules, testing ownership, and guidance for adding strategies, prompts, chart recipes, or market-specific experts.
+
+### Current issues and investigations
+
+The active worker out-of-memory investigation is maintained in [docs/worker-memory-experiment-log.md](docs/worker-memory-experiment-log.md). It is the starting point for experiment results and current working conclusions; the linked diagnostics guides contain the procedures and raw artifact locations.
 
 ---
 

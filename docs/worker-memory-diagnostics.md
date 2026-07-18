@@ -4,6 +4,10 @@ This document describes the P1 memory-forensics design for the production `Tradi
 
 Use this alongside [the architecture overview](ARCHITECTURE.md). The local synthetic lab is in `tools/Trading.Worker.Diagnostics`; it never connects to IG, OpenAI, GCS, or Slack.
 
+For chart-specific attribution, use the separate [chart renderer memory lab](chart-memory-diagnostics.md). It exercises `Trading.Charting` in isolation before any worker-level mitigation is considered.
+
+Keep the durable experiment history in the [worker memory experiment log](worker-memory-experiment-log.md); this document remains the operational diagnostics and containment guide.
+
 ## Scope and non-goals
 
 - Keep one persistent .NET worker. Market-data collection, automation, and scheduling are not split into duplicate hosts.

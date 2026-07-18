@@ -167,9 +167,13 @@ public sealed class ScottPlotPriceChartRenderer : IPriceChartRenderer
             return dates.ToArray();
         }
 
+        // ScottPlot can produce duplicate OADate values for gapped candles on Linux.
+        // Compressed indicators use sequential positions, so retain the first position
+        // for a repeated coordinate instead of making a valid chart fail during mapping.
         var indicesByDate = ohlcs
             .Select((ohlc, index) => new { X = ohlc.DateTime.ToOADate(), Index = (double)index })
-            .ToDictionary(item => item.X, item => item.Index);
+            .GroupBy(item => item.X)
+            .ToDictionary(group => group.Key, group => group.First().Index);
 
         return dates
             .Select(date => indicesByDate.TryGetValue(date, out var index)

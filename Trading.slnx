@@ -17,6 +17,7 @@
     <Project Path="src/Trading.Worker/Trading.Worker.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/Trading.Charting.MemoryLab.Tests/Trading.Charting.MemoryLab.Tests.csproj" />
     <Project Path="tests/Trading.Cli.Tests/Trading.Cli.Tests.csproj" />
     <Project Path="tests/Trading.Execution.Tests/Trading.Execution.Tests.csproj" />
     <Project Path="tests/Ig.Trading.Sdk.Tests/Ig.Trading.Sdk.Tests.csproj" />
@@ -30,6 +31,7 @@
     <Project Path="tests/Trading.Worker.Diagnostics.Tests/Trading.Worker.Diagnostics.Tests.csproj" />
   </Folder>
   <Folder Name="/tools/">
+    <Project Path="tools/Trading.Charting.MemoryLab/Trading.Charting.MemoryLab.csproj" />
     <Project Path="tools/Trading.Worker.Diagnostics/Trading.Worker.Diagnostics.csproj" />
   </Folder>
 </Solution>
