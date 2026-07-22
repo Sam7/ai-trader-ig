@@ -147,6 +147,7 @@ main() {
     install -d -o ai-trader -g ai-trader -m 0750 "$APP_DIR" "$DATA_DIR" "$LOG_DIR"
     install -d -o ai-trader -g ai-trader -m 0750 \
         "$DATA_DIR/market-data" \
+        "$CONTINUITY_DIR" \
         "$CONTINUITY_DIR/reports" \
         "$CONTINUITY_DIR/archive" \
         "$DATA_DIR/snapshot-publisher" \
