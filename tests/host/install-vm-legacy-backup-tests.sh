@@ -27,6 +27,7 @@ grep -q 'apt-get -o DPkg::Lock::Timeout=300 install' "$installer"
 grep -q 'create_deployment_checkpoint "\$staged_app_dir"' "$installer"
 grep -q "trap 'rm -rf -- \"\$staged_app_dir\"' EXIT" "$installer"
 ! grep -q "trap 'rm -rf -- \"\$staged_app_dir\"' RETURN" "$installer"
+grep -q 'cd "\$1"' "$installer"
 
 # The installer is sourced so this test exercises only the legacy-removal path;
 # it never invokes apt, systemd, or any production filesystem path.

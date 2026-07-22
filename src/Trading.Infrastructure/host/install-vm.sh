@@ -119,7 +119,8 @@ create_deployment_checkpoint() {
         export MarketData__DeploymentContinuity__CheckpointPath=/var/lib/ai-trader/market-data/deployment-continuity/active.json
         export MarketData__DeploymentContinuity__ReportDirectory=/var/lib/ai-trader/market-data/deployment-continuity/reports
         export MarketData__DeploymentContinuity__ArchiveDirectory=/var/lib/ai-trader/market-data/deployment-continuity/archive
-        exec "$1/Trading.Worker" --create-deployment-checkpoint "$2"
+        cd "$1"
+        exec ./Trading.Worker --create-deployment-checkpoint "$2"
     ' _ "$staged_app_dir" "$DEPLOYMENT_ID" "$BACKUP_BUCKET_NAME"
 }
 
