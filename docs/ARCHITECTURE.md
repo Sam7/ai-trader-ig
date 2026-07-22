@@ -242,7 +242,7 @@ Market data follows a local-first stream-and-fill model:
 7. The production publisher can upload validated SQLite snapshots to GCS.
 8. `MarketDataRecoveryPlanner` may create durable recent-tail or historical-audit work. `MarketDataRecoveryCoordinator` is the only automatic REST owner: it processes one item at a time, prioritizes recent work, observes the returned allowance, and paces background work while preserving the configured reserve.
 9. Mirror mode downloads, validates, and imports final cloud bars while preserving local health and transient state.
-10. Production deployment continuity is separate from recurring recovery: a staged worker checkpoints final bars and verifies a snapshot before the live process is stopped. The restarted worker waits for fresh stream updates, then uses the same coordinator to repair only the checkpoint-to-restart gap (maximum 30 minutes). It writes a local/GCS report, and the deploy workflow fails unless that report succeeds. A no-bar result passes only with persisted IG closed/suspended session evidence.
+10. Production deployment continuity is separate from recurring recovery: a staged worker checkpoints final bars and verifies a snapshot before the live process is stopped. The restarted worker waits until every configured stream subscription is connected, then uses the same coordinator to repair only the checkpoint-to-restart gap (maximum 30 minutes). It writes a local/GCS report, and the deploy workflow fails unless that report succeeds. A no-bar result passes only with persisted IG closed/suspended session evidence.
 
 Strategy and AI code consume broker-neutral price data through these services; they do not call IG price endpoints directly.
 

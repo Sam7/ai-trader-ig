@@ -29,7 +29,7 @@ public sealed class MarketDataDeploymentContinuityHostedService : BackgroundServ
             {
                 await _continuity.FailAsync(
                     checkpoint,
-                    "The restarted worker did not receive stream updates for every checkpointed market before the readiness deadline.",
+                    "The restarted worker did not establish connected stream subscriptions for every checkpointed market before the readiness deadline.",
                     stoppingToken);
                 return;
             }

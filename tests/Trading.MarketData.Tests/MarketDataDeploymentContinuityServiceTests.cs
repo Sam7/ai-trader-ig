@@ -26,6 +26,33 @@ public sealed class MarketDataDeploymentContinuityServiceTests
     }
 
     [Fact]
+    public async Task WaitForPostRestartStreamAsync_ShouldAcceptConnectedQuietMarket()
+    {
+        var now = DateTimeOffset.Parse("2026-07-23T00:15:00Z");
+        var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
+        await using var workspace = new ContinuityWorkspace();
+        var health = new MarketDataHealthRecord(
+            instrument,
+            PriceResolution.FiveMinutes,
+            MarketDataConnectionState.Connected,
+            LastReceivedUpdateUtc: null,
+            LatestCompletedCandleUtc: null,
+            MarketDataRepairState.Idle,
+            [],
+            null,
+            null,
+            now);
+        var service = Create(
+            new InMemoryMarketDataStore(),
+            new ContinuityGateway(_ => throw new InvalidOperationException()),
+            now,
+            workspace.Options,
+            new FakeHealthStore(health));
+
+        (await service.WaitForPostRestartStreamAsync(Checkpoint(instrument, now, "2026-07-23T00:00:00Z"))).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task ReconcileAsync_ShouldRepairOnlyTheMissingDeploymentRange()
     {
         var now = DateTimeOffset.Parse("2026-07-23T00:15:00Z");
@@ -77,7 +104,8 @@ public sealed class MarketDataDeploymentContinuityServiceTests
         InMemoryMarketDataStore store,
         ContinuityGateway gateway,
         DateTimeOffset now,
-        MarketDataOptions options)
+        MarketDataOptions options,
+        FakeHealthStore? healthStore = null)
     {
         var clock = new FixedMarketDataClock(now);
         var metrics = new MarketDataRuntimeActivityMetrics();
@@ -93,7 +121,7 @@ public sealed class MarketDataDeploymentContinuityServiceTests
             metrics);
         return new MarketDataDeploymentContinuityService(
             store,
-            new FakeHealthStore(),
+            healthStore ?? new FakeHealthStore(),
             store,
             store,
             recovery,
@@ -198,9 +226,10 @@ public sealed class MarketDataDeploymentContinuityServiceTests
         private sealed record Session() : ITradingSession { public string AccountId => "demo"; public string BrokerName => "fake"; public DateTimeOffset AuthenticatedAtUtc => DateTimeOffset.UtcNow; }
     }
 
-    private sealed class FakeHealthStore : IMarketDataHealthStore
+    private sealed class FakeHealthStore(MarketDataHealthRecord? health = null) : IMarketDataHealthStore
     {
         public Task UpsertAsync(MarketDataHealthRecord health, CancellationToken cancellationToken = default) => Task.CompletedTask;
-        public Task<MarketDataHealthRecord?> GetAsync(InstrumentId instrument, PriceResolution resolution, CancellationToken cancellationToken = default) => Task.FromResult<MarketDataHealthRecord?>(null);
+        public Task<MarketDataHealthRecord?> GetAsync(InstrumentId instrument, PriceResolution resolution, CancellationToken cancellationToken = default)
+            => Task.FromResult(health);
     }
 }

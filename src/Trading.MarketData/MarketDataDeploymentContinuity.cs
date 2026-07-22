@@ -133,8 +133,7 @@ public sealed class MarketDataDeploymentContinuityService
             foreach (var market in checkpoint.Markets)
             {
                 var health = await _healthStore.GetAsync(new InstrumentId(market.Instrument), checkpoint.Resolution, cancellationToken);
-                if (health?.ConnectionState != MarketDataConnectionState.Connected
-                    || health.LastReceivedUpdateUtc <= checkpoint.CapturedAtUtc)
+                if (health?.ConnectionState != MarketDataConnectionState.Connected)
                 {
                     ready = false;
                     break;
