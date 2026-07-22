@@ -167,10 +167,11 @@ public sealed class MarketDataDeploymentContinuityService
         }
 
         var deadline = startedAtUtc.Add(_options.RepairTimeout);
+        var deploymentFromUtc = PriceResolutionIntervals.AlignDown(checkpoint.CapturedAtUtc, interval);
         foreach (var market in checkpoint.Markets)
         {
             var instrument = new InstrumentId(market.Instrument);
-            var fromUtc = market.LatestFinalBarUtc.Add(interval);
+            var fromUtc = Max(market.LatestFinalBarUtc.Add(interval), deploymentFromUtc);
             var missing = await _store.FindMissingCompletedRangesAsync(instrument, checkpoint.Resolution, fromUtc, cutoffUtc, cancellationToken);
             if (missing.Count == 0)
             {
@@ -210,7 +211,7 @@ public sealed class MarketDataDeploymentContinuityService
             var remaining = await _store.FindMissingCompletedRangesAsync(
                 instrument,
                 checkpoint.Resolution,
-                market.LatestFinalBarUtc.Add(interval),
+                Max(market.LatestFinalBarUtc.Add(interval), deploymentFromUtc),
                 cutoffUtc,
                 cancellationToken);
             if (remaining.Count > 0)
@@ -331,6 +332,9 @@ public sealed class MarketDataDeploymentContinuityService
         IReadOnlyList<string> failures,
         MarketDataDeploymentContinuityStatus status)
         => new(1, checkpoint.DeploymentId, checkpoint.CapturedAtUtc, startedAtUtc, cutoffUtc, status, ranges, failures);
+
+    private static DateTimeOffset Max(DateTimeOffset left, DateTimeOffset right)
+        => left > right ? left : right;
 }
 
 public sealed class MarketDataDeploymentContinuityStore

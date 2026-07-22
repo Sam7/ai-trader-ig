@@ -65,7 +65,7 @@ public sealed class MarketDataDeploymentContinuityServiceTests
             Bars(request.FromUtc!.Value, request.ToUtc!.Value)));
         await using var workspace = new ContinuityWorkspace();
         var service = Create(store, gateway, now, workspace.Options);
-        var checkpoint = Checkpoint(instrument, now, "2026-07-23T00:00:00Z");
+        var checkpoint = Checkpoint(instrument, DateTimeOffset.Parse("2026-07-23T00:00:00Z"), "2026-07-23T00:00:00Z");
 
         var report = await service.ReconcileAsync(checkpoint);
 
@@ -92,12 +92,35 @@ public sealed class MarketDataDeploymentContinuityServiceTests
         await using var workspace = new ContinuityWorkspace();
         var service = Create(store, gateway, now, workspace.Options);
 
-        var report = await service.ReconcileAsync(Checkpoint(instrument, now, "2026-07-23T00:00:00Z"));
+        var report = await service.ReconcileAsync(Checkpoint(instrument, DateTimeOffset.Parse("2026-07-23T00:00:00Z"), "2026-07-23T00:00:00Z"));
 
         report.Status.Should().Be(MarketDataDeploymentContinuityStatus.Succeeded);
         report.Ranges.Should().ContainSingle(range => range.ConfirmedClosedMarket);
         (await store.GetCoverageAsync(instrument, PriceResolution.FiveMinutes, DateTimeOffset.Parse("2026-07-23T00:05:00Z"), now))
             .Should().ContainSingle(coverage => coverage.Status == MarketDataCoverageStatus.NoBars);
+    }
+
+    [Fact]
+    public async Task ReconcileAsync_ShouldExcludeHistoryBeforeTheDeploymentCheckpoint()
+    {
+        var now = DateTimeOffset.Parse("2026-07-23T00:20:00Z");
+        var checkpointCapturedAtUtc = DateTimeOffset.Parse("2026-07-23T00:15:00Z");
+        var instrument = new InstrumentId("CC.D.CL.UMA.IP");
+        var store = new InMemoryMarketDataStore();
+        await store.UpsertAsync([Stored(instrument, "2026-07-23T00:00:00Z")]);
+        var gateway = new ContinuityGateway(request => new PriceSeries(
+            request.Instrument,
+            request.Resolution,
+            Bars(request.FromUtc!.Value, request.ToUtc!.Value)));
+        await using var workspace = new ContinuityWorkspace();
+        var service = Create(store, gateway, now, workspace.Options);
+
+        var report = await service.ReconcileAsync(Checkpoint(instrument, checkpointCapturedAtUtc, "2026-07-23T00:00:00Z"));
+
+        report.Status.Should().Be(MarketDataDeploymentContinuityStatus.Succeeded);
+        gateway.PriceRequests.Should().ContainSingle();
+        gateway.PriceRequests[0].FromUtc.Should().Be(checkpointCapturedAtUtc);
+        gateway.PriceRequests[0].ToUtc.Should().Be(now);
     }
 
     private static MarketDataDeploymentContinuityService Create(
