@@ -235,14 +235,18 @@ public sealed class BackfillMarketDataCommand : AsyncCommand<BackfillMarketDataS
         BackfillMarketDataSettings settings,
         CancellationToken cancellationToken)
     {
-        var count = await _backfill.BackfillAsync(
+        var result = await _backfill.BackfillAsync(
             new InstrumentId(settings.Instrument),
             CliParsing.ParsePriceResolution(settings.Resolution),
             settings.From!.Value,
             settings.To!.Value,
             cancellationToken);
 
-        _console.MarkupLine($"Backfilled [cyan]{count}[/] historical bar(s) from IG REST.");
+        _console.MarkupLine($"Backfilled [cyan]{result.BarCount}[/] historical bar(s) from IG REST.");
+        if (result.Allowance is { } allowance)
+        {
+            _console.MarkupLine($"IG historical allowance remaining: [cyan]{allowance.Remaining?.ToString() ?? "unknown"}[/]; reset after: [cyan]{allowance.ResetAfter?.ToString() ?? "unknown"}[/].");
+        }
         return 0;
     }
 }

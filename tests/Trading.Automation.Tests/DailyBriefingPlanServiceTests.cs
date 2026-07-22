@@ -4,6 +4,7 @@ using Microsoft.Extensions.Options;
 using Trading.Abstractions;
 using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
+using Trading.Automation.Health;
 using Trading.Strategy.DayPlanning;
 using Trading.Strategy.Inputs;
 using Trading.Strategy.Shared;
@@ -14,9 +15,11 @@ public sealed class DailyBriefingPlanServiceTests
     public async Task RunAsync_ShouldPlanRequestedTradingDate()
     {
         var planner = new FakeTradingDayPlanner();
+        var operationMetrics = new WorkerOperationMetrics();
         var service = new DailyBriefingPlanService(
             planner,
             Options.Create(new AutomationOptions()),
+            operationMetrics,
             NullLogger<DailyBriefingPlanService>.Instance);
 
         var plan = await service.RunAsync(new DateOnly(2026, 3, 12));
@@ -24,6 +27,9 @@ public sealed class DailyBriefingPlanServiceTests
         planner.Requests.Should().ContainSingle();
         planner.Requests[0].TradingDate.Should().Be(new DateOnly(2026, 3, 12));
         plan.TradingDate.Should().Be(new DateOnly(2026, 3, 12));
+        operationMetrics.Snapshot().RecentCheckpoints.Should().Contain(checkpoint =>
+            checkpoint.Operation == "daily-plan"
+            && checkpoint.Outcome == WorkerOperationOutcome.Completed);
     }
 
     private sealed class FakeTradingDayPlanner : ITradingDayPlanner

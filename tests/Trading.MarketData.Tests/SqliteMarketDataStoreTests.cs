@@ -25,6 +25,29 @@ public sealed class SqliteMarketDataStoreTests
     }
 
     [Fact]
+    public async Task RecoveryWorkAndAllowanceBudget_ShouldSurviveStoreRecreation()
+    {
+        using var database = TestDatabase.Create();
+        var work = new MarketDataRecoveryWorkItem(
+            new InstrumentId("CS.D.CFAGOLD.CFA.IP"), PriceResolution.FiveMinutes,
+            MarketDataRecoveryReason.HistoricalAudit, 1000,
+            DateTimeOffset.Parse("2026-07-01T00:00:00Z"), DateTimeOffset.Parse("2026-07-02T00:00:00Z"),
+            DateTimeOffset.Parse("2026-07-01T00:25:00Z"), MarketDataRecoveryWorkStatus.Pending,
+            DateTimeOffset.Parse("2026-07-20T00:00:00Z"), 2, 250, "Allowance deferred");
+        var budget = new HistoricalAllowanceBudget(
+            8_500, DateTimeOffset.Parse("2026-07-21T00:00:00Z"), DateTimeOffset.Parse("2026-07-14T00:00:00Z"),
+            DateTimeOffset.Parse("2026-07-14T01:00:00Z"));
+        var writer = new SqliteMarketDataStore(database.Path);
+
+        await writer.UpsertRecoveryWorkItemAsync(work);
+        await writer.UpsertHistoricalAllowanceBudgetAsync(budget);
+
+        var reader = new SqliteMarketDataStore(database.Path);
+        (await reader.GetRecoveryWorkItemsAsync()).Should().ContainSingle().Which.Should().Be(work);
+        (await reader.GetHistoricalAllowanceBudgetAsync()).Should().Be(budget);
+    }
+
+    [Fact]
     public async Task UpsertAsync_ShouldReplaceExistingBucketWithoutDuplicates()
     {
         using var database = TestDatabase.Create();

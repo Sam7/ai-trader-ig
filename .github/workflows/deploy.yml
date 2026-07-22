@@ -204,7 +204,7 @@ jobs:
             --project "$GCP_PROJECT_ID" \
             --zone "$WORKER_INSTANCE_ZONE" \
             --quiet \
-            --command "sudo bash /tmp/ai-trader-deploy/install-vm.sh '$BACKUP_BUCKET_NAME'"
+            --command "sudo bash /tmp/ai-trader-deploy/install-vm.sh '$BACKUP_BUCKET_NAME' /tmp/ai-trader-deploy '${{ github.sha }}'"
 
       - name: Validate market-data collection
         shell: bash
@@ -274,6 +274,39 @@ jobs:
           validate_object_freshness \
             "gs://$BACKUP_BUCKET_NAME/market-data/ig-market-data.sqlite" \
             600
+
+      - name: Validate deployment market-data continuity
+        shell: bash
+        env:
+          WORKER_INSTANCE_NAME: ${{ steps.pulumi.outputs.worker_instance_name }}
+          WORKER_INSTANCE_ZONE: ${{ steps.pulumi.outputs.worker_instance_zone }}
+          DEPLOYMENT_ID: ${{ github.sha }}
+        run: |
+          deadline=$((SECONDS + 1020))
+          report_path="/var/lib/ai-trader/market-data/deployment-continuity/reports/${DEPLOYMENT_ID}.json"
+          while (( SECONDS < deadline )); do
+            status="$(gcloud compute ssh "$WORKER_INSTANCE_NAME" \
+              --project "$GCP_PROJECT_ID" \
+              --zone "$WORKER_INSTANCE_ZONE" \
+              --quiet \
+              --command "sudo python3 -c 'import json,sys; print(json.load(open(\"$report_path\"))[\"status\"]) if __import__(\"os\").path.exists(\"$report_path\") else print(\"Pending\")'" 2>/dev/null || true)"
+            if [[ "$status" == "Succeeded" ]]; then
+              echo "Deployment continuity succeeded."
+              exit 0
+            fi
+            if [[ "$status" == "Failed" ]]; then
+              gcloud compute ssh "$WORKER_INSTANCE_NAME" --project "$GCP_PROJECT_ID" --zone "$WORKER_INSTANCE_ZONE" --quiet \
+                --command "sudo cat '$report_path'; sudo journalctl -u ai-trader.service -n 160 --no-pager" || true
+              echo "Deployment continuity failed." >&2
+              exit 1
+            fi
+            sleep 10
+          done
+
+          gcloud compute ssh "$WORKER_INSTANCE_NAME" --project "$GCP_PROJECT_ID" --zone "$WORKER_INSTANCE_ZONE" --quiet \
+            --command "sudo test -f '$report_path' && sudo cat '$report_path' || true; sudo journalctl -u ai-trader.service -n 160 --no-pager" || true
+          echo "Deployment continuity did not finish before its deadline." >&2
+          exit 1
 
       - name: Validate market-data-only worker mode
         shell: bash

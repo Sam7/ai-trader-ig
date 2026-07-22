@@ -162,7 +162,8 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
                 health?.RepairState.ToString()));
         }
 
-        var recovery = await _recoveryStore.GetRecoveryStatesAsync(cancellationToken).ConfigureAwait(false);
+        var recoveryWork = await _recoveryStore.GetRecoveryWorkItemsAsync(cancellationToken).ConfigureAwait(false);
+        var recoveryBudget = await _recoveryStore.GetHistoricalAllowanceBudgetAsync(cancellationToken).ConfigureAwait(false);
         return new MarketDataHealthSummary(
             instruments
                 .Select(instrument => instrument.LatestFinalBarUtc)
@@ -172,7 +173,7 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
             stream.LastReceivedUpdateUtc,
             stream.LastPersistedUpdateUtc,
             instruments,
-            BuildRecoveryHealth(recovery, DateTimeOffset.UtcNow));
+            BuildRecoveryHealth(recoveryWork, recoveryBudget, DateTimeOffset.UtcNow));
     }
 
     private WorkerHealthStatus ResolveStatus(
@@ -215,10 +216,16 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
             reasons.Add("No final market-data bar is available for configured instruments.");
         }
 
-        if (marketData.Recovery?.BlockedRanges > 0)
+        if (marketData.Recovery?.AllowanceBlockedRanges > 0)
         {
             status = Max(status, WorkerHealthStatus.Warning);
             reasons.Add(FormatAllowanceReason(marketData.Recovery));
+        }
+
+        if (marketData.Recovery?.PermanentlyBlockedRanges > 0)
+        {
+            status = Max(status, WorkerHealthStatus.Warning);
+            reasons.Add($"{marketData.Recovery.PermanentlyBlockedRanges} automatic market-data recovery range(s) are permanently blocked.");
         }
 
         return status;
@@ -380,6 +387,57 @@ public sealed class WorkerHealthReporterHostedService : BackgroundService
         {
             AllowanceExpiryEstimated = active is not null
                 && active.LastFailure?.Contains("allowance", StringComparison.OrdinalIgnoreCase) == true,
+        };
+    }
+
+    internal static MarketDataRecoveryHealth BuildRecoveryHealth(
+        IReadOnlyList<MarketDataRecoveryWorkItem> recovery,
+        HistoricalAllowanceBudget? budget,
+        DateTimeOffset now)
+    {
+        ArgumentNullException.ThrowIfNull(recovery);
+
+        var pending = recovery
+            .Where(item => item.Status == MarketDataRecoveryWorkStatus.Pending)
+            .ToArray();
+        var recentPending = pending
+            .Where(item => item.Reason == MarketDataRecoveryReason.RecentTail)
+            .ToArray();
+        var historicalPending = pending
+            .Where(item => item.Reason == MarketDataRecoveryReason.HistoricalAudit)
+            .ToArray();
+        var allowanceBlocked = budget?.RemainingPoints is <= 0
+            && budget.ResetAtUtc is { } resetAtUtc
+            && resetAtUtc > now
+            ? historicalPending
+            : [];
+        var permanentlyBlocked = recovery
+            .Where(item => item.Status == MarketDataRecoveryWorkStatus.Blocked)
+            .OrderBy(item => item.Instrument.Value, StringComparer.Ordinal)
+            .ThenBy(item => item.FromUtc)
+            .ToArray();
+        var active = allowanceBlocked
+            .OrderBy(item => item.Priority)
+            .ThenByDescending(item => item.ToUtc)
+            .FirstOrDefault()
+            ?? permanentlyBlocked.FirstOrDefault()
+            ?? recentPending.OrderBy(item => item.Priority).ThenByDescending(item => item.ToUtc).FirstOrDefault()
+            ?? historicalPending.OrderBy(item => item.Priority).ThenByDescending(item => item.ToUtc).FirstOrDefault();
+
+        return new MarketDataRecoveryHealth(
+            pending.Length,
+            allowanceBlocked.Length + permanentlyBlocked.Length,
+            budget?.RemainingPoints,
+            budget?.ResetAtUtc,
+            active?.Instrument.Value)
+        {
+            AllowanceExpiryEstimated = budget?.ResetEstimated == true,
+            RecentPendingRanges = recentPending.Length,
+            HistoricalPendingRanges = historicalPending.Length,
+            AllowanceBlockedRanges = allowanceBlocked.Length,
+            PermanentlyBlockedRanges = permanentlyBlocked.Length,
+            NextAttemptUtc = active?.NextAttemptUtc,
+            LastFailure = active?.LastFailure,
         };
     }
 

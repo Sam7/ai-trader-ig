@@ -6,6 +6,7 @@ using Microsoft.Extensions.Options;
 using Trading.Abstractions;
 using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
+using Trading.Automation.Health;
 using Trading.Strategy.DayPlanning;
 using Trading.Strategy.Inputs;
 using Trading.Strategy.Persistence;
@@ -69,6 +70,7 @@ public sealed class DailyPlanEnsureServiceTests
         var services = new ServiceCollection();
         services.AddSingleton<ITradingDayPlanner>(planner);
         services.AddSingleton(Options.Create(new AutomationOptions()));
+        services.AddSingleton<WorkerOperationMetrics>();
         services.AddSingleton<ILogger<DailyBriefingPlanService>>(NullLogger<DailyBriefingPlanService>.Instance);
         services.AddTransient<DailyBriefingPlanService>();
         var provider = services.BuildServiceProvider();

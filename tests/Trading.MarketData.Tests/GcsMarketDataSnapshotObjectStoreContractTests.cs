@@ -11,4 +11,12 @@ public sealed class GcsMarketDataSnapshotObjectStoreContractTests
         typeof(GcsMarketDataSnapshotObjectStore)
             .Should().BeAssignableTo<IMarketDataObjectStore>();
     }
+
+    [Fact]
+    public void DefaultObjectStore_ShouldNotCreateCloudCredentialsDuringConstruction()
+    {
+        var objectStore = new GcsMarketDataSnapshotObjectStore();
+
+        objectStore.Should().NotBeNull();
+    }
 }

@@ -32,7 +32,7 @@ A future MIG needs durable worker state, a health endpoint with meaningful seman
 
 The trace deliberately contains counters and sizes only. It never reads process command lines or environments, and does not include prompt text, API credentials, raw price updates, broker tokens, chart data, or exception payloads.
 
-Pressure mode starts when worker cgroup memory reaches 256 MiB, host available memory drops below 256 MiB, memory PSI is non-zero, or the host process count rises materially above this process lifetime's baseline. It returns to the five-second cadence only after five continuous minutes below every signal. The first crossing of 256, 320, and 384 MiB per process instance synchronously flushes the JSONL trace then writes bounded compressed `smaps`, `smaps_rollup`, maps, descriptor classification, full cgroup, host census, and activity artifacts. No dump is taken automatically.
+Pressure mode starts when worker cgroup memory reaches 256 MiB, host available memory drops below 256 MiB, memory PSI is non-zero, or the host process count rises materially above this process lifetime's baseline. It returns to the five-second cadence only after five continuous minutes below every signal. The first crossing of 256, 320, 384, and 480 MiB per process instance synchronously flushes the JSONL trace then writes bounded compressed `smaps`, `smaps_rollup`, maps, descriptor classification, full cgroup, host census, and activity artifacts. No dump is taken automatically.
 
 ### Evidence fields
 
@@ -87,7 +87,7 @@ return to `Healthy` sends one recovery notification. The transition state is
 in-memory and resets after a worker restart; the Slack cooldown remains for
 non-health alerts such as fail-fast notifications.
 
-During the collection-only production phase, market-data streaming, historical recovery, snapshots, health reporting, diagnostics, and Slack health alerts remain enabled. Daily briefing, intraday chart/AI scheduling, and execution are disabled by the systemd environment overrides above.
+During the collection-only production phase, market-data streaming, snapshots, health reporting, diagnostics, and Slack health alerts remain enabled. Daily briefing, intraday chart/AI scheduling, execution, and recurring automatic recovery are disabled by the systemd environment overrides above. Deployment continuity is the deliberate exception: before a replacement the staged worker checkpoints final bars and verifies a snapshot; after restart it can repair only that bounded gap through the rate- and allowance-aware coordinator, and CI requires its report to succeed. The worker health payload still exposes queued recovery work, the global historical allowance budget, and the next retry time when recovery is enabled in a controlled experiment.
 
 To inspect a production incident after the next restart:
 
@@ -122,16 +122,19 @@ It writes `timeline.csv`, `summary.json`, `REPORT.md`, and `sources.sha256`. Cla
 
 ## Production history notebook
 
-`notebooks/production_worker_memory_analysis.ipynb` reads all retained worker JSONL segments from the durable GCS diagnostics prefix by default. It also supports the current VM active files and local artifact directories. The first code cell controls the analysis window:
+`notebooks/production_worker_memory_analysis.ipynb` reads retained worker JSONL segments from the durable GCS diagnostics prefix by default. It keeps a persistent local cache and performs a metadata/checksum comparison before downloading, so repeating the notebook does not redownload unchanged segments. It also supports the current VM active files and local artifact directories. The first code cell controls the analysis window and cache:
 
 ```python
 DATA_SOURCE = 'gcs'
 LOOKBACK_HOURS = None  # None = all retained history; use 48 for two days.
 MAX_FILES = None       # None = every matching worker segment.
 MAX_TOTAL_BYTES = None # None = no artificial byte cap.
+CACHE_DIRECTORY_OVERRIDE = None # Optional existing cache/artifact directory.
 ```
 
-The notebook writes a combined `memory.csv`, `summary.json`, and `source-manifest.json`. It deduplicates overlapping local snapshots, preserves process/segment boundaries, and fails explicitly when a configured cap would exclude data. GCS is preferred for long windows because VM `.active` files are point-in-time copies and may disappear after restart.
+The notebook writes a combined `memory.csv`, `summary.json`, and `source-manifest.json`. The cache manifest records remote size, update time, generation, and checksums; new, changed, or missing files are downloaded atomically while unchanged files are reused. It deduplicates overlapping local snapshots, preserves process/segment boundaries, and fails explicitly when a configured cap would exclude data. GCS is preferred for long windows because VM `.active` files are point-in-time copies and may disappear after restart.
+
+To reuse an existing downloaded artifact as the cache, set `CACHE_DIRECTORY_OVERRIDE` to that artifact directory and leave `RUN_DIRECTORY_OVERRIDE` unset. Subsequent runs will check GCS online, reuse matching files, and place only new or changed segments under the cache directory.
 
 ## Local synthetic memory lab
 
@@ -155,6 +158,35 @@ pwsh -File tools/run-worker-memory-lab.ps1 -Profile moderate -DurationSeconds 12
 ```
 
 The script publishes a self-contained Linux executable, runs it through `systemd-run --user`, and writes result/trace artifacts under `artifacts/diagnostics-lab/` (ignored by Git). Its final output includes the actual GC flavor, peak working set/cgroup memory, and cgroup `max`, OOM, and OOM-kill counters.
+
+## Combined local IG, chart, and OpenAI memory lab
+
+Use this overnight lab to measure the production-shaped worker process with demo IG streaming, SQLite, chart rendering, and real OpenAI calls in one Linux cgroup. It is intentionally not a data-quality or trading test: execution is disabled, cloud publishing/alerts are disabled, each run uses a private SQLite copy, recovery/backfill are disabled, and stale/incomplete local bars are allowed only so a chart gap cannot suppress an intraday OpenAI review.
+
+The lab preserves production's `MemoryHigh=400M` and `MemoryMax=480M` configuration. Its local scope instead uses a 480 MiB observation point, a 560 MiB soft-pressure point, and a 600 MiB hard stop. This preserves a bounded 120 MiB observation window after the point at which the current production worker would fail. The soft limit can affect behavior after 560 MiB, so treat evidence above that value as cap-pressure evidence rather than an unconstrained memory profile.
+
+From PowerShell, start the overnight run with:
+
+```powershell
+pwsh -File tools/run-worker-ai-memory-lab.ps1 -DurationHours 8
+```
+
+To validate the demo-only configuration, isolated database copy, Linux publish, and cgroup prerequisites without starting the worker or making an OpenAI call, append `-ValidateOnly`.
+
+The runner publishes the normal `Trading.Worker` Linux build, schedules exactly one daily plan a few minutes after startup, then schedules intraday reviews every 15 minutes. It prints the artifact path and an optional `Get-Content ... -Wait` command before the long-lived process begins. Do not run another local worker or live-stream lab concurrently: this run opens its own demo IG streaming connection.
+
+At completion (including an expected cgroup failure), it writes `artifacts/worker-ai-memory-lab/<run-id>/analysis/`:
+
+| Artifact | Outcome diagnostic | Interpretation |
+| --- | --- | --- |
+| `REPORT.md` | 480 MiB production breach, 600 MiB outcome, peak/release, attribution lead | A 480 MiB breach means the present production `MemoryMax=480M` would have ended the worker. A large release after peak suggests a transient/cold-cache peak; repeated unreleased steps suggest retention. |
+| `summary.json` | Sample completeness, cgroup events, baseline/peak/final managed/native/file/SQLite deltas, prompt totals | `oom_kill` is a real cgroup kill; `max` without an OOM kill means the scope was forced to reclaim. Attribution is a lead, not proof. |
+| `timeline.csv` | Five-second normal samples and one-second pressure samples | Correlate cgroup/PSS/RSS/private-dirty with managed committed/LOH/POH, SQLite, queue depth, and the active operation. |
+| `operation-checkpoints.json` | Before/after cgroup, PSS, RSS, and managed committed values for daily plan, price load, chart render, evidence load, and AI review | A recurring increase after one named operation identifies the next boundary to profile or change. |
+| `prompt-summary.json` | Prompt name/status/model/duration/tokens/cost plus nearest memory sample | Separates LLM call timing from chart and stream work without copying raw prompts, responses, or provider error text into the report. |
+| `trace/forensic-*.gz` | `/proc` maps/smaps, cgroup, descriptor, host, and activity snapshots at 256/320/384/480 MiB | Use when PSS/private-dirty grows while managed committed stays flat; it is the evidence for native/chart/runtime/SQLite ownership. |
+
+Read results in this order: confirm whether 480 MiB was reached; inspect the operation and prompt nearest that timestamp; compare baseline-to-peak managed committed, private-dirty, file-cache, and SQLite deltas; then inspect whether final memory releases from the peak. If the worker remains below 480 MiB after its first chart/AI cycle and stays flat over several cycles, the issue is likely bounded warm-up rather than a leak. If it climbs after the same operation and does not release, repeat the run and narrow that operation in isolation.
 
 For a long-running overhead comparison, start one detached coordinator from the repository root:
 

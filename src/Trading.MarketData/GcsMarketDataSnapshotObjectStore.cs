@@ -10,17 +10,21 @@ public sealed class GcsMarketDataSnapshotObjectStore : IMarketDataSnapshotObject
     private const string MetadataSha256 = "sha256";
     private const string MetadataLatestBarTicks = "latest-bar-utc-ticks";
 
-    private readonly StorageClient _client;
+    private readonly StorageClient? _client;
+    private readonly Lazy<StorageClient>? _lazyClient;
 
     public GcsMarketDataSnapshotObjectStore()
-        : this(StorageClient.Create())
     {
+        // Do not require local ADC during worker startup when cloud mirror/publishing is disabled.
+        _lazyClient = new(StorageClient.Create, LazyThreadSafetyMode.ExecutionAndPublication);
     }
 
     public GcsMarketDataSnapshotObjectStore(StorageClient client)
     {
-        _client = client;
+        _client = client ?? throw new ArgumentNullException(nameof(client));
     }
+
+    private StorageClient Client => _client ?? _lazyClient!.Value;
 
     public async Task<MarketDataSnapshotObject?> GetAsync(
         string bucketName,
@@ -29,7 +33,7 @@ public sealed class GcsMarketDataSnapshotObjectStore : IMarketDataSnapshotObject
     {
         try
         {
-            var obj = await _client.GetObjectAsync(bucketName, objectName, cancellationToken: cancellationToken);
+            var obj = await Client.GetObjectAsync(bucketName, objectName, cancellationToken: cancellationToken);
             return ToSnapshotObject(obj);
         }
         catch (GoogleApiException exception) when (exception.HttpStatusCode == HttpStatusCode.NotFound)
@@ -46,7 +50,7 @@ public sealed class GcsMarketDataSnapshotObjectStore : IMarketDataSnapshotObject
     {
         Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(destinationPath))!);
         await using var stream = File.Create(destinationPath);
-        await _client.DownloadObjectAsync(bucketName, objectName, stream, cancellationToken: cancellationToken);
+        await Client.DownloadObjectAsync(bucketName, objectName, stream, cancellationToken: cancellationToken);
     }
 
     public async Task UploadAsync(
@@ -74,7 +78,7 @@ public sealed class GcsMarketDataSnapshotObjectStore : IMarketDataSnapshotObject
             Metadata = metadata.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.OrdinalIgnoreCase),
         };
 
-        await _client.UploadObjectAsync(obj, stream, cancellationToken: cancellationToken);
+        await Client.UploadObjectAsync(obj, stream, cancellationToken: cancellationToken);
     }
 
     private static MarketDataSnapshotObject ToSnapshotObject(GcsObject obj)

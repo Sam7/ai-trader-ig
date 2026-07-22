@@ -16,6 +16,12 @@ public sealed class IntradayOpportunityScanOptions
 
     public int FreshPriceMaxAgeMinutes { get; init; } = 20;
 
+    /// <summary>
+    /// Allows a diagnostics-only run to render incomplete or stale local price history.
+    /// Production remains fail-closed unless this is explicitly enabled.
+    /// </summary>
+    public bool AllowStalePriceDataForDiagnostics { get; init; }
+
     public int MaxCandidatesPerRun { get; init; } = 4;
 
     public void Validate()

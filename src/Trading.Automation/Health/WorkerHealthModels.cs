@@ -62,6 +62,12 @@ public sealed record MarketDataRecoveryHealth(
     string? ActiveInstrument)
 {
     public bool AllowanceExpiryEstimated { get; init; }
+    public int RecentPendingRanges { get; init; }
+    public int HistoricalPendingRanges { get; init; }
+    public int AllowanceBlockedRanges { get; init; }
+    public int PermanentlyBlockedRanges { get; init; }
+    public DateTimeOffset? NextAttemptUtc { get; init; }
+    public string? LastFailure { get; init; }
 }
 
 public sealed record MarketDataInstrumentHealth(

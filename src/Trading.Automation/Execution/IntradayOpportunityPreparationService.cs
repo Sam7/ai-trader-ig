@@ -163,7 +163,7 @@ public sealed class IntradayOpportunityPreparationService : IIntradayOpportunity
 
         var latestBar = series.Bars.OrderByDescending(bar => bar.TimestampUtc).First();
         var maxAge = TimeSpan.FromMinutes(options.FreshPriceMaxAgeMinutes);
-        if (requestedAtUtc - latestBar.TimestampUtc > maxAge)
+        if (requestedAtUtc - latestBar.TimestampUtc > maxAge && !options.AllowStalePriceDataForDiagnostics)
         {
             _logger.LogInformation(
                 "Skipping {Instrument}: latest bar at {TimestampUtc} is older than {MaxAge}.",
@@ -171,6 +171,15 @@ public sealed class IntradayOpportunityPreparationService : IIntradayOpportunity
                 latestBar.TimestampUtc,
                 maxAge);
             return null;
+        }
+
+        if (requestedAtUtc - latestBar.TimestampUtc > maxAge)
+        {
+            _logger.LogWarning(
+                "Using stale local price data for diagnostics for {Instrument}: latest bar at {TimestampUtc} is older than {MaxAge}.",
+                market.Instrument,
+                latestBar.TimestampUtc,
+                maxAge);
         }
 
         var currentBid = latestBar.BidClose;

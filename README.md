@@ -107,10 +107,11 @@ Market data is the lifeblood of the charting and AI analysis workflows. It is ha
 
 * **SQLite Storage**: Price data is stored in `ig-market-data.sqlite` with Write-Ahead Logging (WAL) enabled. The schema tracks `price_bars`, connection health (`market_data_health`), and historical backfill status (`market_data_coverage`).
 * **Live Streaming**: The system uses `IgMarketDataStreamClient` to connect to IG's Lightstreamer endpoint, subscribing to items like `CHART:{epic}:5MINUTE`. Stream callbacks are bounded and coalesce expendable forming-candle updates before batched SQLite writes; finalized candles are preserved or the stream fails loudly instead of silently losing data.
-* **Historical Backfill**: If the system detects gaps (e.g., after a restart), the `MarketDataCollector` requests historical data via REST (`GetPricesAsync`). **Crucial note:** IG enforces strict historical data allowance limits. The codebase catches these specific allowance exceptions to prevent infinite retry loops.
+* **Historical recovery**: `MarketDataService` and chart/AI preparation are cache-only; they never silently call IG REST for a missing range. Automatic recovery is a durable, one-item queue with `Disabled`, `Observe`, `RecentOnly`, and `RecentAndHistorical` modes. Recent tail work is prioritized; historical work is budgeted from the returned IG allowance and retains a 2,000-point reserve. Production currently sets this recurring recovery mode to `Disabled` while the memory investigation is underway.
+* **Deployment continuity**: before a production replacement, the staged worker records each market's final-bar checkpoint and publishes a verified SQLite snapshot; failure blocks the restart. After the new worker has reconnected, it repairs only the bounded restart gap through the same rate- and allowance-aware recovery coordinator. The deployment workflow requires a `Succeeded` continuity report; an IG-confirmed closed or suspended no-bar interval is recorded as evidence rather than treated as a gap.
 * **Cloud Snapshots**: The production worker can publish a validated SQLite snapshot to GCS every five minutes using the Google Cloud Storage .NET client. Local development can mirror that snapshot with Application Default Credentials, validate it, and transactionally import final market-data bars without replacing an active SQLite file.
 * **Worker Health**: The worker writes `worker-status.json` locally and can publish `market-data/health/worker-status.json` to GCS. The payload includes process memory, GC state, stream queue depth, persisted-update counters, latest market-data freshness, and the most recent chart/evidence operation size and duration. A separate bounded one-second/five-second memory-forensics path captures cgroup evidence and post-exit state without retaining market payloads. See [worker memory diagnostics](docs/worker-memory-diagnostics.md) before changing memory limits or GC settings.
-* **Mirror Mode**: When `MarketData:CloudSnapshot:Mirror:Enabled` is `true`, automatic IG historical REST backfill is disabled. Local workflows read the mirrored data from the normal `MarketDataService` path. Explicit REST backfill remains available through the `marketdata backfill` CLI command.
+* **Mirror Mode**: Local workflows read validated mirrored data through the normal cache-only `MarketDataService` path. Explicit REST backfill remains available through the `marketdata backfill` CLI command and reports the returned IG allowance.
 * **State Separation**: Cloud snapshots import only `instruments` and final `price_bars`. Local `market_data_health`, `market_data_coverage`, observability, workflow, and transient state remain local so the production database does not overwrite local operational state.
 * **Execution Boundary Storage**: Broker mutation idempotency lives in a separate SQLite file, `Logs/Execution/execution-boundary.sqlite`, not in the market-data database. It stores durable operation reservations, stop/limit protection intent, deal references, submission attempts, broker outcomes, and reconciliation state for manual CLI and automated execution paths.
 * **Aggregation**: `PriceBarAggregator` allows the base 5-minute canonical data to be rolled up dynamically into 10-minute or 1-hour candles for the AI charts.
@@ -131,7 +132,6 @@ gcloud auth application-default login
 {
   "MarketData": {
     "StorePath": "Logs/MarketData/ig-market-data.sqlite",
-    "BackfillEnabled": true,
     "CloudSnapshot": {
       "BucketName": "YOUR_GCS_BUCKET",
       "ObjectName": "market-data/ig-market-data.sqlite",
@@ -164,7 +164,7 @@ Troubleshooting:
 * **Permission failures**: verify ADC can read the bucket/object and that the GCS object path matches `BucketName` plus `ObjectName`.
 * **Schema errors**: the mirror rejects snapshots that do not contain the current `instruments` and `price_bars` schema. It preserves the last valid local data.
 * **Corrupt downloads**: validation runs `PRAGMA quick_check`; corrupt snapshots are rejected before import.
-* **Unexpected IG REST calls**: mirror mode disables automatic historical backfill, but direct manual commands such as `markets prices`, `markets chart`, and `marketdata backfill` intentionally call IG.
+* **Unexpected IG REST calls**: automatic cache reads do not call IG. Use the worker health recovery fields to distinguish queued/planned work from executed recovery; manual broker commands and `marketdata backfill` remain deliberate IG calls.
 
 ---
 

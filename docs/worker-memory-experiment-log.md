@@ -4,7 +4,7 @@ This is the short, durable record of experiments investigating the worker's out-
 
 ## Current conclusion
 
-Chart rendering is a material native/runtime cost, but the isolated lab does not explain the whole 480 MiB worker limit. A fresh 1,152-bar five-minute chart added approximately 20.5–25.0 MiB peak PSS. Renderer/cache growth reached approximately 26 MiB and then plateaued in a 500-render discard test. Retaining returned PNG buffers grows approximately with the number of charts retained. The worker still needs a combined market-data plus chart/AI workload measurement.
+Chart rendering is a material native/runtime cost, but the isolated lab does not explain the whole 480 MiB worker limit. A fresh 1,152-bar five-minute chart added approximately 20.5–25.0 MiB peak PSS. Renderer/cache growth reached approximately 26 MiB and then plateaued in a 500-render discard test. Retaining returned PNG buffers grows approximately with the number of charts retained. Production's contained mid-run spikes are consistent with the old high-frequency historical-recovery scan, so automatic recovery is now disabled in production configuration and redesigned as a bounded, quota-aware queue for controlled reintroduction.
 
 Confidence: medium. The chart evidence is repeatable in the isolated Linux cgroup lab, but it is not a production worker trace.
 
@@ -18,6 +18,8 @@ Confidence: medium. The chart evidence is repeatable in the isolated Linux cgrou
 - Retaining 500 PNG results added approximately 26–32 MiB relative to the warmed discard path, consistent with approximately 52 KiB per PNG.
 - Four concurrent renders added approximately 19–20 MiB peak PSS over the sequential baseline.
 - The chart PNG payload itself is small: approximately 52–62 KiB for the production scenarios tested.
+- The old recovery shape inspected every tracked market across a 14-day window on a three-second cadence before REST admission, creating avoidable allocation churn even when no request could run.
+- The worker source now keeps cache reads broker-free and persists recovery work and one global historical-allowance budget. Production configuration leaves automatic recovery disabled pending a measured rollout.
 
 ## Rejected assumptions
 
@@ -35,6 +37,7 @@ Confidence: medium. The chart evidence is repeatable in the isolated Linux cgrou
 | MEM-2026-07-18-03 | 2026-07-18 | What is the fresh production chart increment? | Five production-only runs; 1,152-bar five-minute charts added 20.5–25.0 MiB peak PSS. | Include native chart headroom in worker sizing. |
 | MEM-2026-07-18-04 | 2026-07-18 | Is repeated discard a linear leak? | 500-render discard run plateaued near 26 MiB growth after about 200 renders. | Treat as bounded cache warm-up for now; verify after library upgrades. |
 | MEM-2026-07-18-05 | 2026-07-18 | Does caller retention grow with chart count? | 500 retained PNGs added approximately 26–32 MiB. | Bound retained chart count/bytes in the worker path. |
+| MEM-2026-07-22-06 | 2026-07-22 | Could recovery explain the contained production spikes without spending IG quota unsafely? | Legacy planning was broad and frequent; redesign separates planning from execution and keeps all automatic REST behind one budgeted queue. | Keep production recovery disabled; reintroduce `Observe`, then `RecentOnly`, only with diagnostic evidence. |
 
 ## Experiment details
 
@@ -72,6 +75,13 @@ Confidence: medium. The chart evidence is repeatable in the isolated Linux cgrou
 - Conclusion: separate bounded renderer warm-up from caller retention. Neither result alone explains the worker OOM.
 - Evidence: `artifacts/chart-memory-lab/chart-memory-20260718T035654Z/` and `artifacts/chart-memory-lab/chart-memory-20260718T035929Z/`.
 
+### MEM-2026-07-22-06 — Recovery allocation and quota containment
+
+- Question: Could the contained production-memory spikes be recovery work rather than charting, and can that work be made safe to reintroduce?
+- Observed: the previous recovery loop considered every tracked market across a 14-day history on a three-second cadence before REST rate admission. The production worker did not run chart/AI automation during the observed segments. IG historical allowance is account-wide enough that this shape can exhaust it before a full backfill completes.
+- Decision: production recovery remains `Disabled`. Cache reads never trigger REST. A future controlled rollout uses `Observe` first, then `RecentOnly`; only `RecentAndHistorical` spends the persisted global background budget after its 2,000-point reserve.
+- Evidence: production worker memory traces and source inspection; no new load experiment was run for this implementation change.
+
 ## Open questions
 
 - What is the combined peak when the real market-data baseline and the intraday chart/AI preparation path run in the same worker process?
@@ -86,3 +96,11 @@ Confidence: medium. The chart evidence is repeatable in the isolated Linux cgrou
 - Separate observation from interpretation; do not promote a hypothesis to a conclusion without repeated evidence.
 - Link raw artifacts, but do not paste large tables or traces into this file.
 - Update `Current conclusion`, `Confirmed findings`, and `Rejected assumptions` when the evidence changes.
+
+## Operational safeguards implemented
+
+### 2026-07-23 — deployment continuity guard
+
+- A production deployment now keeps the old collector live until a staged worker has written final-bar checkpoints and published a verified market-data snapshot.
+- Restart-gap repair is bounded to 30 minutes and is distinct from recurring recovery, which remains disabled in production during the OOM investigation.
+- The deploy workflow requires a successful continuity report; closed/suspended no-bar intervals require IG session evidence.

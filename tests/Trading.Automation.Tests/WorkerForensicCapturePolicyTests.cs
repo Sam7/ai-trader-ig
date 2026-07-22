@@ -16,6 +16,8 @@ public sealed class WorkerForensicCapturePolicyTests
             .Should().Equal(320L * 1024 * 1024);
         WorkerForensicCapturePolicy.GetNewCrossings(384L * 1024 * 1024, captured)
             .Should().Equal(384L * 1024 * 1024);
+        WorkerForensicCapturePolicy.GetNewCrossings(480L * 1024 * 1024, captured)
+            .Should().Equal(480L * 1024 * 1024);
         WorkerForensicCapturePolicy.GetNewCrossings(512L * 1024 * 1024, captured).Should().BeEmpty();
     }
 }

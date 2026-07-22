@@ -7,6 +7,7 @@ using Trading.AI.DailyBriefing;
 using Trading.AI.Prompts;
 using Trading.Automation.Configuration;
 using Trading.Automation.Execution;
+using Trading.Automation.Health;
 using Trading.Strategy.DayPlanning;
 using Trading.Strategy.Persistence;
 using Trading.Strategy.Shared;
@@ -92,6 +93,7 @@ public sealed class IntradayOpportunityScanServiceTests
         var services = new ServiceCollection();
         services.AddSingleton(planner);
         services.AddSingleton(Options.Create(new AutomationOptions()));
+        services.AddSingleton<WorkerOperationMetrics>();
         services.AddSingleton<ILogger<DailyBriefingPlanService>>(NullLogger<DailyBriefingPlanService>.Instance);
         services.AddTransient<DailyBriefingPlanService>();
         var provider = services.BuildServiceProvider();

@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Trading.Automation.Configuration;
+using Trading.Automation.Health;
 using Trading.Strategy.DayPlanning;
 using Trading.Strategy.Shared;
 
@@ -10,15 +11,18 @@ public sealed class DailyBriefingPlanService
 {
     private readonly ITradingDayPlanner _planner;
     private readonly AutomationOptions _options;
+    private readonly WorkerOperationMetrics _operationMetrics;
     private readonly ILogger<DailyBriefingPlanService> _logger;
 
     public DailyBriefingPlanService(
         ITradingDayPlanner planner,
         IOptions<AutomationOptions> options,
+        WorkerOperationMetrics operationMetrics,
         ILogger<DailyBriefingPlanService> logger)
     {
         _planner = planner;
         _options = options.Value;
+        _operationMetrics = operationMetrics;
         _logger = logger;
     }
 
@@ -32,7 +36,18 @@ public sealed class DailyBriefingPlanService
     public async Task<TradingDayPlan> RunAsync(DateOnly tradingDate, CancellationToken cancellationToken = default)
     {
         _logger.LogInformation("Planning trading day for {TradingDate}.", tradingDate);
-        var plan = await _planner.PlanAsync(new TradingDayRequest(tradingDate), cancellationToken);
+        var operation = _operationMetrics.Begin("daily-plan", itemCount: 1);
+        TradingDayPlan plan;
+        try
+        {
+            plan = await _planner.PlanAsync(new TradingDayRequest(tradingDate), cancellationToken);
+            operation.Complete();
+        }
+        catch
+        {
+            operation.Fail();
+            throw;
+        }
         _logger.LogInformation(
             "Planned trading day for {TradingDate}. Watch list contains {WatchListCount} markets.",
             tradingDate,

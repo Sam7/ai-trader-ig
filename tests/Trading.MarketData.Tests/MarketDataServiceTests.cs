@@ -30,16 +30,12 @@ public sealed class MarketDataServiceTests
     }
 
     [Fact]
-    public async Task GetBarsAsync_WithMissingTail_ShouldFetchOnlyTheTailGapAndPersistIt()
+    public async Task GetBarsAsync_WithMissingTail_ShouldReturnPartialWithoutCallingBroker()
     {
         var store = new InMemoryMarketDataStore();
         var gateway = new FakeTradingGateway();
         var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
         await store.UpsertAsync(CreateStoredBars(instrument, "2026-06-29T00:00:00Z", 4, MarketDataSource.Stream));
-        gateway.PriceResponseFactory = request => new PriceSeries(
-            request.Instrument,
-            request.Resolution,
-            [CreateBar("2026-06-29T00:20:00Z"), CreateBar("2026-06-29T00:25:00Z")]);
         var service = CreateService(store, gateway);
 
         var result = await service.GetBarsAsync(new MarketDataRequest(
@@ -48,23 +44,18 @@ public sealed class MarketDataServiceTests
             DateTimeOffset.Parse("2026-06-29T00:00:00Z"),
             DateTimeOffset.Parse("2026-06-29T00:30:00Z")));
 
-        result.Status.Should().Be(MarketDataStatus.Completed);
-        result.Source.Should().Be(MarketDataResultSource.Mixed);
-        result.BackfilledBarCount.Should().Be(2);
-        gateway.PriceRequests.Should().ContainSingle();
-        gateway.PriceRequests[0].Resolution.Should().Be(PriceResolution.FiveMinutes);
-        gateway.PriceRequests[0].FromUtc.Should().Be(DateTimeOffset.Parse("2026-06-29T00:20:00Z"));
-        gateway.PriceRequests[0].ToUtc.Should().Be(DateTimeOffset.Parse("2026-06-29T00:30:00Z"));
+        result.Status.Should().Be(MarketDataStatus.Partial);
+        result.Source.Should().Be(MarketDataResultSource.LocalCache);
+        result.BackfilledBarCount.Should().Be(0);
+        result.Gaps.Should().NotBeEmpty();
+        gateway.PriceRequests.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task GetBarsAsync_WhenBackfillHitsAllowance_ShouldReturnBlockedResultWithLocalBars()
+    public async Task GetBarsAsync_WhenLocalDataHasAGap_ShouldNotConsultBrokerAllowance()
     {
         var store = new InMemoryMarketDataStore();
-        var gateway = new FakeTradingGateway
-        {
-            PriceException = new TradingGatewayException(TradingErrorCode.BrokerError, "IG API error: error.public-api.exceeded-account-historical-data-allowance."),
-        };
+        var gateway = new FakeTradingGateway();
         var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
         await store.UpsertAsync(CreateStoredBars(instrument, "2026-06-29T00:00:00Z", 2, MarketDataSource.Stream));
         var service = CreateService(store, gateway);
@@ -75,13 +66,15 @@ public sealed class MarketDataServiceTests
             DateTimeOffset.Parse("2026-06-29T00:00:00Z"),
             DateTimeOffset.Parse("2026-06-29T00:30:00Z")));
 
-        result.Status.Should().Be(MarketDataStatus.BlockedBackfillAllowance);
+        result.Status.Should().Be(MarketDataStatus.Partial);
+        result.Source.Should().Be(MarketDataResultSource.LocalCache);
         result.Series.Bars.Should().ContainSingle();
         result.Gaps.Should().NotBeEmpty();
+        gateway.PriceRequests.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task GetBarsAsync_WithOnlyUnfinishedLocalBar_ShouldBackfillTheBucket()
+    public async Task GetBarsAsync_WithOnlyUnfinishedLocalBar_ShouldReturnPartialWithoutCallingBroker()
     {
         var store = new InMemoryMarketDataStore();
         var gateway = new FakeTradingGateway();
@@ -95,10 +88,6 @@ public sealed class MarketDataServiceTests
                 MarketDataSource.Stream,
                 isFinal: false),
         ]);
-        gateway.PriceResponseFactory = request => new PriceSeries(
-            request.Instrument,
-            request.Resolution,
-            [CreateBar("2026-06-29T00:00:00Z")]);
         var service = CreateService(store, gateway);
 
         var result = await service.GetBarsAsync(new MarketDataRequest(
@@ -107,10 +96,10 @@ public sealed class MarketDataServiceTests
             DateTimeOffset.Parse("2026-06-29T00:00:00Z"),
             DateTimeOffset.Parse("2026-06-29T00:05:00Z")));
 
-        result.Status.Should().Be(MarketDataStatus.Completed);
-        result.Source.Should().Be(MarketDataResultSource.RestBackfill);
-        gateway.PriceRequests.Should().ContainSingle();
-        result.Series.Bars.Should().ContainSingle();
+        result.Status.Should().Be(MarketDataStatus.Partial);
+        result.Source.Should().Be(MarketDataResultSource.None);
+        result.Series.Bars.Should().BeEmpty();
+        gateway.PriceRequests.Should().BeEmpty();
     }
 
     [Fact]
@@ -133,10 +122,7 @@ public sealed class MarketDataServiceTests
     public async Task GetBarsAsync_WithBackfillDisabledAndNoLocalBars_ShouldReturnPartialWithNoSource()
     {
         var gateway = new FakeTradingGateway();
-        var service = CreateService(
-            new InMemoryMarketDataStore(),
-            gateway,
-            new MarketDataOptions { BackfillEnabled = false });
+        var service = CreateService(new InMemoryMarketDataStore(), gateway);
 
         var result = await service.GetBarsAsync(new MarketDataRequest(
             new InstrumentId("CS.D.BITCOIN.CFD.IP"),
@@ -159,7 +145,6 @@ public sealed class MarketDataServiceTests
             gateway,
             new MarketDataOptions
             {
-                BackfillEnabled = true,
                 CloudSnapshot = new MarketDataCloudSnapshotOptions
                 {
                     Mirror = new MarketDataSnapshotMirrorOptions { Enabled = true },
@@ -186,9 +171,7 @@ public sealed class MarketDataServiceTests
         MarketDataOptions options)
         => new(
             store,
-            gateway,
-            Options.Create(options),
-            NullLogger<MarketDataService>.Instance);
+            Options.Create(options));
 
     private static IReadOnlyList<StoredPriceBar> CreateStoredBars(
         InstrumentId instrument,

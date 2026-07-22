@@ -6,7 +6,14 @@ Console.CancelKeyPress += OnCancelKeyPress;
 
 try
 {
-    await TradingWorkerApplication.RunAsync(args, cancellationSource.Token);
+    if (args.FirstOrDefault() == "--create-deployment-checkpoint")
+    {
+        Environment.ExitCode = await TradingWorkerApplication.RunMaintenanceAsync(args, cancellationSource.Token);
+    }
+    else
+    {
+        await TradingWorkerApplication.RunAsync(args, cancellationSource.Token);
+    }
 }
 finally
 {

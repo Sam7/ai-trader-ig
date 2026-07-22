@@ -14,8 +14,6 @@ public enum MarketDataResultSource
 {
     None = 0,
     LocalCache = 1,
-    RestBackfill = 2,
-    Mixed = 3,
 }
 
 public enum MarketDataStatus
@@ -23,6 +21,4 @@ public enum MarketDataStatus
     Completed = 0,
     Partial = 1,
     UnsupportedResolution = 2,
-    BlockedBackfillAllowance = 3,
-    FailedBackfill = 4,
 }

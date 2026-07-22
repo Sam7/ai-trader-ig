@@ -33,17 +33,26 @@ public static class ServiceCollectionExtensions
         services.AddSingleton<FileMarketDataMirrorStateStore>();
         services.AddSingleton<MarketDataMirrorStatusService>();
         services.AddSingleton<MarketDataSnapshotPublisher>();
+        services.AddSingleton<MarketDataDeploymentContinuityStore>();
         services.AddSingleton<MarketDataSnapshotSynchronizer>();
         services.AddSingleton<MarketDataStreamPipelineMetrics>();
         services.AddSingleton<MarketDataRuntimeActivityMetrics>();
         services.AddSingleton<MarketDataService>();
         services.AddSingleton<MarketDataHistoricalBackfillService>();
+        services.AddSingleton<MarketDataDeploymentContinuityService>();
+        services.AddSingleton(sp => new MarketDataRecoveryPlanner(
+            sp.GetRequiredService<IMarketDataStore>(),
+            sp.GetRequiredService<IMarketDataRecoveryStore>(),
+            sp.GetRequiredService<IMarketSessionEvidenceStore>(),
+            sp.GetRequiredService<IMarketDataClock>(),
+            sp.GetRequiredService<IOptions<MarketDataRecoveryOptions>>().Value));
         services.AddSingleton(sp => new MarketDataRecoveryCoordinator(
             sp.GetRequiredService<IMarketDataStore>(),
             sp.GetRequiredService<IMarketDataRecoveryStore>(),
             sp.GetRequiredService<Trading.Abstractions.ITradingGateway>(),
             sp.GetRequiredService<IMarketDataClock>(),
             sp.GetRequiredService<IOptions<MarketDataRecoveryOptions>>().Value,
+            sp.GetRequiredService<MarketDataRuntimeActivityMetrics>(),
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<MarketDataRecoveryCoordinator>>()));
         services.AddSingleton<MarketDataCollector>();
         services.AddSingleton<IMarketDataCollector>(sp => sp.GetRequiredService<MarketDataCollector>());

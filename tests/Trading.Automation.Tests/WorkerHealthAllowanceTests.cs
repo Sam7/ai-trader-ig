@@ -83,4 +83,29 @@ public sealed class WorkerHealthAllowanceTests
         health.AllowanceExpiresAtUtc.Should().Be(now.AddHours(1));
         health.AllowanceExpiryEstimated.Should().BeTrue();
     }
+
+    [Fact]
+    public void BuildRecoveryHealth_should_report_global_allowance_block_for_historical_work_only()
+    {
+        var now = DateTimeOffset.Parse("2026-07-22T00:00:00Z");
+        var recent = new MarketDataRecoveryWorkItem(
+            new InstrumentId("CS.D.BITCOIN.CFD.IP"), PriceResolution.FiveMinutes,
+            MarketDataRecoveryReason.RecentTail, 0, now.AddHours(-1), now, now.AddHours(-1),
+            MarketDataRecoveryWorkStatus.Pending, now, 0, 0);
+        var historical = new MarketDataRecoveryWorkItem(
+            new InstrumentId("CS.D.GBPUSD.CFD.IP"), PriceResolution.FiveMinutes,
+            MarketDataRecoveryReason.HistoricalAudit, 1000, now.AddDays(-14), now.AddDays(-1), now.AddDays(-14),
+            MarketDataRecoveryWorkStatus.Pending, now, 0, 0);
+        var budget = new HistoricalAllowanceBudget(0, now.AddHours(3), now, now.AddHours(3), ResetEstimated: true);
+
+        var health = WorkerHealthReporterHostedService.BuildRecoveryHealth([recent, historical], budget, now);
+
+        health.PendingRanges.Should().Be(2);
+        health.RecentPendingRanges.Should().Be(1);
+        health.HistoricalPendingRanges.Should().Be(1);
+        health.AllowanceBlockedRanges.Should().Be(1);
+        health.PermanentlyBlockedRanges.Should().Be(0);
+        health.ActiveInstrument.Should().Be("CS.D.GBPUSD.CFD.IP");
+        health.AllowanceExpiryEstimated.Should().BeTrue();
+    }
 }

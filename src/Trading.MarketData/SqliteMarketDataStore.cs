@@ -189,6 +189,126 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
         finally { _gate.Release(); }
     }
 
+    public async Task UpsertRecoveryWorkItemAsync(MarketDataRecoveryWorkItem item, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken);
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+            var instrumentId = await GetOrCreateInstrumentIdAsync(connection, (SqliteTransaction)transaction, item.Instrument.Value, new Dictionary<string, long>(StringComparer.Ordinal), cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.Transaction = (SqliteTransaction)transaction;
+            command.CommandText = """
+                INSERT INTO market_data_recovery_work (
+                    instrument_fk, resolution, reason, priority, from_utc_ticks, to_utc_ticks, cursor_utc_ticks,
+                    status, next_attempt_utc_ticks, attempt_count, returned_points, last_failure)
+                VALUES ($instrument_fk, $resolution, $reason, $priority, $from, $to, $cursor, $status, $next, $attempts, $points, $failure)
+                ON CONFLICT(instrument_fk, resolution, reason) DO UPDATE SET
+                    priority = excluded.priority, from_utc_ticks = excluded.from_utc_ticks, to_utc_ticks = excluded.to_utc_ticks,
+                    cursor_utc_ticks = excluded.cursor_utc_ticks, status = excluded.status,
+                    next_attempt_utc_ticks = excluded.next_attempt_utc_ticks, attempt_count = excluded.attempt_count,
+                    returned_points = excluded.returned_points, last_failure = excluded.last_failure;
+                """;
+            command.Parameters.AddWithValue("$instrument_fk", instrumentId); command.Parameters.AddWithValue("$resolution", (int)item.Resolution);
+            command.Parameters.AddWithValue("$reason", (int)item.Reason); command.Parameters.AddWithValue("$priority", item.Priority);
+            command.Parameters.AddWithValue("$from", item.FromUtc.UtcTicks); command.Parameters.AddWithValue("$to", item.ToUtc.UtcTicks); command.Parameters.AddWithValue("$cursor", item.CursorUtc.UtcTicks);
+            command.Parameters.AddWithValue("$status", (int)item.Status); command.Parameters.AddWithValue("$next", item.NextAttemptUtc.UtcTicks);
+            command.Parameters.AddWithValue("$attempts", item.AttemptCount); command.Parameters.AddWithValue("$points", item.ReturnedPoints); command.Parameters.AddWithValue("$failure", (object?)item.LastFailure ?? DBNull.Value);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<MarketDataRecoveryWorkItem>> GetRecoveryWorkItemsAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken);
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT i.instrument_value, w.resolution, w.reason, w.priority, w.from_utc_ticks, w.to_utc_ticks, w.cursor_utc_ticks,
+                       w.status, w.next_attempt_utc_ticks, w.attempt_count, w.returned_points, w.last_failure
+                FROM market_data_recovery_work w JOIN instruments i ON i.id = w.instrument_fk
+                ORDER BY w.reason, w.priority, i.instrument_value;
+                """;
+            var results = new List<MarketDataRecoveryWorkItem>();
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            while (await reader.ReadAsync(cancellationToken))
+            {
+                results.Add(new MarketDataRecoveryWorkItem(
+                    new InstrumentId(reader.GetString(0)),
+                    (PriceResolution)reader.GetInt32(1),
+                    (MarketDataRecoveryReason)reader.GetInt32(2),
+                    reader.GetInt32(3),
+                    new DateTimeOffset(reader.GetInt64(4), TimeSpan.Zero),
+                    new DateTimeOffset(reader.GetInt64(5), TimeSpan.Zero),
+                    new DateTimeOffset(reader.GetInt64(6), TimeSpan.Zero),
+                    (MarketDataRecoveryWorkStatus)reader.GetInt32(7),
+                    new DateTimeOffset(reader.GetInt64(8), TimeSpan.Zero),
+                    reader.GetInt32(9),
+                    reader.GetInt32(10),
+                    reader.IsDBNull(11) ? null : reader.GetString(11)));
+            }
+            return results;
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<HistoricalAllowanceBudget?> GetHistoricalAllowanceBudgetAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken);
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """SELECT remaining_points, reset_at_utc_ticks, observed_at_utc_ticks, next_background_attempt_utc_ticks, reset_estimated FROM market_data_historical_allowance WHERE id = 1;""";
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken)) return null;
+            return new HistoricalAllowanceBudget(
+                reader.IsDBNull(0) ? null : reader.GetInt32(0),
+                reader.IsDBNull(1) ? null : new DateTimeOffset(reader.GetInt64(1), TimeSpan.Zero),
+                new DateTimeOffset(reader.GetInt64(2), TimeSpan.Zero),
+                reader.IsDBNull(3) ? null : new DateTimeOffset(reader.GetInt64(3), TimeSpan.Zero),
+                reader.GetInt64(4) != 0);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task UpsertHistoricalAllowanceBudgetAsync(HistoricalAllowanceBudget budget, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureInitializedAsync(cancellationToken);
+            await using var connection = new SqliteConnection(_connectionString);
+            await connection.OpenAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                INSERT INTO market_data_historical_allowance (id, remaining_points, reset_at_utc_ticks, observed_at_utc_ticks, next_background_attempt_utc_ticks, reset_estimated)
+                VALUES (1, $remaining, $reset, $observed, $next, $estimated)
+                ON CONFLICT(id) DO UPDATE SET remaining_points = excluded.remaining_points, reset_at_utc_ticks = excluded.reset_at_utc_ticks,
+                    observed_at_utc_ticks = excluded.observed_at_utc_ticks, next_background_attempt_utc_ticks = excluded.next_background_attempt_utc_ticks,
+                    reset_estimated = excluded.reset_estimated;
+                """;
+            command.Parameters.AddWithValue("$remaining", (object?)budget.RemainingPoints ?? DBNull.Value);
+            command.Parameters.AddWithValue("$reset", budget.ResetAtUtc is null ? DBNull.Value : budget.ResetAtUtc.Value.UtcTicks);
+            command.Parameters.AddWithValue("$observed", budget.ObservedAtUtc.UtcTicks);
+            command.Parameters.AddWithValue("$next", budget.NextBackgroundAttemptUtc is null ? DBNull.Value : budget.NextBackgroundAttemptUtc.Value.UtcTicks);
+            command.Parameters.AddWithValue("$estimated", budget.ResetEstimated ? 1 : 0);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+        finally { _gate.Release(); }
+    }
+
     public async Task<StoredPriceBar?> GetLatestFinalAsync(
         InstrumentId instrument,
         PriceResolution resolution,
@@ -805,6 +925,39 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
                 last_failure TEXT NULL,
                 PRIMARY KEY (instrument_fk, resolution, from_utc_ticks, to_utc_ticks)
             ) WITHOUT ROWID;
+
+            CREATE TABLE IF NOT EXISTS market_data_recovery_work (
+                instrument_fk INTEGER NOT NULL REFERENCES instruments(id),
+                resolution INTEGER NOT NULL,
+                reason INTEGER NOT NULL,
+                priority INTEGER NOT NULL,
+                from_utc_ticks INTEGER NOT NULL,
+                to_utc_ticks INTEGER NOT NULL,
+                cursor_utc_ticks INTEGER NOT NULL,
+                status INTEGER NOT NULL,
+                next_attempt_utc_ticks INTEGER NOT NULL,
+                attempt_count INTEGER NOT NULL,
+                returned_points INTEGER NOT NULL,
+                last_failure TEXT NULL,
+                PRIMARY KEY (instrument_fk, resolution, reason)
+            ) WITHOUT ROWID;
+
+            CREATE TABLE IF NOT EXISTS market_data_historical_allowance (
+                id INTEGER PRIMARY KEY CHECK (id = 1),
+                remaining_points INTEGER NULL,
+                reset_at_utc_ticks INTEGER NULL,
+                observed_at_utc_ticks INTEGER NOT NULL,
+                next_background_attempt_utc_ticks INTEGER NULL,
+                reset_estimated INTEGER NOT NULL
+            );
+
+            INSERT OR IGNORE INTO market_data_recovery_work (
+                instrument_fk, resolution, reason, priority, from_utc_ticks, to_utc_ticks, cursor_utc_ticks,
+                status, next_attempt_utc_ticks, attempt_count, returned_points, last_failure)
+            SELECT instrument_fk, resolution, 2, 1000, from_utc_ticks, to_utc_ticks, cursor_utc_ticks,
+                   1, 0, 0, returned_points, last_failure
+            FROM market_data_recovery
+            WHERE is_complete = 0;
             """;
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -1441,12 +1594,22 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
         IReadOnlyList<MarketDataCoverageRecord> covered)
     {
         var gaps = new List<MarketDataGap>();
+        var orderedCoverage = covered.OrderBy(record => record.FromUtc).ThenBy(record => record.ToUtc).ToArray();
+        var coverageIndex = 0;
         DateTimeOffset? gapStart = null;
         var cursor = fromUtc;
 
         while (cursor < toUtc)
         {
-            var missing = !present.Contains(cursor) && !IsCovered(cursor, covered);
+            while (coverageIndex < orderedCoverage.Length && orderedCoverage[coverageIndex].ToUtc <= cursor)
+            {
+                coverageIndex++;
+            }
+
+            var isCovered = coverageIndex < orderedCoverage.Length
+                && cursor >= orderedCoverage[coverageIndex].FromUtc
+                && cursor < orderedCoverage[coverageIndex].ToUtc;
+            var missing = !present.Contains(cursor) && !isCovered;
             if (missing)
             {
                 gapStart ??= cursor;
@@ -1467,9 +1630,6 @@ public sealed class SqliteMarketDataStore : IMarketDataStore, IMarketDataHealthS
 
         return gaps;
     }
-
-    private static bool IsCovered(DateTimeOffset bucketStartUtc, IReadOnlyList<MarketDataCoverageRecord> covered)
-        => covered.Any(record => bucketStartUtc >= record.FromUtc && bucketStartUtc < record.ToUtc);
 
     private sealed record LegacyPriceBarRow(
         string InstrumentValue,

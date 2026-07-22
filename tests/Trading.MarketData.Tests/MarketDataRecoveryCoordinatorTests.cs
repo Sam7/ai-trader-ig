@@ -8,7 +8,17 @@ namespace Trading.MarketData.Tests;
 public sealed class MarketDataRecoveryCoordinatorTests
 {
     [Fact]
-    public async Task RecoverOnceAsync_UsesHighestPriorityAndNewestChunk()
+    public void RecoveryOptions_ShouldRejectAnUnsafeRequestRate()
+    {
+        var options = new MarketDataRecoveryOptions { MaximumRequestsPerMinute = 0 };
+
+        var action = options.Validate;
+
+        action.Should().Throw<InvalidOperationException>().WithMessage("*request and allowance settings*");
+    }
+
+    [Fact]
+    public async Task ProcessNextAsync_UsesRecentWorkBeforeHistoricalWork()
     {
         var now = DateTimeOffset.Parse("2026-07-13T00:00:00Z");
         var store = new InMemoryMarketDataStore();
@@ -16,52 +26,112 @@ public sealed class MarketDataRecoveryCoordinatorTests
         var service = Create(store, gateway, now);
         var gold = new InstrumentId("GOLD");
         var wti = new InstrumentId("WTI");
+        await store.UpsertRecoveryWorkItemAsync(Work(wti, MarketDataRecoveryReason.HistoricalAudit, 1, now.AddHours(-2), now));
+        await store.UpsertRecoveryWorkItemAsync(Work(gold, MarketDataRecoveryReason.RecentTail, 2, now.AddMinutes(-10), now));
 
-        await service.RecoverOnceAsync([new MarketDataRecoveryTarget(wti, 2), new MarketDataRecoveryTarget(gold, 1)], PriceResolution.FiveMinutes);
+        (await service.ProcessNextAsync(MarketDataRecoveryMode.RecentAndHistorical)).Should().BeTrue();
 
         gateway.Requests.Should().ContainSingle();
         gateway.Requests[0].Instrument.Should().Be(gold);
-        gateway.Requests[0].FromUtc.Should().Be(now.AddMinutes(-250 * 5));
-        gateway.Requests[0].ToUtc.Should().Be(now);
     }
 
     [Fact]
-    public async Task RecoverOnceAsync_NoBarsCompletesRangeAndDoesNotRequestItAgain()
+    public async Task ProcessNextAsync_UsesDeploymentContinuityBeforeOtherAutomaticWork()
+    {
+        var now = DateTimeOffset.Parse("2026-07-13T00:00:00Z");
+        var store = new InMemoryMarketDataStore();
+        var gateway = new RecoveryGateway(request => new PriceSeries(
+            request.Instrument,
+            request.Resolution,
+            Bars(request.FromUtc!.Value, request.ToUtc!.Value)));
+        var service = Create(store, gateway, now);
+        var deployment = new InstrumentId("GOLD");
+        await store.UpsertRecoveryWorkItemAsync(Work(new InstrumentId("WTI"), MarketDataRecoveryReason.RecentTail, 1, now.AddMinutes(-10), now));
+        await store.UpsertRecoveryWorkItemAsync(Work(deployment, MarketDataRecoveryReason.DeploymentContinuity, -1_000_000, now.AddMinutes(-10), now));
+
+        (await service.ProcessNextAsync(MarketDataRecoveryMode.RecentOnly)).Should().BeTrue();
+
+        gateway.Requests.Should().ContainSingle();
+        gateway.Requests[0].Instrument.Should().Be(deployment);
+    }
+
+    [Fact]
+    public async Task ProcessNextAsync_NoBarsCompletesWorkAndRecordsCoverage()
+    {
+        var now = DateTimeOffset.Parse("2026-07-13T00:00:00Z");
+        var store = new InMemoryMarketDataStore();
+        var metrics = new MarketDataRuntimeActivityMetrics();
+        var service = Create(store, new RecoveryGateway(_ => new PriceSeries(new InstrumentId("GOLD"), PriceResolution.FiveMinutes, [])), now, metrics);
+        var target = new InstrumentId("GOLD");
+        await store.UpsertRecoveryWorkItemAsync(Work(target, MarketDataRecoveryReason.RecentTail, 1, now.AddMinutes(-10), now));
+
+        (await service.ProcessNextAsync(MarketDataRecoveryMode.RecentOnly)).Should().BeTrue();
+
+        (await store.GetRecoveryWorkItemsAsync()).Should().ContainSingle().Which.Status.Should().Be(MarketDataRecoveryWorkStatus.Completed);
+        (await store.GetCoverageAsync(target, PriceResolution.FiveMinutes, now.AddMinutes(-10), now))
+            .Should().ContainSingle(x => x.Status == MarketDataCoverageStatus.NoBars);
+        var activity = metrics.Snapshot();
+        activity.RecoveryStartedCount.Should().Be(1);
+        activity.RecoveryCompletedCount.Should().Be(1);
+        activity.RecoveryFailedCount.Should().Be(0);
+        activity.ActiveRecoveryCount.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task ProcessNextAsync_WhenAllowanceFails_DefersWorkAndPersistsEstimatedBudget()
+    {
+        var now = DateTimeOffset.Parse("2026-07-13T00:00:00Z");
+        var store = new InMemoryMarketDataStore();
+        var gateway = new RecoveryGateway(_ => throw new TradingGatewayException(TradingErrorCode.BrokerError, "IG API error: error.public-api.exceeded-account-historical-data-allowance."));
+        var service = Create(store, gateway, now);
+        await store.UpsertRecoveryWorkItemAsync(Work(new InstrumentId("GOLD"), MarketDataRecoveryReason.RecentTail, 1, now.AddMinutes(-10), now));
+
+        (await service.ProcessNextAsync(MarketDataRecoveryMode.RecentOnly)).Should().BeFalse();
+
+        var budget = await store.GetHistoricalAllowanceBudgetAsync();
+        budget.Should().Be(new HistoricalAllowanceBudget(0, now.AddHours(1), now, now.AddHours(1), ResetEstimated: true));
+        (await store.GetRecoveryWorkItemsAsync()).Should().ContainSingle().Which.NextAttemptUtc.Should().Be(now.AddHours(1));
+    }
+
+    [Fact]
+    public async Task ProcessNextAsync_DoesNotSpendHistoricalReserve()
+    {
+        var now = DateTimeOffset.Parse("2026-07-13T00:00:00Z");
+        var store = new InMemoryMarketDataStore();
+        var gateway = new RecoveryGateway(request => new PriceSeries(request.Instrument, request.Resolution, Bars(request.FromUtc!.Value, request.ToUtc!.Value)));
+        var service = Create(store, gateway, now);
+        await store.UpsertHistoricalAllowanceBudgetAsync(new HistoricalAllowanceBudget(2_000, now.AddDays(7), now));
+        await store.UpsertRecoveryWorkItemAsync(Work(new InstrumentId("GOLD"), MarketDataRecoveryReason.HistoricalAudit, 1, now.AddHours(-2), now));
+
+        (await service.ProcessNextAsync(MarketDataRecoveryMode.RecentAndHistorical)).Should().BeFalse();
+
+        gateway.Requests.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task ProcessNextAsync_ObserveModeDoesNotAuthenticateOrCallIg()
     {
         var now = DateTimeOffset.Parse("2026-07-13T00:00:00Z");
         var store = new InMemoryMarketDataStore();
         var gateway = new RecoveryGateway(request => new PriceSeries(request.Instrument, request.Resolution, []));
         var service = Create(store, gateway, now);
-        var target = new MarketDataRecoveryTarget(new InstrumentId("GOLD"), 1);
+        await store.UpsertRecoveryWorkItemAsync(Work(new InstrumentId("GOLD"), MarketDataRecoveryReason.RecentTail, 1, now.AddMinutes(-10), now));
 
-        await service.RecoverOnceAsync([target], PriceResolution.FiveMinutes);
-        gateway.Requests.Should().HaveCount(1);
-        (await store.GetCoverageAsync(target.Instrument, PriceResolution.FiveMinutes, now.AddDays(-14), now)).Should().ContainSingle(x => x.Status == MarketDataCoverageStatus.NoBars);
+        (await service.ProcessNextAsync(MarketDataRecoveryMode.Observe)).Should().BeFalse();
+
+        gateway.Requests.Should().BeEmpty();
+        (await store.GetRecoveryWorkItemsAsync()).Should().ContainSingle().Which.Status.Should().Be(MarketDataRecoveryWorkStatus.Pending);
     }
 
-    [Fact]
-    public async Task RecoverOnceAsync_WhenAllowanceFails_PersistsAnEstimatedOneHourExpiry()
-    {
-        var now = DateTimeOffset.Parse("2026-07-13T00:00:00Z");
-        var store = new InMemoryMarketDataStore();
-        var gateway = new RecoveryGateway(_ => throw new TradingGatewayException(
-            TradingErrorCode.BrokerError,
-            "IG API error: error.public-api.exceeded-account-historical-data-allowance."));
-        var service = Create(store, gateway, now);
-        var target = new MarketDataRecoveryTarget(new InstrumentId("GOLD"), 1);
+    private static MarketDataRecoveryWorkItem Work(InstrumentId instrument, MarketDataRecoveryReason reason, int priority, DateTimeOffset fromUtc, DateTimeOffset toUtc)
+        => new(instrument, PriceResolution.FiveMinutes, reason, priority, fromUtc, toUtc, fromUtc, MarketDataRecoveryWorkStatus.Pending, fromUtc, 0, 0);
 
-        var result = await service.RecoverOnceAsync([target], PriceResolution.FiveMinutes);
-
-        result.BlockedRanges.Should().ContainSingle();
-        result.RemainingAllowance.Should().Be(0);
-        result.AllowanceExpiresAtUtc.Should().Be(now.AddHours(1));
-        (await store.GetRecoveryStatesAsync()).Should().ContainSingle(state =>
-            state.AllowanceExpiresAtUtc == now.AddHours(1)
-            && state.LastFailure!.Contains("allowance", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static MarketDataRecoveryCoordinator Create(InMemoryMarketDataStore store, RecoveryGateway gateway, DateTimeOffset now)
-        => new(store, store, gateway, new FixedMarketDataClock(now), new MarketDataRecoveryOptions(), NullLogger<MarketDataRecoveryCoordinator>.Instance);
+    private static MarketDataRecoveryCoordinator Create(
+        InMemoryMarketDataStore store,
+        RecoveryGateway gateway,
+        DateTimeOffset now,
+        MarketDataRuntimeActivityMetrics? metrics = null)
+        => new(store, store, gateway, new FixedMarketDataClock(now), new MarketDataRecoveryOptions(), metrics ?? new MarketDataRuntimeActivityMetrics(), NullLogger<MarketDataRecoveryCoordinator>.Instance);
 
     private static IReadOnlyList<PriceBar> Bars(DateTimeOffset from, DateTimeOffset to)
         => Enumerable.Range(0, (int)((to - from).TotalMinutes / 5)).Select(i => new PriceBar(from.AddMinutes(i * 5), 1, 1, 1, 1, 1, 1, 1, 1, null)).ToArray();

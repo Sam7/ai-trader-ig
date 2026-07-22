@@ -9,6 +9,8 @@ public sealed class InMemoryMarketDataStore : IMarketDataStore, IMarketSessionEv
     private readonly List<MarketDataCoverageRecord> _coverage = [];
     private readonly List<MarketSessionStatusRecord> _sessionStatus = [];
     private readonly List<MarketDataRecoveryState> _recovery = [];
+    private readonly List<MarketDataRecoveryWorkItem> _recoveryWork = [];
+    private HistoricalAllowanceBudget? _historicalAllowanceBudget;
 
     public async Task UpsertRecoveryStateAsync(MarketDataRecoveryState state, CancellationToken cancellationToken = default)
     {
@@ -25,6 +27,45 @@ public sealed class InMemoryMarketDataStore : IMarketDataStore, IMarketSessionEv
     {
         await _gate.WaitAsync(cancellationToken);
         try { return _recovery.OrderBy(x => x.Instrument.Value, StringComparer.Ordinal).ThenBy(x => x.FromUtc).ToArray(); }
+        finally { _gate.Release(); }
+    }
+
+    public async Task UpsertRecoveryWorkItemAsync(MarketDataRecoveryWorkItem item, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            _recoveryWork.RemoveAll(x => x.Instrument == item.Instrument && x.Resolution == item.Resolution && x.Reason == item.Reason);
+            _recoveryWork.Add(item);
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<IReadOnlyList<MarketDataRecoveryWorkItem>> GetRecoveryWorkItemsAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try
+        {
+            return _recoveryWork
+                .OrderBy(x => x.Reason)
+                .ThenBy(x => x.Priority)
+                .ThenBy(x => x.Instrument.Value, StringComparer.Ordinal)
+                .ToArray();
+        }
+        finally { _gate.Release(); }
+    }
+
+    public async Task<HistoricalAllowanceBudget?> GetHistoricalAllowanceBudgetAsync(CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try { return _historicalAllowanceBudget; }
+        finally { _gate.Release(); }
+    }
+
+    public async Task UpsertHistoricalAllowanceBudgetAsync(HistoricalAllowanceBudget budget, CancellationToken cancellationToken = default)
+    {
+        await _gate.WaitAsync(cancellationToken);
+        try { _historicalAllowanceBudget = budget; }
         finally { _gate.Release(); }
     }
 
@@ -223,12 +264,22 @@ public sealed class InMemoryMarketDataStore : IMarketDataStore, IMarketSessionEv
         IReadOnlyList<MarketDataCoverageRecord> covered)
     {
         var gaps = new List<MarketDataGap>();
+        var orderedCoverage = covered.OrderBy(record => record.FromUtc).ThenBy(record => record.ToUtc).ToArray();
+        var coverageIndex = 0;
         DateTimeOffset? gapStart = null;
         var cursor = fromUtc;
 
         while (cursor < toUtc)
         {
-            var missing = !present.Contains(cursor) && !IsCovered(cursor, covered);
+            while (coverageIndex < orderedCoverage.Length && orderedCoverage[coverageIndex].ToUtc <= cursor)
+            {
+                coverageIndex++;
+            }
+
+            var isCovered = coverageIndex < orderedCoverage.Length
+                && cursor >= orderedCoverage[coverageIndex].FromUtc
+                && cursor < orderedCoverage[coverageIndex].ToUtc;
+            var missing = !present.Contains(cursor) && !isCovered;
             if (missing)
             {
                 gapStart ??= cursor;
@@ -249,7 +300,4 @@ public sealed class InMemoryMarketDataStore : IMarketDataStore, IMarketSessionEv
 
         return gaps;
     }
-
-    private static bool IsCovered(DateTimeOffset bucketStartUtc, IReadOnlyList<MarketDataCoverageRecord> covered)
-        => covered.Any(record => bucketStartUtc >= record.FromUtc && bucketStartUtc < record.ToUtc);
 }

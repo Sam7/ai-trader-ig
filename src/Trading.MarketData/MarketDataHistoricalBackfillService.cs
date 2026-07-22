@@ -20,7 +20,7 @@ public sealed class MarketDataHistoricalBackfillService
         _logger = logger;
     }
 
-    public async Task<int> BackfillAsync(
+    public async Task<MarketDataHistoricalBackfillResult> BackfillAsync(
         InstrumentId instrument,
         PriceResolution resolution,
         DateTimeOffset fromUtc,
@@ -44,11 +44,13 @@ public sealed class MarketDataHistoricalBackfillService
         await _store.UpsertAsync(bars, cancellationToken);
 
         _logger.LogInformation(
-            "Explicitly backfilled {BarCount} historical bar(s) for {Instrument} from IG REST.",
+            "Explicitly backfilled {BarCount} historical bar(s) for {Instrument} from IG REST. Remaining historical allowance: {RemainingAllowance}; reset after: {ResetAfter}.",
             bars.Length,
-            instrument);
+            instrument,
+            series.Allowance?.Remaining,
+            series.Allowance?.ResetAfter);
 
-        return bars.Length;
+        return new MarketDataHistoricalBackfillResult(bars.Length, series.Allowance);
     }
 
     private async Task EnsureAuthenticatedAsync(CancellationToken cancellationToken)
@@ -56,3 +58,7 @@ public sealed class MarketDataHistoricalBackfillService
         _session ??= await _tradingGateway.AuthenticateAsync(cancellationToken);
     }
 }
+
+public sealed record MarketDataHistoricalBackfillResult(
+    int BarCount,
+    HistoricalPriceAllowance? Allowance);

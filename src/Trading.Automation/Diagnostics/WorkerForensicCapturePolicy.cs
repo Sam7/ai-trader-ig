@@ -8,6 +8,7 @@ internal static class WorkerForensicCapturePolicy
         256L * 1024 * 1024,
         320L * 1024 * 1024,
         384L * 1024 * 1024,
+        480L * 1024 * 1024,
     ];
 
     public static IReadOnlyList<long> GetNewCrossings(long? cgroupCurrentBytes, ISet<long> capturedThresholds)

@@ -237,16 +237,18 @@ Market data follows a local-first stream-and-fill model:
 2. `MarketDataStreamBatchIngestor` places callbacks into a bounded channel.
 3. Forming-candle updates may be coalesced; final candles must be persisted or fail loudly.
 4. `SqliteMarketDataStore` stores instruments, final/forming bars, health, coverage, and market-session evidence.
-5. `MarketDataService` reads locally and may request bounded REST backfill when data is missing and backfill is enabled.
+5. `MarketDataService` is cache-only: it returns available local bars and explicit gaps, never a hidden IG REST request.
 6. `PriceBarAggregator` derives coarser resolutions from canonical bars.
 7. The production publisher can upload validated SQLite snapshots to GCS.
-8. Mirror mode downloads, validates, and imports final cloud bars while preserving local health and transient state. Automatic IG REST backfill is disabled in mirror mode.
+8. `MarketDataRecoveryPlanner` may create durable recent-tail or historical-audit work. `MarketDataRecoveryCoordinator` is the only automatic REST owner: it processes one item at a time, prioritizes recent work, observes the returned allowance, and paces background work while preserving the configured reserve.
+9. Mirror mode downloads, validates, and imports final cloud bars while preserving local health and transient state.
+10. Production deployment continuity is separate from recurring recovery: a staged worker checkpoints final bars and verifies a snapshot before the live process is stopped. The restarted worker waits for fresh stream updates, then uses the same coordinator to repair only the checkpoint-to-restart gap (maximum 30 minutes). It writes a local/GCS report, and the deploy workflow fails unless that report succeeds. A no-bar result passes only with persisted IG closed/suspended session evidence.
 
 Strategy and AI code consume broker-neutral price data through these services; they do not call IG price endpoints directly.
 
 ### 5.7 Worker memory and deployment safety
 
-The production worker is capable of running market-data collection, SQLite snapshot/recovery, daily automation, and fifteen-minute intraday chart preparation in one process on a 1 GiB GCP `e2-micro`. During the current collection-only phase, the systemd configuration disables the daily/intraday schedules and execution while retaining market-data persistence, health, and Slack alerting. This means a chart allocation failure and unrelated guest-wide pressure remain distinct failure classes: systemd's service cgroup can constrain the worker, but it cannot prevent unrelated cron or other host processes from exhausting the VM. systemd applies `MemoryHigh=400M`, `MemoryMax=480M`, `Restart=on-failure`, and a best-effort `ExecStopPost` evidence hook. The worker also keeps:
+The production worker is capable of running market-data collection, SQLite snapshot/recovery, daily automation, and fifteen-minute intraday chart preparation in one process on a 1 GiB GCP `e2-micro`. During the current collection-only phase, the systemd configuration disables the daily/intraday schedules, execution, and automatic historical recovery while retaining market-data persistence, snapshots, health, and Slack alerting. This means a chart allocation failure and unrelated guest-wide pressure remain distinct failure classes: systemd's service cgroup can constrain the worker, but it cannot prevent unrelated cron or other host processes from exhausting the VM. systemd applies `MemoryHigh=400M`, `MemoryMax=480M`, `Restart=on-failure`, and a best-effort `ExecStopPost` evidence hook. The worker also keeps:
 
 - the existing one-minute `worker-status.json` health/Slack path;
 - a one-second in-memory cgroup sentry;
@@ -255,12 +257,14 @@ The production worker is capable of running market-data collection, SQLite snaps
 
 The diagnostics module does not retain broker or prompt payloads. Its proactive cgroup containment policy is currently disabled in production; it must be enabled only after local and production evidence meets the documented acceptance gate. The full design, local lab, GC experiment policy, and incident workflow are in [worker-memory-diagnostics.md](worker-memory-diagnostics.md).
 
+Deployments are protected independently of that memory policy: `install-vm.sh` stages the new worker, runs its checkpoint/snapshot maintenance command while the old collector remains live, and aborts before replacing `/opt/ai-trader/app` if that command fails. The post-restart continuity worker has a seven-minute stream-readiness deadline and a ten-minute repair deadline; its report is a CI deployment gate.
+
 ## 6. State, persistence, and ownership
 
 | State or artifact | Owner | Default location | Lifetime and rule |
 | --- | --- | --- | --- |
 | Trading-day plan and handled decision IDs | `Trading.Strategy` | In memory | Volatile. A restart loses it; a full scan lazily recreates today's plan. |
-| Market bars, coverage, health, and session evidence | `Trading.MarketData` | `Logs/MarketData/ig-market-data.sqlite` | Durable SQLite with WAL. |
+| Market bars, coverage, health, session evidence, recovery work, and historical allowance budget | `Trading.MarketData` | `Logs/MarketData/ig-market-data.sqlite` | Durable SQLite with WAL. Automatic recovery has one global quota budget per worker database. |
 | Execution operations and attempts | `Trading.Execution` | `Logs/Execution/execution-boundary.sqlite` | Durable source of truth for mutation idempotency and uncertain outcomes. |
 | Prompt and response observability | `Trading.AI` | `Logs/Observability/<date>/` | Run-scoped request, envelope, attachment, and extracted-response evidence. |
 | Intraday preparation and evidence manifest | `Trading.Automation` | `Logs/Observability/<date>/` | Write-once. Includes schema/profile versions, prompt contract, hashes, time windows, and recipe provenance. |

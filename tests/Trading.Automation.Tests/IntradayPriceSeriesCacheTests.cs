@@ -8,53 +8,31 @@ using Trading.MarketData;
 public sealed class IntradayPriceSeriesCacheTests
 {
     [Fact]
-    public async Task GetSeriesAsync_ShouldAuthenticateBeforeRetrievingPrices()
+    public async Task GetSeriesAsync_WithNoCachedBars_ShouldReturnAnEmptyLocalResult()
     {
-        var gateway = new FakeTradingGateway();
-        var cache = CreateCache(gateway);
+        var cache = CreateCache();
 
-        await cache.GetSeriesAsync(
+        var result = await cache.GetSeriesAsync(
             new InstrumentId("CS.D.BITCOIN.CFD.IP"),
             DateTimeOffset.Parse("2026-06-28T04:30:00Z"),
             chartLookbackHours: 1,
             PriceResolution.TenMinutes);
 
-        gateway.Calls.Should().StartWith(["Authenticate", "GetPrices"]);
+        result.RefreshMode.Should().Be(PriceSeriesRefreshMode.LocalCache);
+        result.FetchedBarCount.Should().Be(0);
+        result.Series.Bars.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task GetSeriesAsync_ShouldReuseAuthenticatedSessionAcrossRefreshes()
+    public async Task GetSeriesAsync_ShouldReadCoveredLookbackFromLocalCache()
     {
-        var gateway = new FakeTradingGateway();
-        var cache = CreateCache(gateway);
-        var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
-
-        await cache.GetSeriesAsync(
-            instrument,
-            DateTimeOffset.Parse("2026-06-28T04:30:00Z"),
-            chartLookbackHours: 1,
-            PriceResolution.TenMinutes);
-        await cache.GetSeriesAsync(
-            instrument,
-            DateTimeOffset.Parse("2026-06-28T04:40:00Z"),
-            chartLookbackHours: 1,
-            PriceResolution.TenMinutes);
-
-        gateway.Calls.Where(call => call == "Authenticate").Should().ContainSingle();
-        gateway.Calls.Where(call => call == "GetPrices").Should().HaveCount(2);
-    }
-
-    [Fact]
-    public async Task GetSeriesAsync_ShouldReadFromLocalCacheWhenLookbackIsAlreadyCovered()
-    {
-        var gateway = new FakeTradingGateway();
         var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
         var store = new InMemoryMarketDataStore();
         await store.UpsertAsync(CreateStoredFiveMinuteBars(
             instrument,
             DateTimeOffset.Parse("2026-06-28T03:30:00Z"),
             DateTimeOffset.Parse("2026-06-28T04:30:00Z")));
-        var cache = CreateCache(gateway, store);
+        var cache = CreateCache(store);
 
         var result = await cache.GetSeriesAsync(
             instrument,
@@ -65,15 +43,35 @@ public sealed class IntradayPriceSeriesCacheTests
         result.RefreshMode.Should().Be(PriceSeriesRefreshMode.LocalCache);
         result.FetchedBarCount.Should().Be(0);
         result.Series.Bars.Should().HaveCount(6);
-        gateway.Calls.Should().BeEmpty();
     }
 
     [Fact]
-    public async Task GetSeriesAsync_ShouldBackfillOnlyMissingCanonicalGapWhenLocalCacheHasLookback()
+    public async Task GetSeriesAsync_WithMissingCanonicalGap_ShouldReturnAvailableLocalBarsOnly()
     {
         var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
-        var gateway = new FakeTradingGateway();
-        var cache = CreateCache(gateway);
+        var store = new InMemoryMarketDataStore();
+        await store.UpsertAsync(CreateStoredFiveMinuteBars(
+            instrument,
+            DateTimeOffset.Parse("2026-06-28T04:00:00Z"),
+            DateTimeOffset.Parse("2026-06-28T04:30:00Z")));
+        var cache = CreateCache(store);
+
+        var result = await cache.GetSeriesAsync(
+            instrument,
+            DateTimeOffset.Parse("2026-06-28T04:30:00Z"),
+            chartLookbackHours: 1,
+            PriceResolution.TenMinutes);
+
+        result.RefreshMode.Should().Be(PriceSeriesRefreshMode.LocalCache);
+        result.FetchedBarCount.Should().Be(0);
+        result.Series.Bars.Should().HaveCount(3);
+    }
+
+    [Fact]
+    public async Task GetSeriesAsync_ShouldRemainLocalAcrossSuccessiveRequests()
+    {
+        var cache = CreateCache();
+        var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
 
         var first = await cache.GetSeriesAsync(
             instrument,
@@ -86,166 +84,28 @@ public sealed class IntradayPriceSeriesCacheTests
             chartLookbackHours: 1,
             PriceResolution.TenMinutes);
 
-        first.RefreshMode.Should().Be(PriceSeriesRefreshMode.Bootstrap);
-        second.RefreshMode.Should().Be(PriceSeriesRefreshMode.Incremental);
-        gateway.PriceRequests.Select(request => (
-                request.Resolution,
-                request.FromUtc,
-                request.ToUtc))
-            .Should()
-            .Equal(
-                (
-                    PriceResolution.FiveMinutes,
-                    (DateTimeOffset?)DateTimeOffset.Parse("2026-06-28T03:30:00Z"),
-                    (DateTimeOffset?)DateTimeOffset.Parse("2026-06-28T04:30:00Z")),
-                (
-                    PriceResolution.FiveMinutes,
-                    (DateTimeOffset?)DateTimeOffset.Parse("2026-06-28T04:30:00Z"),
-                    (DateTimeOffset?)DateTimeOffset.Parse("2026-06-28T04:40:00Z")));
+        first.RefreshMode.Should().Be(PriceSeriesRefreshMode.LocalCache);
+        second.RefreshMode.Should().Be(PriceSeriesRefreshMode.LocalCache);
+        first.Series.Bars.Should().BeEmpty();
+        second.Series.Bars.Should().BeEmpty();
     }
 
-    [Fact]
-    public async Task GetSeriesAsync_ShouldReauthenticateOnceWhenSessionIsRejected()
-    {
-        var gateway = new FakeTradingGateway
-        {
-            FailFirstPriceRequest = true,
-        };
-        var cache = CreateCache(gateway);
-
-        var result = await cache.GetSeriesAsync(
-            new InstrumentId("CS.D.BITCOIN.CFD.IP"),
-            DateTimeOffset.Parse("2026-06-28T04:30:00Z"),
-            chartLookbackHours: 1,
-            PriceResolution.TenMinutes);
-
-        result.Series.Bars.Should().NotBeEmpty();
-        gateway.Calls.Should().Equal("Authenticate", "GetPrices", "Authenticate", "GetPrices");
-    }
-
-    private static IntradayPriceSeriesCache CreateCache(
-        FakeTradingGateway gateway,
-        IMarketDataStore? store = null)
-    {
-        var marketDataService = new MarketDataService(
-            store ?? new InMemoryMarketDataStore(),
-            gateway,
-            Options.Create(new MarketDataOptions()),
-            NullLogger<MarketDataService>.Instance);
-
-        return new IntradayPriceSeriesCache(
-            marketDataService,
+    private static IntradayPriceSeriesCache CreateCache(IMarketDataStore? store = null)
+        => new(
+            new MarketDataService(store ?? new InMemoryMarketDataStore(), Options.Create(new MarketDataOptions())),
             NullLogger<IntradayPriceSeriesCache>.Instance);
-    }
-
-    private sealed class FakeTradingGateway : ITradingGateway
-    {
-        private int _priceRequests;
-
-        public List<string> Calls { get; } = [];
-
-        public List<GetPricesRequest> PriceRequests { get; } = [];
-
-        public bool FailFirstPriceRequest { get; init; }
-
-        public Task<ITradingSession> AuthenticateAsync(CancellationToken cancellationToken = default)
-        {
-            Calls.Add("Authenticate");
-            return Task.FromResult<ITradingSession>(
-                new FakeTradingSession("DEMO1234", "IG Demo", DateTimeOffset.Parse("2026-06-28T04:00:00Z")));
-        }
-
-        public Task<PriceSeries> GetPricesAsync(GetPricesRequest request, CancellationToken cancellationToken = default)
-        {
-            Calls.Add("GetPrices");
-            PriceRequests.Add(request);
-            _priceRequests++;
-            if (FailFirstPriceRequest && _priceRequests == 1)
-            {
-                throw new TradingGatewayException(TradingErrorCode.SessionExpired, "missing token");
-            }
-
-            var fromUtc = request.FromUtc ?? throw new InvalidOperationException("Expected range-based price request.");
-            var toUtc = request.ToUtc ?? throw new InvalidOperationException("Expected range-based price request.");
-
-            return Task.FromResult(new PriceSeries(
-                request.Instrument,
-                request.Resolution,
-                CreateBars(fromUtc, toUtc, TimeSpan.FromMinutes(5))));
-        }
-
-        public Task<PlaceOrderResult> PlaceMarketOrderAsync(PlaceOrderRequest request, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<WorkingOrderResult> PlaceWorkingOrderAsync(CreateWorkingOrderRequest request, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<ClosePositionResult> ClosePositionAsync(ClosePositionRequest request, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<UpdatePositionResult> UpdatePositionAsync(UpdatePositionRequest request, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<WorkingOrderResult> UpdateWorkingOrderAsync(UpdateWorkingOrderRequest request, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<WorkingOrderResult> CancelWorkingOrderAsync(string dealId, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<PositionSummary>> GetOpenPositionsAsync(CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<WorkingOrderSummary>> GetWorkingOrdersAsync(CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<MarketSearchResult>> SearchMarketsAsync(
-            string searchTerm,
-            int maxResults = 20,
-            CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<MarketDetails> GetMarketDetailsAsync(InstrumentId instrument, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<MarketNavigationPage> BrowseMarketsAsync(string? nodeId = null, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<IReadOnlyList<OrderSummary>> GetOrdersAsync(OrderQuery query, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-
-        public Task<OrderSummary?> GetOrderStatusAsync(string dealReference, CancellationToken cancellationToken = default)
-            => throw new NotSupportedException();
-    }
-
-    private sealed record FakeTradingSession(
-        string AccountId,
-        string BrokerName,
-        DateTimeOffset AuthenticatedAtUtc) : ITradingSession;
 
     private static IReadOnlyList<StoredPriceBar> CreateStoredFiveMinuteBars(
         InstrumentId instrument,
         DateTimeOffset fromUtc,
         DateTimeOffset toUtc)
-        => CreateBars(fromUtc, toUtc, TimeSpan.FromMinutes(5))
-            .Select(bar => StoredPriceBar.FromPriceBar(instrument, PriceResolution.FiveMinutes, bar, MarketDataSource.Stream))
+        => Enumerable.Range(0, (int)((toUtc - fromUtc).TotalMinutes / 5))
+            .Select(index => StoredPriceBar.FromPriceBar(
+                instrument,
+                PriceResolution.FiveMinutes,
+                CreateBar(fromUtc.AddMinutes(index * 5)),
+                MarketDataSource.Stream))
             .ToArray();
-
-    private static IReadOnlyList<PriceBar> CreateBars(
-        DateTimeOffset fromUtc,
-        DateTimeOffset toUtc,
-        TimeSpan interval)
-    {
-        var bars = new List<PriceBar>();
-        var timestamp = fromUtc;
-
-        while (timestamp < toUtc)
-        {
-            bars.Add(CreateBar(timestamp));
-            timestamp = timestamp.Add(interval);
-        }
-
-        return bars;
-    }
 
     private static PriceBar CreateBar(DateTimeOffset timestampUtc)
         => new(

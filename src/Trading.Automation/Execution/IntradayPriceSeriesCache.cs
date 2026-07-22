@@ -45,14 +45,6 @@ public sealed class IntradayPriceSeriesCache : IIntradayPriceSeriesSource
                     requestedAtUtc),
                 cancellationToken);
 
-            if (result.Status == MarketDataStatus.BlockedBackfillAllowance)
-            {
-                _logger.LogWarning(
-                    "Intraday price backfill was blocked by broker allowance for {Instrument}. Returning {BarCount} locally available bars.",
-                    instrument,
-                    result.Series.Bars.Count);
-            }
-
             _logger.LogInformation(
                 "Resolved intraday prices for {Instrument}. Status: {Status}. Source: {Source}. Bars: {BarCount}. Broker requests: {BrokerRequests}. Backfilled bars: {BackfilledBars}.",
                 instrument,
@@ -64,7 +56,7 @@ public sealed class IntradayPriceSeriesCache : IIntradayPriceSeriesSource
 
             return new CachedPriceSeriesResult(
                 result.Series,
-                ToRefreshMode(result),
+                PriceSeriesRefreshMode.LocalCache,
                 result.BackfilledBarCount);
         }
         finally
@@ -73,11 +65,4 @@ public sealed class IntradayPriceSeriesCache : IIntradayPriceSeriesSource
         }
     }
 
-    private static PriceSeriesRefreshMode ToRefreshMode(MarketDataResult result)
-        => result.Source switch
-        {
-            MarketDataResultSource.RestBackfill => PriceSeriesRefreshMode.Bootstrap,
-            MarketDataResultSource.Mixed => PriceSeriesRefreshMode.Incremental,
-            _ => PriceSeriesRefreshMode.LocalCache,
-        };
 }

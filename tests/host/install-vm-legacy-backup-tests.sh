@@ -21,6 +21,13 @@ printf '%s\n' '#!/usr/bin/env bash' > "$legacy_script"
 grep -q 'apt-get -o DPkg::Lock::Timeout=300 update' "$installer"
 grep -q 'apt-get -o DPkg::Lock::Timeout=300 install' "$installer"
 
+# The package is staged and checkpointed before the live app is replaced. The
+# cleanup trap must run only when the installer exits, not when its checkpoint
+# helper returns.
+grep -q 'create_deployment_checkpoint "\$staged_app_dir"' "$installer"
+grep -q "trap 'rm -rf -- \"\$staged_app_dir\"' EXIT" "$installer"
+! grep -q "trap 'rm -rf -- \"\$staged_app_dir\"' RETURN" "$installer"
+
 # The installer is sourced so this test exercises only the legacy-removal path;
 # it never invokes apt, systemd, or any production filesystem path.
 source "$installer"

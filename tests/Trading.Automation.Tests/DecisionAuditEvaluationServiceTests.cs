@@ -106,9 +106,7 @@ public sealed class DecisionAuditEvaluationServiceTests
                 new PaperMarketAssessmentEvaluator(),
                 new MarketDataService(
                     store,
-                    new FakeTradingGateway(),
-                    Options.Create(new MarketDataOptions { BackfillEnabled = false }),
-                    NullLogger<MarketDataService>.Instance),
+                    Options.Create(new MarketDataOptions())),
                 new AuditMarketDataQualityAnalyzer(store, store));
 
             var report = await service.EvaluateAsync(
@@ -180,9 +178,7 @@ public sealed class DecisionAuditEvaluationServiceTests
                 new PaperMarketAssessmentEvaluator(),
                 new MarketDataService(
                     store,
-                    new FakeTradingGateway(),
-                    Options.Create(new MarketDataOptions { BackfillEnabled = false }),
-                    NullLogger<MarketDataService>.Instance),
+                    Options.Create(new MarketDataOptions())),
                 new AuditMarketDataQualityAnalyzer(store, store));
 
             var report = await service.EvaluateAsync(
@@ -402,9 +398,7 @@ public sealed class DecisionAuditEvaluationServiceTests
             new PaperMarketAssessmentEvaluator(),
             new MarketDataService(
                 store,
-                new FakeTradingGateway(),
-                Options.Create(new MarketDataOptions { BackfillEnabled = false }),
-                NullLogger<MarketDataService>.Instance),
+                Options.Create(new MarketDataOptions())),
             new AuditMarketDataQualityAnalyzer(store, store));
 
     private static IReadOnlyList<StoredPriceBar> CreateAssessmentBars(

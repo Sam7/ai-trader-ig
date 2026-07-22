@@ -23,6 +23,13 @@ Environment=DOTNET_ENVIRONMENT=Production
 Environment=ASPNETCORE_ENVIRONMENT=Production
 EnvironmentFile=-/etc/ai-trader/ai-trader.env
 Environment=MarketData__StorePath=/var/lib/ai-trader/market-data/ig-market-data.sqlite
+Environment=MarketData__Recovery__Mode=Disabled
+Environment=MarketData__DeploymentContinuity__CheckpointPath=/var/lib/ai-trader/market-data/deployment-continuity/active.json
+Environment=MarketData__DeploymentContinuity__ReportDirectory=/var/lib/ai-trader/market-data/deployment-continuity/reports
+Environment=MarketData__DeploymentContinuity__ArchiveDirectory=/var/lib/ai-trader/market-data/deployment-continuity/archive
+Environment=MarketData__DeploymentContinuity__MaximumGapWindow=00:30:00
+Environment=MarketData__DeploymentContinuity__ReadinessTimeout=00:07:00
+Environment=MarketData__DeploymentContinuity__RepairTimeout=00:10:00
 Environment=MarketData__CloudSnapshot__BucketName=REPLACE_WITH_BACKUP_BUCKET
 Environment=MarketData__CloudSnapshot__ObjectName=market-data/ig-market-data.sqlite
 Environment=MarketData__CloudSnapshot__Publisher__Enabled=true

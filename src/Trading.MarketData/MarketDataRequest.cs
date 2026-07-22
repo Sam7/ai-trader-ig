@@ -6,8 +6,7 @@ public sealed record MarketDataRequest(
     InstrumentId Instrument,
     PriceResolution Resolution,
     DateTimeOffset FromUtc,
-    DateTimeOffset ToUtc,
-    bool AllowBackfill = true)
+    DateTimeOffset ToUtc)
 {
     public void Validate()
     {

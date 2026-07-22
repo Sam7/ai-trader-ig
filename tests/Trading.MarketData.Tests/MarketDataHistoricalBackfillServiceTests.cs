@@ -16,7 +16,8 @@ public sealed class MarketDataHistoricalBackfillServiceTests
             PriceResponseFactory = request => new PriceSeries(
                 request.Instrument,
                 request.Resolution,
-                [CreateBar("2026-06-29T00:00:00Z")]),
+                [CreateBar("2026-06-29T00:00:00Z")],
+                new HistoricalPriceAllowance(9_750, TimeSpan.FromDays(6))),
         };
         var service = new MarketDataHistoricalBackfillService(
             store,
@@ -24,13 +25,14 @@ public sealed class MarketDataHistoricalBackfillServiceTests
             NullLogger<MarketDataHistoricalBackfillService>.Instance);
         var instrument = new InstrumentId("CS.D.BITCOIN.CFD.IP");
 
-        var count = await service.BackfillAsync(
+        var result = await service.BackfillAsync(
             instrument,
             PriceResolution.FiveMinutes,
             DateTimeOffset.Parse("2026-06-29T00:00:00Z"),
             DateTimeOffset.Parse("2026-06-29T00:05:00Z"));
 
-        count.Should().Be(1);
+        result.BarCount.Should().Be(1);
+        result.Allowance.Should().Be(new HistoricalPriceAllowance(9_750, TimeSpan.FromDays(6)));
         gateway.PriceRequests.Should().ContainSingle();
         var bars = await store.GetRangeAsync(
             instrument,

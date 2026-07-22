@@ -43,7 +43,7 @@ public sealed class IntradayOpportunityPreparationServiceTests
                 instrument,
                 PriceResolution.TenMinutes,
                 [new PriceBar(
-                    requestedAtUtc.AddMinutes(-5),
+                    requestedAtUtc.AddMinutes(-25),
                     80m,
                     81m,
                     79m,
@@ -64,7 +64,13 @@ public sealed class IntradayOpportunityPreparationServiceTests
             new FakeChartRenderer([1, 2, 3]),
             analysis,
             preparationStore,
-            Options.Create(new AutomationOptions()),
+            Options.Create(new AutomationOptions
+            {
+                IntradayOpportunities = new IntradayOpportunityScanOptions
+                {
+                    AllowStalePriceDataForDiagnostics = true,
+                },
+            }),
             Options.Create(new DailyBriefingOptions
             {
                 TrackedMarkets =

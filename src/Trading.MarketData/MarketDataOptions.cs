@@ -10,11 +10,11 @@ public sealed class MarketDataOptions
 
     public PriceResolution CanonicalResolution { get; init; } = PriceResolution.FiveMinutes;
 
-    public bool BackfillEnabled { get; init; } = true;
-
     public MarketDataStreamIngestionOptions StreamIngestion { get; init; } = new();
 
     public MarketDataCloudSnapshotOptions CloudSnapshot { get; init; } = new();
+
+    public MarketDataDeploymentContinuityOptions DeploymentContinuity { get; init; } = new();
 }
 
 public sealed class MarketDataStreamIngestionOptions

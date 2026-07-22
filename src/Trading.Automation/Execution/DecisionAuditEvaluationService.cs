@@ -129,8 +129,7 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
                 candidate.Instrument,
                 resolution,
                 record.ReviewedAtUtc,
-                windowToUtc,
-                AllowBackfill: false),
+                windowToUtc),
             cancellationToken);
         var quality = await _dataQualityAnalyzer.AnalyzeAsync(
             candidate.Instrument,
@@ -205,8 +204,7 @@ public sealed class DecisionAuditEvaluationService : IDecisionAuditEvaluationSer
                 assessment.Instrument,
                 resolution,
                 record.ReviewedAtUtc,
-                windowToUtc,
-                AllowBackfill: false),
+                windowToUtc),
             cancellationToken);
         var quality = await _dataQualityAnalyzer.AnalyzeAsync(
             assessment.Instrument,

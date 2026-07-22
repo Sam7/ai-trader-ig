@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 BACKUP_BUCKET_NAME="${1:-}"
 DEPLOY_DIR="${2:-/tmp/ai-trader-deploy}"
+DEPLOYMENT_ID="${3:-}"
 
 APP_ROOT="/opt/ai-trader"
 APP_DIR="$APP_ROOT/app"
@@ -12,6 +13,7 @@ LOG_DIR="/var/log/ai-trader"
 SERVICE_FILE="$DEPLOY_DIR/ai-trader.service"
 EXIT_EVIDENCE_FILE="$DEPLOY_DIR/capture-worker-exit-evidence.sh"
 WORKER_PACKAGE="$DEPLOY_DIR/ai-trader-worker.tar.gz"
+CONTINUITY_DIR="$DATA_DIR/market-data/deployment-continuity"
 
 fail() {
     echo "install-vm: $*" >&2
@@ -100,8 +102,30 @@ assert_worker_cgroup_is_stable() {
     done
 }
 
+create_deployment_checkpoint() {
+    local staged_app_dir="$1"
+
+    runuser -u ai-trader -- bash -c '
+        set -a
+        . /etc/ai-trader/ai-trader.env
+        set +a
+        export DOTNET_ENVIRONMENT=Production
+        export ASPNETCORE_ENVIRONMENT=Production
+        export MarketData__StorePath=/var/lib/ai-trader/market-data/ig-market-data.sqlite
+        export MarketData__CloudSnapshot__BucketName="$3"
+        export MarketData__CloudSnapshot__ObjectName=market-data/ig-market-data.sqlite
+        export MarketData__CloudSnapshot__Publisher__Enabled=true
+        export MarketData__CloudSnapshot__Publisher__StagingDirectory=/var/lib/ai-trader/snapshot-publisher
+        export MarketData__DeploymentContinuity__CheckpointPath=/var/lib/ai-trader/market-data/deployment-continuity/active.json
+        export MarketData__DeploymentContinuity__ReportDirectory=/var/lib/ai-trader/market-data/deployment-continuity/reports
+        export MarketData__DeploymentContinuity__ArchiveDirectory=/var/lib/ai-trader/market-data/deployment-continuity/archive
+        exec "$1/Trading.Worker" --create-deployment-checkpoint "$2"
+    ' _ "$staged_app_dir" "$DEPLOYMENT_ID" "$BACKUP_BUCKET_NAME"
+}
+
 main() {
     [[ -n "$BACKUP_BUCKET_NAME" ]] || fail "backup bucket name is required"
+    [[ -n "$DEPLOYMENT_ID" ]] || fail "deployment ID is required"
     [[ -f "$SERVICE_FILE" ]] || fail "missing $SERVICE_FILE"
     [[ -f "$EXIT_EVIDENCE_FILE" ]] || fail "missing $EXIT_EVIDENCE_FILE"
     [[ -f "$WORKER_PACKAGE" ]] || fail "missing $WORKER_PACKAGE"
@@ -122,6 +146,8 @@ main() {
     install -d -o ai-trader -g ai-trader -m 0750 "$APP_DIR" "$DATA_DIR" "$LOG_DIR"
     install -d -o ai-trader -g ai-trader -m 0750 \
         "$DATA_DIR/market-data" \
+        "$CONTINUITY_DIR/reports" \
+        "$CONTINUITY_DIR/archive" \
         "$DATA_DIR/snapshot-publisher" \
         "$DATA_DIR/observability" \
         "$DATA_DIR/health" \
@@ -130,6 +156,19 @@ main() {
     touch /etc/ai-trader/ai-trader.env
     chown root:ai-trader /etc/ai-trader/ai-trader.env
     chmod 0640 /etc/ai-trader/ai-trader.env
+
+    staged_app_dir="$(mktemp -d "$APP_ROOT/.staged-worker.XXXXXX")"
+    # Clean the staged package if this installation exits early. EXIT is
+    # deliberate: RETURN would fire when the checkpoint helper returns and
+    # remove the staged binary before it can be installed.
+    trap 'rm -rf -- "$staged_app_dir"' EXIT
+    tar -xzf "$WORKER_PACKAGE" -C "$staged_app_dir"
+    chown -R ai-trader:ai-trader "$staged_app_dir"
+    chmod 0750 "$staged_app_dir" "$staged_app_dir/Trading.Worker"
+
+    # This must complete before changing the running application or restarting
+    # its stream connection. A failed checkpoint leaves the current worker intact.
+    create_deployment_checkpoint "$staged_app_dir"
 
     find "$APP_DIR" -mindepth 1 -maxdepth 1 -exec rm -rf {} +
     tar -xzf "$WORKER_PACKAGE" -C "$APP_DIR"
@@ -154,6 +193,9 @@ main() {
     assert_worker_cgroup_is_stable
 
     systemctl --no-pager --full status ai-trader.service
+
+    rm -rf -- "$staged_app_dir"
+    trap - EXIT
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
